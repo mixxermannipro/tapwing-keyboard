@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Rounded Material 3 Keycap -->
+    <path
+        android:fillColor="#FFF5EEFC"
+        android:pathData="M34,30 h40 c6.6,0 12,5.4 12,12 v26 c0,6.6 -5.4,12 -12,12 h-40 c-6.6,0 -12,-5.4 -12,-12 v-26 c0,-6.6 5.4,-12 12,-12 z" />
+    <!-- Wing / Spark Accent -->
+    <path
+        android:fillColor="#FF6750A4"
+        android:pathData="M35,59 C43,43 58,39 74,40 C65,48 56,54 49,64 C44,61 39,60 35,59 Z" />
+    <path
+        android:fillColor="#FF9A82DB"
+        android:pathData="M43,66 C52,58 63,55 72,56 C66,63 59,68 51,71 C48,69 45,68 43,66 Z" />
+    <!-- Sparkle star -->
+    <path
+        android:fillColor="#FF6750A4"
+        android:pathData="M71,34 L72.7,37.8 L76.5,39.5 L72.7,41.2 L71,45 L69.3,41.2 L65.5,39.5 L69.3,37.8 Z" />
+</vector>

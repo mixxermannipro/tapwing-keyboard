@@ -1,0 +1,29 @@
+# Build & Gradle
+.gradle/
+build/
+app/build/
+*/build/
+.kotlin/
+
+# Local SDK & Environment
+local.properties
+.env
+.env.*
+
+# Signing & Secrets (NEVER commit keystores or passwords)
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+
+# Release distribution outputs (uploaded to GitHub Releases)
+dist/
+
+# IDE & OS
+.idea/
+*.iml
+.DS_Store
+.vscode/
+*.log

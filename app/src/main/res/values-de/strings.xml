@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tapwing</string>
+    <string name="subtype_de_qwertz">Deutsch (QWERTZ)</string>
+    <string name="subtype_en_qwerty">Englisch (QWERTY)</string>
+    <string name="scan_text_title">Text scannen (OCR)</string>
+
+    <!-- Bedienungshilfen & Tasten -->
+    <string name="cd_tools_hub">Werkzeugmenü öffnen</string>
+    <string name="cd_writing_tools">Schreibhilfe öffnen</string>
+    <string name="cd_clipboard">Zwischenablage öffnen</string>
+    <string name="cd_scan_text">Text mit Kamera scannen</string>
+    <string name="cd_settings">Tapwing-Einstellungen öffnen</string>
+    <string name="cd_voice_mic">Spracheingabe starten</string>
+    <string name="cd_voice_done">Spracheingabe beenden und übernehmen</string>
+    <string name="cd_voice_cancel">Spracheingabe abbrechen</string>
+    <string name="cd_voice_minimize">Tastatur minimieren oder erweitern</string>
+    <string name="cd_backspace">Löschen</string>
+    <string name="cd_shift">Umschalttaste</string>
+    <string name="cd_emoji">Emoji-Bereich</string>
+    <string name="cd_switch_language">Sprache wechseln</string>
+    <string name="cd_back">Zurück</string>
+
+    <!-- Spracheingabe & Schreibhilfe -->
+    <string name="voice_hint_finish">Tippe \u2713 zum Beenden und Anzeigen</string>
+    <string name="voice_listening">Ich höre zu\u2026 sprich einfach natürlich</string>
+    <string name="voice_onboarding_title">Sprich einfach natürlich</string>
+    <string name="voice_onboarding_f1_title">Automatisch bereinigen</string>
+    <string name="voice_onboarding_f1_desc">Entfernt Pausen, \u201eähm\u201c, \u201eäh\u201c und Füllwörter</string>
+    <string name="voice_onboarding_f2_title">In eigenen Worten bearbeiten</string>
+    <string name="voice_onboarding_f2_desc">Sage z. B. \u201emach es freundlicher\u201c oder \u201ekürzer\u201c</string>
+    <string name="voice_onboarding_f3_title">Klare Zeichensetzung &amp; Sprachsperre</string>
+    <string name="voice_onboarding_f3_desc">Automatische Satzzeichen und feste Sprache ohne ungewollten Wechsel</string>
+    <string name="voice_onboarding_privacy">Sprache wird über die Android-Spracherkennung verarbeitet. Optionale KI-Veredelung erfolgt nur mit deinem eigenen API-Schlüssel.</string>
+    <string name="btn_get_started">Loslegen</string>
+    <string name="btn_no_thanks">Nein, danke</string>
+
+    <string name="writing_tools_title">Schreibhilfe</string>
+    <string name="writing_tools_empty_title">Tippe etwas, um zu starten</string>
+    <string name="writing_tools_empty_desc">Starke Werkzeuge zum Korrigieren von Fehlern, Kürzen, Tonfall anpassen und mehr</string>
+    <string name="writing_tools_onboarding_title">Starke Werkzeuge für deine Texte</string>
+    <string name="writing_tools_onboarding_desc">Korrigieren, umformulieren oder Tonfall wechseln. Läuft lokal ohne Cloud oder mit eigenem Gemini-/OpenAI-API-Schlüssel.</string>
+    <string name="btn_continue">Weiter</string>
+    <string name="btn_apply">Übernehmen</string>
+    <string name="btn_undo">Rückgängig</string>
+</resources>

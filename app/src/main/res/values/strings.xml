@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tapwing</string>
+    <string name="subtype_de_qwertz">German (QWERTZ)</string>
+    <string name="subtype_en_qwerty">English (QWERTY)</string>
+    <string name="scan_text_title">Scan Text (OCR)</string>
+
+    <!-- Accessibility & Keyboard Controls -->
+    <string name="cd_tools_hub">Open keyboard tools</string>
+    <string name="cd_writing_tools">Open AI Writing Tools</string>
+    <string name="cd_clipboard">Open clipboard history</string>
+    <string name="cd_scan_text">Scan text with camera</string>
+    <string name="cd_settings">Open Tapwing settings</string>
+    <string name="cd_voice_mic">Start voice typing</string>
+    <string name="cd_voice_done">Finish and apply voice text</string>
+    <string name="cd_voice_cancel">Cancel voice typing</string>
+    <string name="cd_voice_minimize">Minimize or expand keyboard</string>
+    <string name="cd_backspace">Backspace</string>
+    <string name="cd_shift">Shift</string>
+    <string name="cd_emoji">Emoji panel</string>
+    <string name="cd_switch_language">Switch keyboard language</string>
+    <string name="cd_back">Back</string>
+
+    <!-- Voice & Writing Tools UI -->
+    <string name="voice_hint_finish">Tap \u2713 to finish and see your text</string>
+    <string name="voice_listening">Listening\u2026 speak naturally</string>
+    <string name="voice_onboarding_title">Just speak naturally</string>
+    <string name="voice_onboarding_f1_title">Tidy up automatically</string>
+    <string name="voice_onboarding_f1_desc">Remove pauses, \u2018ums\u2019 and \u2018ahs\u2019</string>
+    <string name="voice_onboarding_f2_title">Edit in your own words</string>
+    <string name="voice_onboarding_f2_desc">Just say \u2018make it friendly\u2019 or \u2018make it shorter\u2019</string>
+    <string name="voice_onboarding_f3_title">Auto-punctuate &amp; switch cleanly</string>
+    <string name="voice_onboarding_f3_desc">Automatic punctuation and strict language lock without unwanted switching</string>
+    <string name="voice_onboarding_privacy">Audio is processed via Android Speech Services. Optional AI polish only runs if you configure your own API key.</string>
+    <string name="btn_get_started">Get started</string>
+    <string name="btn_no_thanks">No, thanks</string>
+
+    <string name="writing_tools_title">Writing tools</string>
+    <string name="writing_tools_empty_title">Type something to get started</string>
+    <string name="writing_tools_empty_desc">Powerful tools to help you fix mistakes, shorten text, use a professional tone and more</string>
+    <string name="writing_tools_onboarding_title">Powerful tools to improve your writing</string>
+    <string name="writing_tools_onboarding_desc">Proofread, rephrase or change tone. Works offline with local rules or with your own Gemini / OpenAI API key.</string>
+    <string name="btn_continue">Continue</string>
+    <string name="btn_apply">Apply</string>
+    <string name="btn_undo">Undo</string>
+</resources>
