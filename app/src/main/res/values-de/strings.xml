@@ -20,6 +20,7 @@
     <string name="cd_emoji">Emoji-Bereich</string>
     <string name="cd_switch_language">Sprache wechseln</string>
     <string name="cd_back">Zurück</string>
+    <string name="cd_hide_keyboard">Tastatur ausblenden</string>
 
     <!-- Spracheingabe & Schreibhilfe -->
     <string name="voice_hint_finish">Tippe \u2713 zum Beenden und Anzeigen</string>

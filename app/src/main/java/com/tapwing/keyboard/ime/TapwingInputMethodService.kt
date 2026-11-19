@@ -225,7 +225,8 @@ class TapwingInputMethodService :
                     },
                     onFinishVoice = { voiceController.finishAndCommit() },
                     onCancelVoice = { voiceController.cancel() },
-                    onToggleVoiceMinimize = { voiceController.toggleMinimized() }
+                    onToggleVoiceMinimize = { voiceController.toggleMinimized() },
+                    onHideKeyboard = ::hideKeyboard
                 )
             }
         }
@@ -705,5 +706,11 @@ class TapwingInputMethodService :
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+    }
+
+    private fun hideKeyboard() {
+        panelMode = KeyboardPanelMode.KEYS
+        voiceController.cancel()
+        requestHideSelf(0)
     }
 }

@@ -20,6 +20,7 @@
     <string name="cd_emoji">Emoji panel</string>
     <string name="cd_switch_language">Switch keyboard language</string>
     <string name="cd_back">Back</string>
+    <string name="cd_hide_keyboard">Hide keyboard</string>
 
     <!-- Voice & Writing Tools UI -->
     <string name="voice_hint_finish">Tap \u2713 to finish and see your text</string>
