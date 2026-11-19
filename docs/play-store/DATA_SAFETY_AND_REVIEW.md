@@ -10,7 +10,7 @@ Native 16 KB page alignment: **Verified OK** (`arm64-v8a` & `x86_64` ELF `PT_LOA
 
 | Section | Selection / Answer |
 | :--- | :--- |
-| **Privacy Policy URL** | Host [PRIVACY_POLICY.md](../../PRIVACY_POLICY.md) on GitHub Pages or your own HTTPS domain and enter that public URL. |
+| **Privacy Policy URL** | `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy` (hosted live via Cloudflare Workers; website `https://tapwing-keyboard.mixxermannipropvp.workers.dev`, support `mixxermannipropvp@gmail.com`). |
 | **App Access** | *All functionality is available without special access* (optional BYO API key is clearly optional; local rules work without any account or login). |
 | **Ads** | *No, my app does not contain ads.* |
 | **Content Rating (IARC)** | General Utilities / Tools -> **PEGI 3 / Everyone** (user-entered text only; no UGC feed, no violence, no gambling). |
