@@ -39,8 +39,12 @@ Running `./scripts/build-release.sh` produces everything required for Google Pla
 
 ## 4. Operational Steps Remaining in Google Play Console (Browser / Developer Account)
 
+- **Live Hosted Privacy Policy URL (Cloudflare Workers):** `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`
+- **Live Website / Support URL:** `https://tapwing-keyboard.mixxermannipropvp.workers.dev`
+- **Support Email:** `mixxermannipropvp@gmail.com`
+
 1. Verify `com.tapwing.keyboard` availability in your **Google Play Console** developer account.
-2. Host [PRIVACY_POLICY.md](PRIVACY_POLICY.md) at a public HTTPS URL (e.g., GitHub Pages or your own website) and paste it under *App Content > Privacy Policy*.
+2. Enter the public Cloudflare Privacy Policy URL (`https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`) under *App Content > Privacy Policy*.
 3. Paste copy from [STORE_LISTING_DE.md](docs/play-store/STORE_LISTING_DE.md) / [STORE_LISTING_EN.md](docs/play-store/STORE_LISTING_EN.md) and upload assets from `dist/play-store-assets/`.
 4. Complete *Data Safety*, *Ads*, *Target Audience*, and *Content Rating* using [DATA_SAFETY_AND_REVIEW.md](docs/play-store/DATA_SAFETY_AND_REVIEW.md).
-5. Upload `dist/Tapwing-v1.2.0-release.aab` (+ `dist/Tapwing-v1.2.0-mapping.txt`) to the **Internal Testing** track first, run Play Console pre-launch reports, then promote to Closed Testing / Production (note: personal Google Play accounts created after Nov 2023 require the closed test gate before Production).
+5. Upload `dist/Tapwing-v1.2.0-release.aab` (+ `dist/Tapwing-v1.2.0-mapping.txt`) to **Production** (or **Closed Testing** if Google Play enforces the 12-tester closed-test gate for this developer account).

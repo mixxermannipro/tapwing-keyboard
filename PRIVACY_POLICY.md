@@ -34,7 +34,7 @@ You retain complete control over your local data:
 - Uninstalling Tapwing removes all locally stored app data.
 
 ### 5. Contact
-For privacy questions regarding Tapwing Keyboard (`com.tapwing.keyboard`), please contact the repository/store publisher listed on the Google Play store page.
+For privacy questions regarding Tapwing Keyboard (`com.tapwing.keyboard`), please contact us at `mixxermannipropvp@gmail.com`. Live hosted version: https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy
 
 ---
 
@@ -60,4 +60,4 @@ Alle folgenden Daten verbleiben ausschließlich lokal im privaten App-Speicher a
 - **Optionale Cloud-KI (`INTERNET`)**: Die Schreibhilfe funktioniert standardmäßig vollständig offline über lokale Regeln. Netzwerkanfragen finden nur statt, wenn du ausdrücklich einen Gemini- oder OpenAI-kompatiblen Endpunkt samt eigenem API-Key konfigurierst und eine KI-Aktion ausführst.
 
 ### 4. Löschung
-Alle lokalen Lern-, Wörterbuch-, Zwischenablage- und Key-Daten können jederzeit direkt in den Tapwing-Einstellungen gelöscht oder durch Deinstallation der App restlos entfernt werden.
+Alle lokalen Lern-, Wörterbuch-, Zwischenablage- und Key-Daten können jederzeit direkt in den Tapwing-Einstellungen gelöscht oder durch Deinstallation der App restlos entfernt werden. Kontakt für Datenschutzanfragen: `mixxermannipropvp@gmail.com` • Online unter: https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy
