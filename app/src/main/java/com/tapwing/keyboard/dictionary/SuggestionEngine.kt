@@ -380,6 +380,7 @@ object SuggestionEngine {
             val combinedPool = (customFuzzyPool + vocab).distinct()
             val fuzzy = combinedPool
                 .asSequence()
+                .filter { kotlin.math.abs(it.length - lower.length) <= 2 }
                 .map { word -> word to levenshtein(lower, word.lowercase()) }
                 .filter { (word, dist) -> dist in 1..2 && word != currentWord }
                 .sortedBy { it.second }

@@ -15,6 +15,7 @@ enum class ShiftState {
 enum class KeyboardPanelMode {
     KEYS,
     TOOLS_HUB,
+    CUSTOMIZE_BAR,
     WRITING_TOOLS,
     WRITING_ONBOARDING,
     VOICE_ONBOARDING,

@@ -1,35 +1,46 @@
 # Google Play Store Readiness Guide — Tapwing
 
-Tapwing is built clean-room under **Apache-2.0** with its own `applicationId` (`com.tapwing.keyboard`) and original Jetpack Compose codebase — making it structurally compatible with Google Play distribution once the operational release requirements below are completed.
+Tapwing (`com.tapwing.keyboard`) is a clean-room **Apache-2.0** Android keyboard built on official Android APIs (`InputMethodService`, `SpeechRecognizer`, CameraX + ML Kit Text Recognition, System Photo Picker, AndroidX DataStore, hardware `AndroidKeyStore`) with original Jetpack Compose UI.
 
 ---
 
-## 1. Signing & Upload Key Setup (`Play App Signing`)
-- **Do not distribute debug keys.** Locally, release artifacts are signed with a private keystore stored outside Git (`~/.tapwing-signing/tapwing-release.jks`).
-- When enrolling in **Google Play Console**:
-  1. Enable **Play App Signing** (required for new apps).
-  2. Upload the generated `.aab` (`dist/Tapwing-v1.0.0-release.aab`) — Play Console registers your local release key as the **Upload Key** and generates/manages the final **App Signing Key** safely inside Google's infrastructure.
-  3. **Back up** your local keystore (`tapwing-release.jks`) and credentials in a password manager/offline encrypted backup; losing your upload key requires a Play Console key reset request.
+## 1. Ready-to-Use Play Console Release Package (`v1.2.0`)
 
-## 2. Package Name & Store Listing Identity
-- Current `applicationId`: `com.tapwing.keyboard`.
-- Verify availability of `com.tapwing.keyboard` in your Google Play Developer Console before creating the app listing (application IDs must be globally unique on Google Play and cannot be changed after the first APK/AAB upload).
-- **Trademark & Listing Hygiene:**
-  - Keep store title, icon, screenshots, and description strictly branded as **Tapwing**.
-  - Do **not** imply official affiliation with Google LLC, Gboard, Pixel, or Gemini, and do not copy Google brand icons.
+Running `./scripts/build-release.sh` produces everything required for Google Play Console in `dist/` (gitignored):
 
-## 3. Permissions & Google Play Data Safety Declarations
+- **Signed Android App Bundle (`.aab`)**: `dist/Tapwing-v1.2.0-release.aab` (upload to *Internal Testing* / *Closed Testing* / *Production*)
+- **Signed Release APK (`.apk`)**: `dist/Tapwing-v1.2.0-release.apk` (for direct sideload testing)
+- **R8 / ProGuard Deobfuscation Mapping**: `dist/Tapwing-v1.2.0-mapping.txt` (included automatically or uploadable in Play Console for readable crash stack traces)
+- **Native Debug Symbols (`SYMBOL_TABLE`)**: embedded inside the `.aab` via `ndk { debugSymbolLevel = "SYMBOL_TABLE" }` in [app/build.gradle.kts](app/build.gradle.kts)
+- **16 KB Page-Size Verification**: automatically checked on every 64-bit `.so` (`arm64-v8a`, `x86_64`) inside the `.aab`
+- **Checksums**: `dist/SHA256SUMS.txt`
+- **Store Graphics & Screenshots**: `dist/play-store-assets/` (`tapwing-icon-512.png`, `tapwing-feature-1024x500.png`, `screenshots/`)
 
-| Permission | Purpose in Tapwing | Required Play Console Action |
-| :--- | :--- | :--- |
-| `BIND_INPUT_METHOD` | Standard Android IME service declaration | Declare prominent in-app privacy notice (built into *About* & onboarding sheets); clarify keystrokes stay on-device unless user explicitly triggers optional cloud AI. |
-| `RECORD_AUDIO` | Voice typing via Android `SpeechRecognizer` | Runtime prompt only when user triggers microphone; declare optional audio handling in Data Safety. |
-| `CAMERA` | Scan Text (Camera OCR) via CameraX + ML Kit | Runtime prompt only when user opens *Scan Text*; processing happens on-device via ML Kit. |
-| `READ_MEDIA_IMAGES` / `READ_EXTERNAL_STORAGE` (<=32) | Optional recent screenshot chip OCR | Runtime opt-in via Settings; consider switching to Android Photo Picker if Play policy scrutinizes broad `READ_MEDIA_IMAGES` usage for a keyboard app. |
-| `INTERNET` | Optional user-configured Gemini / OpenAI API requests | Clarify in Privacy Policy & Data Safety that no telemetry is collected and network calls occur only when user activates a cloud AI provider with their own key. |
+---
 
-## 4. Required Pre-Submission Checklist
-- [ ] Publish a public **Privacy Policy URL** covering on-device typing, local clipboard retention, voice recognition delegation, ML Kit camera OCR, and optional bring-your-own-key AI requests.
-- [ ] Complete the **Data Safety** form and **App Content / Ads / Target Audience** questionnaires in Play Console.
-- [ ] Review `READ_MEDIA_IMAGES` policy justification (or restrict screenshot-OCR to manual Photo Picker selection) before production track review to avoid Photo & Video Permissions policy rejection.
-- [ ] Test the signed `.aab` via `bundletool` or Google Play **Internal Testing** track before opening Production rollout.
+## 2. Play Console Documentation Included in Repo
+
+- [PRIVACY_POLICY.md](PRIVACY_POLICY.md) — Bilingual EN/DE privacy policy ready to host on a public HTTPS URL
+- [docs/play-store/STORE_LISTING_DE.md](docs/play-store/STORE_LISTING_DE.md) — German store title, short & full descriptions (trademark-clean), release notes, category & tags
+- [docs/play-store/STORE_LISTING_EN.md](docs/play-store/STORE_LISTING_EN.md) — English store title, short & full descriptions (trademark-clean), release notes
+- [docs/play-store/DATA_SAFETY_AND_REVIEW.md](docs/play-store/DATA_SAFETY_AND_REVIEW.md) — Exact answers for Play Console Data Safety, App Content, Permission Audit (`INTERNET`, `RECORD_AUDIO`, `CAMERA`, `VIBRATE` — zero broad storage permissions!), and reviewer instructions
+
+---
+
+## 3. Signing & Upload Key Setup (`Play App Signing`)
+
+- Release artifacts are signed locally using an external private keystore (`~/.tapwing-signing/tapwing-release.jks`), never committed to Git.
+- In Google Play Console:
+  1. Enable **Play App Signing** (mandatory for new apps).
+  2. Upload `dist/Tapwing-v1.2.0-release.aab` — Google Play registers your local key as the **Upload Key** and signs distribution APKs with Google's managed App Signing Key.
+  3. Store encrypted offline backups of `~/.tapwing-signing/tapwing-release.jks` and `keystore.properties` in your password manager.
+
+---
+
+## 4. Operational Steps Remaining in Google Play Console (Browser / Developer Account)
+
+1. Verify `com.tapwing.keyboard` availability in your **Google Play Console** developer account.
+2. Host [PRIVACY_POLICY.md](PRIVACY_POLICY.md) at a public HTTPS URL (e.g., GitHub Pages or your own website) and paste it under *App Content > Privacy Policy*.
+3. Paste copy from [STORE_LISTING_DE.md](docs/play-store/STORE_LISTING_DE.md) / [STORE_LISTING_EN.md](docs/play-store/STORE_LISTING_EN.md) and upload assets from `dist/play-store-assets/`.
+4. Complete *Data Safety*, *Ads*, *Target Audience*, and *Content Rating* using [DATA_SAFETY_AND_REVIEW.md](docs/play-store/DATA_SAFETY_AND_REVIEW.md).
+5. Upload `dist/Tapwing-v1.2.0-release.aab` (+ `dist/Tapwing-v1.2.0-mapping.txt`) to the **Internal Testing** track first, run Play Console pre-launch reports, then promote to Closed Testing / Production (note: personal Google Play accounts created after Nov 2023 require the closed test gate before Production).

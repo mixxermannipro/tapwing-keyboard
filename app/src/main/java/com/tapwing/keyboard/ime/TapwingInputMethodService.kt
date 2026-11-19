@@ -33,6 +33,7 @@ import com.tapwing.keyboard.clipboard.ClipboardStore
 import com.tapwing.keyboard.clipboard.RecentScreenshot
 import com.tapwing.keyboard.clipboard.ScreenshotMonitor
 import com.tapwing.keyboard.data.OneHandedMode
+import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import com.tapwing.keyboard.data.TapwingPrefs
@@ -192,6 +193,10 @@ class TapwingInputMethodService :
                     },
                     onTapScreenshotChip = ::handleScreenshotChip,
                     onOpenToolsHub = { panelMode = KeyboardPanelMode.TOOLS_HUB },
+                    onOpenCustomizeBar = { panelMode = KeyboardPanelMode.CUSTOMIZE_BAR },
+                    onQuickAction = ::handleQuickBarAction,
+                    onUpdateQuickBar = { list -> updatePref { it.copy(quickBarActions = list) } },
+                    onResetQuickBar = { updatePref { it.copy(quickBarActions = QuickBarAction.DEFAULT_ACTIONS) } },
                     onCloseSubPanel = {
                         textEditSelectionActive = false
                         panelMode = KeyboardPanelMode.KEYS
@@ -308,6 +313,20 @@ class TapwingInputMethodService :
     override fun onConfigurationChanged(newConfig: Configuration) {
         voiceController.markConfigurationPause()
         super.onConfigurationChanged(newConfig)
+    }
+
+    override fun onUpdateSelection(
+        oldSelStart: Int,
+        oldSelEnd: Int,
+        newSelStart: Int,
+        newSelEnd: Int,
+        candidatesStart: Int,
+        candidatesEnd: Int
+    ) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        if (panelMode == KeyboardPanelMode.KEYS) {
+            refreshContextAndSuggestions()
+        }
     }
 
     override fun onDestroy() {
@@ -861,6 +880,30 @@ class TapwingInputMethodService :
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+    }
+
+    private fun handleQuickBarAction(action: QuickBarAction) {
+        when (action) {
+            QuickBarAction.WRITING_TOOLS -> openWritingTools()
+            QuickBarAction.CLIPBOARD -> panelMode = KeyboardPanelMode.CLIPBOARD
+            QuickBarAction.TEXT_EDIT -> panelMode = KeyboardPanelMode.TEXT_EDIT
+            QuickBarAction.SCAN_TEXT -> launchScanTextActivity()
+            QuickBarAction.SETTINGS -> launchSettingsActivity()
+            QuickBarAction.RESIZE -> panelMode = KeyboardPanelMode.RESIZE
+            QuickBarAction.EMOJI -> panelMode = KeyboardPanelMode.EMOJI
+            QuickBarAction.ONE_HANDED -> cycleOneHanded()
+            QuickBarAction.INCOGNITO -> {
+                updatePref { it.copy(incognitoMode = !it.incognitoMode) }
+                panelMode = KeyboardPanelMode.KEYS
+            }
+            QuickBarAction.QUICK_SEARCH -> {
+                quickSearchInitial = readWholeFieldText().take(120)
+                panelMode = KeyboardPanelMode.QUICK_SEARCH
+            }
+            QuickBarAction.APPLE_MODE -> updatePref { it.copy(appleModeEnabled = !it.appleModeEnabled) }
+            QuickBarAction.LANGUAGE -> toggleLocale()
+            QuickBarAction.UNDO -> performUndo()
+        }
     }
 
     private fun hideKeyboard() {
