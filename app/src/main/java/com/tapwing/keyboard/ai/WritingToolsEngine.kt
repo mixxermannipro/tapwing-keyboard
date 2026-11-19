@@ -3,6 +3,7 @@ package com.tapwing.keyboard.ai
 import com.tapwing.keyboard.data.AiProviderType
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPrefs
+import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 
 data class WritingToolsOutput(
     val rewrittenText: String,
@@ -10,7 +11,10 @@ data class WritingToolsOutput(
     val fallbackNote: String? = null
 )
 
-class WritingToolsEngine(private val secureKeyStorage: SecureKeyStorage) {
+class WritingToolsEngine(
+    private val secureKeyStorage: SecureKeyStorage,
+    private val dictionaryStore: AdaptiveDictionaryStore? = null
+) {
 
     suspend fun runAction(
         sourceText: String,
@@ -43,7 +47,7 @@ class WritingToolsEngine(private val secureKeyStorage: SecureKeyStorage) {
                         )
                     }
                     is CloudAiResult.Failure -> {
-                        val local = LocalWritingAssistant.transform(sourceText, action, locale)
+                        val local = LocalWritingAssistant.transform(sourceText, action, locale, dictionaryStore)
                         return WritingToolsOutput(
                             rewrittenText = local,
                             badge = "On-Device (Fallback)",
@@ -52,7 +56,7 @@ class WritingToolsEngine(private val secureKeyStorage: SecureKeyStorage) {
                     }
                 }
             } else {
-                val local = LocalWritingAssistant.transform(sourceText, action, locale)
+                val local = LocalWritingAssistant.transform(sourceText, action, locale, dictionaryStore)
                 val note = if (locale == "de") {
                     "Kein API-Schlüssel hinterlegt — lokale Regeln genutzt"
                 } else {
@@ -66,7 +70,7 @@ class WritingToolsEngine(private val secureKeyStorage: SecureKeyStorage) {
             }
         }
 
-        val local = LocalWritingAssistant.transform(sourceText, action, locale)
+        val local = LocalWritingAssistant.transform(sourceText, action, locale, dictionaryStore)
         return WritingToolsOutput(
             rewrittenText = local,
             badge = "On-Device"

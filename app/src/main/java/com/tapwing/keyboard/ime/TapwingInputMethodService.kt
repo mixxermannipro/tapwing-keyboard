@@ -4,6 +4,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.res.Configuration
 import android.inputmethodservice.InputMethodService
+import android.net.Uri
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -31,11 +32,12 @@ import com.tapwing.keyboard.ai.WritingToolsOutput
 import com.tapwing.keyboard.clipboard.ClipboardStore
 import com.tapwing.keyboard.clipboard.RecentScreenshot
 import com.tapwing.keyboard.clipboard.ScreenshotMonitor
+import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import com.tapwing.keyboard.data.TapwingPrefs
-import com.tapwing.keyboard.data.ThemeMode
 import com.tapwing.keyboard.data.VoiceDictationMode
+import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 import com.tapwing.keyboard.dictionary.SuggestionChip
 import com.tapwing.keyboard.dictionary.SuggestionEngine
 import com.tapwing.keyboard.ocr.OcrResultBus
@@ -48,6 +50,7 @@ import com.tapwing.keyboard.ui.keyboard.KeyboardLayoutPage
 import com.tapwing.keyboard.ui.keyboard.KeyboardPanelMode
 import com.tapwing.keyboard.ui.keyboard.ShiftState
 import com.tapwing.keyboard.ui.keyboard.TapwingKeyboardRoot
+import com.tapwing.keyboard.ui.keyboard.TextEditAction
 import com.tapwing.keyboard.undo.UndoManager
 import com.tapwing.keyboard.undo.UndoReason
 import com.tapwing.keyboard.undo.UndoSnapshot
@@ -77,6 +80,7 @@ class TapwingInputMethodService :
 
     private lateinit var prefsRepo: TapwingPreferencesRepository
     private lateinit var secureKeyStorage: SecureKeyStorage
+    private lateinit var dictionaryStore: AdaptiveDictionaryStore
     private lateinit var writingToolsEngine: WritingToolsEngine
     private lateinit var clipboardStore: ClipboardStore
     private lateinit var voiceController: TapwingVoiceController
@@ -97,10 +101,13 @@ class TapwingInputMethodService :
     private var writingLoading by mutableStateOf(false)
     private var writingAction by mutableStateOf<WritingAction?>(null)
 
+    private var textEditSelectionActive by mutableStateOf(false)
+    private var quickSearchInitial by mutableStateOf("")
+
     private var lastSpaceTapMs: Long = 0L
 
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
-        if (!currentPrefs.clipboardEnabled) return@OnPrimaryClipChangedListener
+        if (!currentPrefs.clipboardEnabled || currentPrefs.incognitoMode) return@OnPrimaryClipChangedListener
         val cm = getSystemService(ClipboardManager::class.java) ?: return@OnPrimaryClipChangedListener
         val clip = cm.primaryClip ?: return@OnPrimaryClipChangedListener
         if (clip.itemCount > 0) {
@@ -122,7 +129,8 @@ class TapwingInputMethodService :
 
         prefsRepo = TapwingPreferencesRepository(this)
         secureKeyStorage = SecureKeyStorage(this)
-        writingToolsEngine = WritingToolsEngine(secureKeyStorage)
+        dictionaryStore = AdaptiveDictionaryStore.createForContext(this)
+        writingToolsEngine = WritingToolsEngine(secureKeyStorage, dictionaryStore)
         clipboardStore = ClipboardStore.createForContext(this)
         voiceController = TapwingVoiceController(
             context = this,
@@ -168,9 +176,14 @@ class TapwingInputMethodService :
                     writingLoading = writingLoading,
                     writingAction = writingAction,
                     clips = clips,
+                    textEditSelectionActive = textEditSelectionActive,
+                    quickSearchInitial = quickSearchInitial,
                     onKeyPress = ::handleKeyPress,
                     onCursorMoveSteps = ::moveCursorBy,
+                    onDeletePreviousWord = ::deletePreviousWordWithUndo,
                     onSwitchLanguage = ::toggleLocale,
+                    onToggleOneHandedSide = ::swapOneHandedSide,
+                    onExitOneHanded = { updatePref { it.copy(oneHandedMode = OneHandedMode.OFF) } },
                     onSelectSuggestion = ::applySuggestionChip,
                     onTriggerUndo = ::performUndo,
                     onDismissUndo = {
@@ -179,12 +192,13 @@ class TapwingInputMethodService :
                     },
                     onTapScreenshotChip = ::handleScreenshotChip,
                     onOpenToolsHub = { panelMode = KeyboardPanelMode.TOOLS_HUB },
-                    onCloseSubPanel = { panelMode = KeyboardPanelMode.KEYS },
+                    onCloseSubPanel = {
+                        textEditSelectionActive = false
+                        panelMode = KeyboardPanelMode.KEYS
+                    },
                     onOpenWritingTools = ::openWritingTools,
                     onWritingOnboardingContinue = {
-                        serviceScope.launch {
-                            prefsRepo.update { it.copy(aiOnboardingSeen = true) }
-                        }
+                        updatePref { it.copy(aiOnboardingSeen = true) }
                         openWritingToolsScreen()
                     },
                     onRunWritingAction = ::runWritingAction,
@@ -203,6 +217,15 @@ class TapwingInputMethodService :
                     onClearUnpinnedClips = {
                         clipboardStore.clearUnpinned(currentPrefs.clipboardRetention, currentPrefs.clipboardMaxItems)
                     },
+                    onOpenResize = { panelMode = KeyboardPanelMode.RESIZE },
+                    onUpdateScalePercent = { pct -> updatePref { it.copy(keyboardScalePercent = pct) } },
+                    onUpdateBottomLiftDp = { dp -> updatePref { it.copy(keyboardBottomLiftDp = dp) } },
+                    onResetResize = {
+                        updatePref { it.copy(keyboardScalePercent = 100, keyboardBottomLiftDp = 0) }
+                    },
+                    onOpenTextEdit = { panelMode = KeyboardPanelMode.TEXT_EDIT },
+                    onToggleTextEditSelection = { textEditSelectionActive = !textEditSelectionActive },
+                    onTextEditAction = ::performTextEditAction,
                     onOpenScanText = ::launchScanTextActivity,
                     onOpenEmoji = { panelMode = KeyboardPanelMode.EMOJI },
                     onInsertEmoji = { emoji ->
@@ -210,13 +233,35 @@ class TapwingInputMethodService :
                         refreshContextAndSuggestions()
                     },
                     onBackspace = { handleBackspace() },
-                    onCycleTheme = ::cycleTheme,
+                    onCycleOneHanded = ::cycleOneHanded,
+                    onToggleIncognito = {
+                        updatePref { it.copy(incognitoMode = !it.incognitoMode) }
+                        panelMode = KeyboardPanelMode.KEYS
+                    },
+                    onOpenQuickSearch = {
+                        quickSearchInitial = readWholeFieldText().take(120)
+                        panelMode = KeyboardPanelMode.QUICK_SEARCH
+                    },
+                    onInsertSearchLink = { q ->
+                        val url = "https://www.google.com/search?q=${Uri.encode(q.trim())}"
+                        commitTextWithSpaceSafety(url)
+                        panelMode = KeyboardPanelMode.KEYS
+                    },
+                    onOpenSearchInBrowser = { q ->
+                        val url = "https://www.google.com/search?q=${Uri.encode(q.trim())}"
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching { startActivity(intent) }
+                        panelMode = KeyboardPanelMode.KEYS
+                    },
+                    onToggleAppleMode = {
+                        updatePref { it.copy(appleModeEnabled = !it.appleModeEnabled) }
+                    },
                     onOpenSettings = ::launchSettingsActivity,
                     onStartVoice = ::handleVoiceMicClicked,
                     onVoiceOnboardingGetStarted = {
-                        serviceScope.launch {
-                            prefsRepo.update { it.copy(voiceOnboardingSeen = true) }
-                        }
+                        updatePref { it.copy(voiceOnboardingSeen = true) }
                         panelMode = KeyboardPanelMode.KEYS
                         voiceController.startListening(
                             locale = currentPrefs.activeLocale,
@@ -238,9 +283,11 @@ class TapwingInputMethodService :
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
+        dictionaryStore.reloadIfModifiedOnDisk()
         imeActionLabel = resolveImeAction(info)
         layoutPage = KeyboardLayoutPage.LETTERS
         panelMode = KeyboardPanelMode.KEYS
+        textEditSelectionActive = false
         consumePendingOcrText()
         refreshContextAndSuggestions()
         checkRecentScreenshot()
@@ -274,6 +321,12 @@ class TapwingInputMethodService :
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         store.clear()
         super.onDestroy()
+    }
+
+    private fun updatePref(transform: (TapwingPrefs) -> TapwingPrefs) {
+        serviceScope.launch {
+            prefsRepo.update(transform)
+        }
     }
 
     private fun attachTreeOwners(view: View?) {
@@ -324,6 +377,7 @@ class TapwingInputMethodService :
             }
             KeyActionType.LANGUAGE_SWITCH -> toggleLocale()
             KeyActionType.ENTER -> {
+                learnCompletedTrailingWord()
                 val handled = sendDefaultEditorAction(true)
                 if (!handled) {
                     ic.commitText("\n", 1)
@@ -334,6 +388,7 @@ class TapwingInputMethodService :
             KeyActionType.COMMA, KeyActionType.PERIOD, KeyActionType.CHAR -> {
                 if (key.type == KeyActionType.PERIOD || key.type == KeyActionType.COMMA) {
                     maybeAutoCorrectTrailingWord()
+                    learnCompletedTrailingWord()
                 }
                 ic.commitText(output, 1)
                 undoManager.notifyUnrelatedTyping()
@@ -363,6 +418,7 @@ class TapwingInputMethodService :
 
         lastSpaceTapMs = now
         val corrected = maybeAutoCorrectTrailingWord()
+        learnCompletedTrailingWord()
         ic.commitText(" ", 1)
         if (!corrected) {
             undoManager.notifyUnrelatedTyping()
@@ -371,13 +427,30 @@ class TapwingInputMethodService :
         refreshContextAndSuggestions()
     }
 
+    private fun learnCompletedTrailingWord() {
+        if (!currentPrefs.learningEnabled || currentPrefs.incognitoMode) return
+        val ic = currentInputConnection ?: return
+        val before = ic.getTextBeforeCursor(120, 0)?.toString().orEmpty()
+        val trailing = SuggestionEngine.extractTrailingWord(before)
+        if (trailing.isEmpty()) return
+
+        val prefixBeforeTrailing = before.dropLast(trailing.length).trimEnd()
+        val prevWord = SuggestionEngine.extractTrailingWord(prefixBeforeTrailing).takeIf { it.isNotEmpty() }
+        dictionaryStore.recordTypedWord(
+            word = trailing,
+            previousWord = prevWord,
+            learningEnabled = currentPrefs.learningEnabled,
+            incognito = currentPrefs.incognitoMode
+        )
+    }
+
     private fun maybeAutoCorrectTrailingWord(): Boolean {
         if (!currentPrefs.autoCorrect) return false
         val ic = currentInputConnection ?: return false
         val before = ic.getTextBeforeCursor(40, 0)?.toString().orEmpty()
         val trailing = SuggestionEngine.extractTrailingWord(before)
         if (trailing.isBlank()) return false
-        val correction = SuggestionEngine.autoCorrectionFor(trailing, currentPrefs.activeLocale)
+        val correction = SuggestionEngine.autoCorrectionFor(trailing, currentPrefs.activeLocale, dictionaryStore)
         if (correction != null && correction != trailing) {
             ic.beginBatchEdit()
             ic.deleteSurroundingText(trailing.length, 0)
@@ -387,11 +460,7 @@ class TapwingInputMethodService :
                 beforeText = trailing,
                 afterText = correction,
                 reason = UndoReason.AUTOCORRECT,
-                label = if (currentPrefs.activeLocale == "de") {
-                    "Rückgängig: $trailing"
-                } else {
-                    "Undo: $trailing"
-                }
+                label = if (currentPrefs.activeLocale == "de") "Rückgängig: $trailing" else "Undo: $trailing"
             )
             proactiveUndoState = undoManager.activeBanner()
             return true
@@ -411,6 +480,22 @@ class TapwingInputMethodService :
         refreshContextAndSuggestions()
     }
 
+    private fun deletePreviousWordWithUndo() {
+        val ic = currentInputConnection ?: return
+        val before = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+        val match = Regex("""\s*\S+\s*$""").find(before) ?: return
+        val deleted = match.value
+        ic.deleteSurroundingText(deleted.length, 0)
+        undoManager.record(
+            beforeText = deleted,
+            afterText = "",
+            reason = UndoReason.BULK_DELETE,
+            label = if (currentPrefs.activeLocale == "de") "Wort wiederherstellen" else "Restore word"
+        )
+        proactiveUndoState = undoManager.activeBanner()
+        refreshContextAndSuggestions()
+    }
+
     private fun moveCursorBy(steps: Int) {
         if (steps == 0) return
         val ic = currentInputConnection ?: return
@@ -419,6 +504,30 @@ class TapwingInputMethodService :
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
             ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
         }
+    }
+
+    private fun performTextEditAction(action: TextEditAction) {
+        val ic = currentInputConnection ?: return
+        val metaShift = if (textEditSelectionActive) KeyEvent.META_SHIFT_ON else 0
+        fun sendNav(code: Int, meta: Int = metaShift) {
+            val now = android.os.SystemClock.uptimeMillis()
+            ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, meta))
+            ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0, meta))
+        }
+
+        when (action) {
+            TextEditAction.LEFT -> sendNav(KeyEvent.KEYCODE_DPAD_LEFT)
+            TextEditAction.RIGHT -> sendNav(KeyEvent.KEYCODE_DPAD_RIGHT)
+            TextEditAction.UP -> sendNav(KeyEvent.KEYCODE_DPAD_UP)
+            TextEditAction.DOWN -> sendNav(KeyEvent.KEYCODE_DPAD_DOWN)
+            TextEditAction.LINE_START -> sendNav(KeyEvent.KEYCODE_MOVE_HOME)
+            TextEditAction.LINE_END -> sendNav(KeyEvent.KEYCODE_MOVE_END)
+            TextEditAction.SELECT_ALL -> ic.performContextMenuAction(android.R.id.selectAll)
+            TextEditAction.COPY -> ic.performContextMenuAction(android.R.id.copy)
+            TextEditAction.CUT -> ic.performContextMenuAction(android.R.id.cut)
+            TextEditAction.PASTE -> ic.performContextMenuAction(android.R.id.paste)
+        }
+        refreshContextAndSuggestions()
     }
 
     private fun applySuggestionChip(chip: SuggestionChip) {
@@ -432,10 +541,28 @@ class TapwingInputMethodService :
         if (chip.replaceCharCount > 0) {
             ic.deleteSurroundingText(chip.replaceCharCount, 0)
         }
-        val insertion = if (chip.isEmoji) chip.text else "${chip.text} "
+        val insertion = when {
+            chip.isEmoji || chip.isMath -> chip.text
+            chip.isShortcut -> "${chip.text} "
+            else -> "${chip.text} "
+        }
         ic.commitText(insertion, 1)
         ic.endBatchEdit()
-        if (before.isNotEmpty() && chip.isCorrection) {
+
+        // Learn chosen suggestion cleanly
+        if (!chip.isEmoji && !chip.isMath && !chip.isShortcut) {
+            val cleanWord = chip.text.trim()
+            val fullBefore = ic.getTextBeforeCursor(120, 0)?.toString().orEmpty()
+            val prev = SuggestionEngine.extractPreviousWord(fullBefore.dropLast(insertion.length))
+            dictionaryStore.recordTypedWord(
+                word = cleanWord,
+                previousWord = prev.takeIf { it.isNotEmpty() },
+                learningEnabled = currentPrefs.learningEnabled,
+                incognito = currentPrefs.incognitoMode
+            )
+        }
+
+        if (before.isNotEmpty() && (chip.isCorrection || chip.isShortcut)) {
             undoManager.record(
                 beforeText = before,
                 afterText = insertion,
@@ -452,10 +579,24 @@ class TapwingInputMethodService :
         proactiveUndoState = undoManager.activeBanner()
         val ic = currentInputConnection ?: return
 
+        if (snapshot.reason == UndoReason.AUTOCORRECT) {
+            dictionaryStore.recordCorrectionRejected(
+                originalWord = snapshot.beforeText,
+                learningEnabled = currentPrefs.learningEnabled,
+                incognito = currentPrefs.incognitoMode
+            )
+        }
+
         if (snapshot.reason == UndoReason.AI_REWRITE) {
             replaceWholeFieldText(snapshot.beforeText)
             writingOutput = null
             writingSourceText = snapshot.beforeText
+            refreshContextAndSuggestions()
+            return
+        }
+
+        if (snapshot.reason == UndoReason.BULK_DELETE) {
+            ic.commitText(snapshot.beforeText, 1)
             refreshContextAndSuggestions()
             return
         }
@@ -477,14 +618,16 @@ class TapwingInputMethodService :
 
     private fun refreshContextAndSuggestions() {
         val ic = currentInputConnection
-        val before = ic?.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+        val before = ic?.getTextBeforeCursor(80, 0)?.toString().orEmpty()
         val trailing = SuggestionEngine.extractTrailingWord(before)
         isTyping = trailing.isNotEmpty()
         suggestions = SuggestionEngine.suggestionsFor(
             textBeforeCursor = before,
             locale = currentPrefs.activeLocale,
             includeEmoji = currentPrefs.candidateEmojiSuggestions,
-            includeGrammarChips = currentPrefs.spellGrammarChips
+            includeGrammarChips = currentPrefs.spellGrammarChips,
+            includeMath = currentPrefs.inlineMathEnabled,
+            dictionaryStore = dictionaryStore
         )
 
         if (layoutPage == KeyboardLayoutPage.LETTERS && shiftState != ShiftState.CAPS_LOCK) {
@@ -516,7 +659,8 @@ class TapwingInputMethodService :
                 rawTranscript = rawTranscript,
                 locale = currentPrefs.activeLocale,
                 removeFillers = currentPrefs.voiceRemoveFillers,
-                autoPunctuate = currentPrefs.voiceAutoPunctuate
+                autoPunctuate = currentPrefs.voiceAutoPunctuate,
+                dictionaryStore = dictionaryStore
             )
         ) {
             is VoiceCommandResult.DeleteLastWord -> deletePreviousWord()
@@ -669,11 +813,13 @@ class TapwingInputMethodService :
             val ocrText = ScreenshotMonitor.extractTextFromImageUri(this@TapwingInputMethodService, shot.uri)
             if (ocrText.isNotBlank()) {
                 commitTextWithSpaceSafety(ocrText)
-                clipboardStore.addClip(
-                    rawText = ocrText,
-                    retention = currentPrefs.clipboardRetention,
-                    maxUnpinnedItems = currentPrefs.clipboardMaxItems
-                )
+                if (!currentPrefs.incognitoMode) {
+                    clipboardStore.addClip(
+                        rawText = ocrText,
+                        retention = currentPrefs.clipboardRetention,
+                        maxUnpinnedItems = currentPrefs.clipboardMaxItems
+                    )
+                }
             }
             recentScreenshot = null
         }
@@ -681,17 +827,26 @@ class TapwingInputMethodService :
 
     private fun toggleLocale() {
         val next = if (currentPrefs.activeLocale == "de") "en" else "de"
-        serviceScope.launch {
-            prefsRepo.update { it.copy(activeLocale = next) }
-        }
+        updatePref { it.copy(activeLocale = next) }
     }
 
-    private fun cycleTheme() {
-        val values = ThemeMode.entries
-        val next = values[(values.indexOf(currentPrefs.themeMode) + 1) % values.size]
-        serviceScope.launch {
-            prefsRepo.update { it.copy(themeMode = next) }
+    private fun cycleOneHanded() {
+        val next = when (currentPrefs.oneHandedMode) {
+            OneHandedMode.OFF -> OneHandedMode.RIGHT
+            OneHandedMode.RIGHT -> OneHandedMode.LEFT
+            OneHandedMode.LEFT -> OneHandedMode.OFF
         }
+        updatePref { it.copy(oneHandedMode = next) }
+        panelMode = KeyboardPanelMode.KEYS
+    }
+
+    private fun swapOneHandedSide() {
+        val next = if (currentPrefs.oneHandedMode == OneHandedMode.RIGHT) {
+            OneHandedMode.LEFT
+        } else {
+            OneHandedMode.RIGHT
+        }
+        updatePref { it.copy(oneHandedMode = next) }
     }
 
     private fun launchScanTextActivity() {
@@ -710,6 +865,7 @@ class TapwingInputMethodService :
 
     private fun hideKeyboard() {
         panelMode = KeyboardPanelMode.KEYS
+        textEditSelectionActive = false
         voiceController.cancel()
         requestHideSelf(0)
     }

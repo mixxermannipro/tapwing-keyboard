@@ -6,13 +6,15 @@
 
 ## Highlights
 
-- **Material 3 Expressive UI**: Rounded pill keycaps with top-right number hints, circular modifier and primary action keys, and 4 themes (`Expressive Lavender`, `Material You Dynamic`, `Pixel Blue`, `AMOLED Dark`).
-- **German (QWERTZ) & English (QWERTY)**: Built-in umlaut support (`Ä`, `Ö`, `Ü`, `ß`), number row toggle, long-press alternates, spacebar swipe cursor navigation, and double-space period.
+- **1:1 Pixel Slate & Material 3 Expressive Capsule UI**: Full stadium-pill keycaps with centered top symbol hints (`% \ | = [ ] < > { }`, `@ # € _ & - + ( )`, `* " ' : ; ! ?`), dedicated `1–0` number row, clean unmarked spacebar, 5 themes (`Pixel Slate`, `Expressive Lavender`, `Material You Dynamic`, `Pixel Blue`, `AMOLED Dark`), and a borderless bottom-right dismiss chevron (`⌄`).
+- **Apple Mode (Liquid Glass)**: Toggleable translucent glass keycaps with vertical specular highlights, spring keycap animations, floating preview bubble, and authentic iOS-style grouped Settings with capsule green switches and colored icon badges — while preserving the exact same key layout.
+- **Custom Dictionary & Adaptive Learning**: Import/export dictionaries (`.txt`, `.csv`, `.tsv` including Gboard Personal Dictionary exports, `key => phrase`, and `.json`), manage text shortcuts (with dynamic `/datum`, `/date`, `/zeit`, `/time`), and automatically learn unigrams, next-word bigrams, and undone autocorrections on-device.
+- **Dynamic Live Resizing & Power Tools**: Smooth continuous height slider (`75%–135%`) + live interactive drag-border resizer, bottom offset control, **Cursor & Text Edit D-Pad** (`← ↑ ↓ →`, `Select`, `Copy/Cut/Paste`), **One-Handed Mode** (Left/Right), **Inline Math** (`24*7=` → `168`), **Swipe-Backspace Word Delete**, **In-Keyboard Quick Search**, and **Incognito Mode**.
+- **German (QWERTZ) & English (QWERTY)**: Built-in long-press umlauts (`Ä`, `Ö`, `Ü`, `ß`) or optional dedicated umlaut keys, spacebar swipe cursor navigation, and double-space period.
 - **Natural Voice Dictation**: Uses Android's `SpeechRecognizer` paired with `NaturalVoiceCleaner` to remove filler words (*„ähm“*, *„um“*, *„uh“*), resolve mid-sentence self-corrections (*„nein warte“*, *„wait no“*), apply spoken punctuation, enforce strict language locking, keep dictation alive across 1.5s rotation changes, and offer a minimizable voice toolbar.
-- **AI Writing Tools (Offline + Bring-Your-Own-Key)**: Inline *Proofread*, *Professional*, *Casual*, *Concise*, *Emotive*, and *Rephrase* modes. Works out of the box offline via `LocalWritingAssistant`, or connects to your own **Google Gemini** / **OpenAI-compatible** endpoint using an API key encrypted in `AndroidKeyStore`.
+- **AI Writing Tools (Offline + Bring-Your-Own-Key)**: Inline *Proofread*, *Professional*, *Casual*, *Concise*, *Emotive*, and *Rephrase* modes. Works out of the box offline via `LocalWritingAssistant` (respecting your custom dictionary), or connects to your own **Google Gemini** / **OpenAI-compatible** endpoint using an API key encrypted in `AndroidKeyStore`.
 - **Extended Clipboard & Screenshot Chip**: Keeps up to 100 unpinned + unlimited pinned clips with configurable retention (`1h`, `24h`, `7d`, `30d`, `Never`) and optional recent-screenshot text extraction.
-- **Scan Text (Camera OCR)**: Live CameraX + on-device Google ML Kit text recognition directly from the keyboard toolbar.
-- **Proactive Undo & Grammar Chips**: 1-tap Undo chip in the suggestion strip after autocorrect, voice inserts, AI rewrites, or OCR insertions, plus typo/grammar and emoji chips.
+- **Scan Text (Camera OCR) & Proactive Undo**: Live CameraX + on-device Google ML Kit text recognition, plus 1-tap Undo chip in the suggestion strip.
 
 ---
 

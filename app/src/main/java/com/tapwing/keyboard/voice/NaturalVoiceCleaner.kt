@@ -1,6 +1,7 @@
 package com.tapwing.keyboard.voice
 
 import com.tapwing.keyboard.ai.WritingAction
+import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 
 sealed interface VoiceCommandResult {
     data class Text(val cleanedText: String) : VoiceCommandResult
@@ -37,7 +38,8 @@ object NaturalVoiceCleaner {
         rawTranscript: String,
         locale: String,
         removeFillers: Boolean = true,
-        autoPunctuate: Boolean = true
+        autoPunctuate: Boolean = true,
+        dictionaryStore: AdaptiveDictionaryStore? = null
     ): VoiceCommandResult {
         val trimmed = rawTranscript.trim()
         if (trimmed.isEmpty()) return VoiceCommandResult.Text("")
@@ -67,7 +69,8 @@ object NaturalVoiceCleaner {
                 rawTranscript = trimmed,
                 locale = locale,
                 removeFillers = removeFillers,
-                autoPunctuate = autoPunctuate
+                autoPunctuate = autoPunctuate,
+                dictionaryStore = dictionaryStore
             )
         )
     }
@@ -76,7 +79,8 @@ object NaturalVoiceCleaner {
         rawTranscript: String,
         locale: String,
         removeFillers: Boolean = true,
-        autoPunctuate: Boolean = true
+        autoPunctuate: Boolean = true,
+        dictionaryStore: AdaptiveDictionaryStore? = null
     ): String {
         var text = rawTranscript.trim()
         if (text.isEmpty()) return ""
@@ -89,6 +93,16 @@ object NaturalVoiceCleaner {
 
         text = replaceSpokenPunctuation(text, locale)
         text = normalizeWhitespaceAndPunctuation(text)
+
+        if (dictionaryStore != null && text.isNotEmpty()) {
+            val vocab = dictionaryStore.allKnownVocabularyWords()
+            if (vocab.isNotEmpty()) {
+                val wordRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
+                text = wordRegex.replace(text) { match ->
+                    vocab.firstOrNull { it.equals(match.value, ignoreCase = true) } ?: match.value
+                }
+            }
+        }
 
         if (autoPunctuate && text.isNotEmpty()) {
             text = capitalizeSentences(text)

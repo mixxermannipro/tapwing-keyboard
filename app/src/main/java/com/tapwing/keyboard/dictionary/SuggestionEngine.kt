@@ -7,6 +7,8 @@ data class SuggestionChip(
     val isCorrection: Boolean = false,
     val isGrammarFix: Boolean = false,
     val isEmoji: Boolean = false,
+    val isShortcut: Boolean = false,
+    val isMath: Boolean = false,
     val replaceCharCount: Int = 0
 )
 
@@ -237,9 +239,38 @@ object SuggestionEngine {
         textBeforeCursor: String,
         locale: String,
         includeEmoji: Boolean = true,
-        includeGrammarChips: Boolean = true
+        includeGrammarChips: Boolean = true,
+        includeMath: Boolean = true,
+        dictionaryStore: AdaptiveDictionaryStore? = null
     ): List<SuggestionChip> {
         val results = mutableListOf<SuggestionChip>()
+
+        // 1. Text shortcuts (e.g. "mfg", "/datum", "/zeit", or imported shortcuts)
+        val trailingToken = extractTrailingToken(textBeforeCursor)
+        if (trailingToken.isNotEmpty() && dictionaryStore != null) {
+            val expansion = dictionaryStore.lookupShortcut(trailingToken, locale)
+            if (!expansion.isNullOrBlank()) {
+                results += SuggestionChip(
+                    text = expansion,
+                    isShortcut = true,
+                    replaceCharCount = trailingToken.length
+                )
+            }
+        }
+
+        // 2. Inline Math Evaluator (e.g. "24*7=" -> "168")
+        if (includeMath) {
+            val math = InlineMathEvaluator.evaluateTrailingExpression(textBeforeCursor, locale)
+            if (math != null) {
+                val chipText = if (math.appendEqualsPrefix) "=${math.formattedResult}" else math.formattedResult
+                val replaceCount = if (math.appendEqualsPrefix) 0 else math.replaceCharCount
+                results += SuggestionChip(
+                    text = chipText,
+                    isMath = true,
+                    replaceCharCount = replaceCount
+                )
+            }
+        }
 
         if (includeGrammarChips) {
             val grammar = detectGrammarHint(textBeforeCursor, locale)
@@ -254,18 +285,28 @@ object SuggestionEngine {
 
         val currentWord = extractTrailingWord(textBeforeCursor)
         if (currentWord.isBlank()) {
+            // Bigram next-word predictions from adaptive learning
+            val prevWord = extractPreviousWord(textBeforeCursor)
+            if (prevWord.isNotEmpty() && dictionaryStore != null) {
+                dictionaryStore.predictNextWords(prevWord, limit = 3).forEach { predicted ->
+                    if (results.size < 3 && results.none { it.text == predicted }) {
+                        results += SuggestionChip(text = predicted, replaceCharCount = 0)
+                    }
+                }
+            }
             val defaults = if (locale == "de") listOf("Hallo", "Danke", "Okay") else listOf("Hello", "Thanks", "Okay")
             defaults.forEach { word ->
-                if (results.size < 3) {
+                if (results.size < 3 && results.none { it.text == word }) {
                     results += SuggestionChip(text = word, replaceCharCount = 0)
                 }
             }
-            return results
+            return results.take(3)
         }
 
         val lower = currentWord.lowercase()
+        val knownByUser = dictionaryStore?.isKnownWord(currentWord) == true
         val typoMap = if (locale == "de") germanTypoMap else englishTypoMap
-        val exactTypo = typoMap[lower]
+        val exactTypo = if (knownByUser) null else typoMap[lower]
         if (exactTypo != null && exactTypo != currentWord) {
             val cased = preserveLeadingCase(currentWord, exactTypo)
             results += SuggestionChip(
@@ -275,7 +316,7 @@ object SuggestionEngine {
             )
         }
 
-        if (locale == "de" && lower in germanCapitalNouns && currentWord.first().isLowerCase()) {
+        if (!knownByUser && locale == "de" && lower in germanCapitalNouns && currentWord.first().isLowerCase()) {
             val capitalized = currentWord.replaceFirstChar { it.uppercaseChar() }
             if (results.none { it.text == capitalized }) {
                 results += SuggestionChip(
@@ -294,6 +335,19 @@ object SuggestionEngine {
                     isEmoji = true,
                     replaceCharCount = 0
                 )
+            }
+        }
+
+        // Prioritize imported custom dictionary & learned user vocabulary before stock list
+        if (dictionaryStore != null) {
+            dictionaryStore.rankedPrefixCandidates(currentWord, limit = 3).forEach { match ->
+                if (results.size < 3 && results.none { it.text == match }) {
+                    results += SuggestionChip(
+                        text = match,
+                        isCorrection = false,
+                        replaceCharCount = currentWord.length
+                    )
+                }
             }
         }
 
@@ -321,8 +375,10 @@ object SuggestionEngine {
             }
         }
 
-        if (results.size < 3 && lower.length >= 3) {
-            val fuzzy = vocab
+        if (results.size < 3 && lower.length >= 3 && !knownByUser) {
+            val customFuzzyPool = dictionaryStore?.allKnownVocabularyWords().orEmpty()
+            val combinedPool = (customFuzzyPool + vocab).distinct()
+            val fuzzy = combinedPool
                 .asSequence()
                 .map { word -> word to levenshtein(lower, word.lowercase()) }
                 .filter { (word, dist) -> dist in 1..2 && word != currentWord }
@@ -345,9 +401,20 @@ object SuggestionEngine {
         return results.take(3)
     }
 
-    fun autoCorrectionFor(word: String, locale: String): String? {
+    fun autoCorrectionFor(
+        word: String,
+        locale: String,
+        dictionaryStore: AdaptiveDictionaryStore? = null
+    ): String? {
         if (word.length < 2) return null
+        if (dictionaryStore?.isKnownWord(word) == true) return null
         val lower = word.lowercase()
+
+        // Match exact lowercase custom/learned word casing (e.g. "tapwing" -> "Tapwing")
+        val customExact = dictionaryStore?.allKnownVocabularyWords()
+            ?.firstOrNull { it.equals(word, ignoreCase = true) && it != word }
+        if (customExact != null) return customExact
+
         val typoMap = if (locale == "de") germanTypoMap else englishTypoMap
         val mapped = typoMap[lower]
         if (mapped != null) {
@@ -410,6 +477,19 @@ object SuggestionEngine {
         if (textBeforeCursor.isEmpty()) return ""
         val idx = textBeforeCursor.indexOfLast { !it.isLetter() && it != '\'' && it != '-' }
         return if (idx == -1) textBeforeCursor else textBeforeCursor.substring(idx + 1)
+    }
+
+    fun extractTrailingToken(textBeforeCursor: String): String {
+        if (textBeforeCursor.isEmpty()) return ""
+        val idx = textBeforeCursor.indexOfLast { it.isWhitespace() }
+        return if (idx == -1) textBeforeCursor else textBeforeCursor.substring(idx + 1)
+    }
+
+    fun extractPreviousWord(textBeforeCursor: String): String {
+        val trimmed = textBeforeCursor.trimEnd()
+        if (trimmed.isEmpty()) return ""
+        val lastWord = extractTrailingWord(trimmed)
+        return lastWord
     }
 
     private fun preserveLeadingCase(source: String, target: String): String {
