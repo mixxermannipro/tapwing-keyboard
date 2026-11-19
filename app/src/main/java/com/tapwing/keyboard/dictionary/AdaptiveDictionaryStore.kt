@@ -5,6 +5,8 @@ import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -19,7 +21,8 @@ data class DictionaryStats(
 
 data class ImportSummary(
     val addedWords: Int,
-    val addedShortcuts: Int
+    val addedShortcuts: Int,
+    val sourceFormat: String = "text"
 )
 
 /**
@@ -32,6 +35,7 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     private val customWords = linkedMapOf<String, Int>()
     private val customWordsLower = linkedMapOf<String, String>()
     private val shortcuts = linkedMapOf<String, String>()
+    private val entryLocales = linkedMapOf<String, String>()
     private val learnedUnigrams = linkedMapOf<String, Int>()
     private val learnedUnigramsLower = linkedMapOf<String, String>()
     private val learnedBigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
@@ -56,7 +60,20 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
 
     @Synchronized
     fun importText(rawContent: String): ImportSummary {
-        val parsed = CustomDictionaryParser.parse(rawContent)
+        return mergeParsed(CustomDictionaryParser.parse(rawContent))
+    }
+
+    @Synchronized
+    fun importBytes(bytes: ByteArray): ImportSummary {
+        return mergeParsed(CustomDictionaryParser.parseBytes(bytes))
+    }
+
+    @Synchronized
+    fun importStream(inputStream: InputStream): ImportSummary {
+        return mergeParsed(CustomDictionaryParser.parseStream(inputStream))
+    }
+
+    private fun mergeParsed(parsed: ParsedDictionaryImport): ImportSummary {
         var wordsAdded = 0
         var shortcutsAdded = 0
 
@@ -79,8 +96,20 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             }
         }
 
+        parsed.locales.forEach { (key, localeTag) ->
+            val k = key.trim().lowercase()
+            val loc = localeTag.trim()
+            if (k.isNotEmpty() && loc.isNotEmpty()) {
+                entryLocales[k] = loc
+            }
+        }
+
         saveToDisk()
-        return ImportSummary(addedWords = wordsAdded, addedShortcuts = shortcutsAdded)
+        return ImportSummary(
+            addedWords = wordsAdded,
+            addedShortcuts = shortcutsAdded,
+            sourceFormat = parsed.sourceFormat
+        )
     }
 
     @Synchronized
@@ -234,8 +263,29 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     fun exportJson(): String = CustomDictionaryParser.exportToJson(
         words = customWords,
         shortcuts = shortcuts,
-        learnedUnigrams = learnedUnigrams
+        learnedUnigrams = learnedUnigrams,
+        entryLocales = entryLocales
     )
+
+    @Synchronized
+    fun exportGboardTsv(defaultLocaleTag: String = "de-DE"): String = CustomDictionaryParser.exportToGboardTsv(
+        words = customWords,
+        shortcuts = shortcuts,
+        learnedUnigrams = learnedUnigrams,
+        defaultLocaleTag = defaultLocaleTag,
+        entryLocales = entryLocales
+    )
+
+    @Synchronized
+    fun exportGboardZip(outputStream: OutputStream, defaultLocaleTag: String = "de-DE"): Int =
+        CustomDictionaryParser.exportToGboardZip(
+            outputStream = outputStream,
+            words = customWords,
+            shortcuts = shortcuts,
+            learnedUnigrams = learnedUnigrams,
+            defaultLocaleTag = defaultLocaleTag,
+            entryLocales = entryLocales
+        )
 
     @Synchronized
     fun clearLearnedData() {
@@ -250,6 +300,8 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     fun clearCustomWords() {
         customWords.clear()
         customWordsLower.clear()
+        val shortcutKeys = shortcuts.keys
+        entryLocales.keys.retainAll { it in shortcutKeys }
         saveToDisk()
     }
 
@@ -328,6 +380,14 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                 }
             }
 
+            entryLocales.clear()
+            root.optJSONObject("entryLocales")?.let { obj ->
+                obj.keys().forEach { k ->
+                    val loc = obj.optString(k, "").trim()
+                    if (loc.isNotEmpty()) entryLocales[k.lowercase()] = loc
+                }
+            }
+
             rejectedCorrections.clear()
             root.optJSONArray("rejected")?.let { arr ->
                 for (i in 0 until arr.length()) {
@@ -350,6 +410,9 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             })
             root.put("shortcuts", JSONObject().apply {
                 shortcuts.forEach { (k, v) -> put(k, v) }
+            })
+            root.put("entryLocales", JSONObject().apply {
+                entryLocales.forEach { (k, v) -> put(k, v) }
             })
             root.put("learnedUnigrams", JSONObject().apply {
                 learnedUnigrams.forEach { (k, v) -> put(k, v) }

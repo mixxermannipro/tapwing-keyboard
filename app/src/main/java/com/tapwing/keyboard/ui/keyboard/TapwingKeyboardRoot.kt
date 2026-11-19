@@ -39,6 +39,7 @@ import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.ai.WritingToolsOutput
 import com.tapwing.keyboard.clipboard.ClipboardClip
 import com.tapwing.keyboard.clipboard.RecentScreenshot
+import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.SuggestionChip
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
@@ -76,6 +77,10 @@ fun TapwingKeyboardRoot(
     onDismissUndo: () -> Unit,
     onTapScreenshotChip: (RecentScreenshot) -> Unit,
     onOpenToolsHub: () -> Unit,
+    onOpenCustomizeBar: () -> Unit,
+    onQuickAction: (QuickBarAction) -> Unit,
+    onUpdateQuickBar: (List<QuickBarAction>) -> Unit,
+    onResetQuickBar: () -> Unit,
     onCloseSubPanel: () -> Unit,
     onOpenWritingTools: () -> Unit,
     onWritingOnboardingContinue: () -> Unit,
@@ -189,6 +194,7 @@ fun TapwingKeyboardRoot(
                         ToolsHubPanel(
                             prefs = prefs,
                             onClose = onCloseSubPanel,
+                            onOpenCustomizeBar = onOpenCustomizeBar,
                             onOpenWritingTools = onOpenWritingTools,
                             onOpenClipboard = onOpenClipboard,
                             onOpenResize = onOpenResize,
@@ -202,6 +208,14 @@ fun TapwingKeyboardRoot(
                             onToggleAppleMode = onToggleAppleMode,
                             onOpenSettings = onOpenSettings,
                             onSwitchLanguage = onSwitchLanguage
+                        )
+                    }
+                    KeyboardPanelMode.CUSTOMIZE_BAR -> {
+                        QuickBarCustomizePanel(
+                            prefs = prefs,
+                            onUpdateQuickBar = onUpdateQuickBar,
+                            onResetQuickBar = onResetQuickBar,
+                            onDone = onCloseSubPanel
                         )
                     }
                     KeyboardPanelMode.CLIPBOARD -> {
@@ -264,11 +278,8 @@ fun TapwingKeyboardRoot(
                                 voiceState = voiceState,
                                 isTyping = isTyping,
                                 onOpenToolsHub = onOpenToolsHub,
-                                onOpenWritingTools = onOpenWritingTools,
-                                onOpenClipboard = onOpenClipboard,
-                                onOpenTextEdit = onOpenTextEdit,
-                                onOpenScanText = onOpenScanText,
-                                onOpenSettings = onOpenSettings,
+                                onQuickAction = onQuickAction,
+                                onLongPressQuickBar = onOpenCustomizeBar,
                                 onSelectSuggestion = onSelectSuggestion,
                                 onTriggerUndo = onTriggerUndo,
                                 onDismissUndo = onDismissUndo,

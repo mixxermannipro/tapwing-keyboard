@@ -1,16 +1,21 @@
 package com.tapwing.keyboard.ui.keyboard
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,15 +24,12 @@ import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.ContentPaste
-import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.Screenshot
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tapwing.keyboard.R
 import com.tapwing.keyboard.clipboard.RecentScreenshot
+import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.SuggestionChip
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
@@ -60,11 +64,8 @@ fun SuggestionStrip(
     voiceState: VoiceUiState,
     isTyping: Boolean,
     onOpenToolsHub: () -> Unit,
-    onOpenWritingTools: () -> Unit,
-    onOpenClipboard: () -> Unit,
-    onOpenTextEdit: () -> Unit,
-    onOpenScanText: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onQuickAction: (QuickBarAction) -> Unit,
+    onLongPressQuickBar: () -> Unit,
     onSelectSuggestion: (SuggestionChip) -> Unit,
     onTriggerUndo: () -> Unit,
     onDismissUndo: () -> Unit,
@@ -75,6 +76,8 @@ fun SuggestionStrip(
     onToggleVoiceMinimize: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
+    val view = LocalView.current
+    val de = prefs.activeLocale == "de"
 
     if (voiceState.isListening || voiceState.isProcessing) {
         VoiceToolbarRow(
@@ -178,7 +181,7 @@ fun SuggestionStrip(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = if (prefs.activeLocale == "de") "Screenshot-Text" else "Scan screenshot",
+                                text = if (de) "Screenshot-Text" else "Scan screenshot",
                                 color = kbColors.stripChipText,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
@@ -189,12 +192,18 @@ fun SuggestionStrip(
                 }
 
                 if (suggestions.isNotEmpty() && (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })) {
-                    if (prefs.aiWritingToolsEnabled && prefs.showWritingToolsIcon) {
+                    if (prefs.aiWritingToolsEnabled && QuickBarAction.WRITING_TOOLS in prefs.quickBarActions) {
                         QuickIconPill(
                             icon = Icons.Rounded.AutoAwesome,
                             contentDescription = stringResource(R.string.cd_writing_tools),
                             highlighted = true,
-                            onClick = onOpenWritingTools
+                            onClick = { onQuickAction(QuickBarAction.WRITING_TOOLS) },
+                            onLongClick = {
+                                if (prefs.hapticFeedback) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                }
+                                onLongPressQuickBar()
+                            }
                         )
                     }
                     suggestions.forEach { chip ->
@@ -227,47 +236,81 @@ fun SuggestionStrip(
                 }
             }
         } else {
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (prefs.aiWritingToolsEnabled && prefs.showWritingToolsIcon) {
-                    QuickIconPill(
-                        icon = Icons.Rounded.AutoAwesome,
-                        contentDescription = stringResource(R.string.cd_writing_tools),
-                        highlighted = true,
-                        onClick = onOpenWritingTools
-                    )
+            val pinned = prefs.quickBarActions
+            if (pinned.isEmpty()) {
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = kbColors.modifierSurface.copy(alpha = 0.45f),
+                        modifier = Modifier.clickable(onClick = onLongPressQuickBar)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Tune,
+                                contentDescription = null,
+                                tint = kbColors.modifierText,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (de) "Leiste anpassen" else "Customize bar",
+                                color = kbColors.modifierText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
-                if (prefs.clipboardEnabled && prefs.showClipboardIcon) {
-                    QuickIconPill(
-                        icon = Icons.Rounded.ContentPaste,
-                        contentDescription = stringResource(R.string.cd_clipboard),
-                        highlighted = false,
-                        onClick = onOpenClipboard
-                    )
+            } else if (pinned.size <= 5) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    pinned.forEach { action ->
+                        QuickIconPill(
+                            icon = action.icon(),
+                            contentDescription = action.title(de),
+                            highlighted = action.isHighlighted(prefs),
+                            onClick = { onQuickAction(action) },
+                            onLongClick = {
+                                if (prefs.hapticFeedback) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                }
+                                onLongPressQuickBar()
+                            }
+                        )
+                    }
                 }
-                QuickIconPill(
-                    icon = Icons.Rounded.OpenWith,
-                    contentDescription = if (prefs.activeLocale == "de") "Textbearbeitung" else "Text editing",
-                    highlighted = false,
-                    onClick = onOpenTextEdit
-                )
-                if (prefs.showScanTextIcon) {
-                    QuickIconPill(
-                        icon = Icons.Rounded.DocumentScanner,
-                        contentDescription = stringResource(R.string.cd_scan_text),
-                        highlighted = false,
-                        onClick = onOpenScanText
-                    )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    pinned.forEach { action ->
+                        QuickIconPill(
+                            icon = action.icon(),
+                            contentDescription = action.title(de),
+                            highlighted = action.isHighlighted(prefs),
+                            onClick = { onQuickAction(action) },
+                            onLongClick = {
+                                if (prefs.hapticFeedback) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                }
+                                onLongPressQuickBar()
+                            }
+                        )
+                    }
                 }
-                QuickIconPill(
-                    icon = Icons.Rounded.Settings,
-                    contentDescription = stringResource(R.string.cd_settings),
-                    highlighted = false,
-                    onClick = onOpenSettings
-                )
             }
         }
 
@@ -383,12 +426,14 @@ private fun VoiceToolbarRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun QuickIconPill(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
     highlighted: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     Box(
@@ -399,7 +444,10 @@ private fun QuickIconPill(
                 if (highlighted) kbColors.actionSurface.copy(alpha = 0.25f)
                 else kbColors.modifierSurface.copy(alpha = 0.35f)
             )
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         contentAlignment = Alignment.Center
     ) {
         Icon(

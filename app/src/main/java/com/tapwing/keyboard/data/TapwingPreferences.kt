@@ -93,6 +93,7 @@ data class TapwingPrefs(
     val showWritingToolsIcon: Boolean = true,
     val showClipboardIcon: Boolean = true,
     val showScanTextIcon: Boolean = true,
+    val quickBarActions: List<QuickBarAction> = QuickBarAction.DEFAULT_ACTIONS,
 
     val voiceMode: VoiceDictationMode = VoiceDictationMode.NATURAL_CLEANUP,
     val voiceRemoveFillers: Boolean = true,
@@ -160,6 +161,7 @@ class TapwingPreferencesRepository(context: Context) {
         val SHOW_WRITING_TOOLS_ICON = booleanPreferencesKey("show_writing_tools_icon")
         val SHOW_CLIPBOARD_ICON = booleanPreferencesKey("show_clipboard_icon")
         val SHOW_SCAN_TEXT_ICON = booleanPreferencesKey("show_scan_text_icon")
+        val QUICK_BAR_ACTIONS = stringPreferencesKey("quick_bar_actions")
 
         val VOICE_MODE = stringPreferencesKey("voice_mode")
         val VOICE_REMOVE_FILLERS = booleanPreferencesKey("voice_remove_fillers")
@@ -204,61 +206,74 @@ class TapwingPreferencesRepository(context: Context) {
         }
     }
 
-    private fun fromPreferences(p: Preferences): TapwingPrefs = TapwingPrefs(
-        activeLocale = p[Keys.ACTIVE_LOCALE] ?: "de",
-        showNumberRow = p[Keys.SHOW_NUMBER_ROW] ?: true,
-        showGermanUmlautKeys = p[Keys.SHOW_GERMAN_UMLAUTS] ?: false,
-        showSpacebarLanguageLabel = p[Keys.SHOW_SPACEBAR_LABEL] ?: false,
-        roundedExpressiveKeys = p[Keys.ROUNDED_EXPRESSIVE_KEYS] ?: true,
-        showKeyBorders = p[Keys.SHOW_KEY_BORDERS] ?: false,
-        keyboardHeight = parseEnum(p[Keys.KEYBOARD_HEIGHT], KeyboardHeightMode.NORMAL),
-        keyboardScalePercent = (p[Keys.KEYBOARD_SCALE_PERCENT] ?: 100).coerceIn(75, 135),
-        keyboardBottomLiftDp = (p[Keys.KEYBOARD_BOTTOM_LIFT_DP] ?: 0).coerceIn(0, 48),
-        longPressDelayMs = (p[Keys.LONG_PRESS_DELAY_MS] ?: 280).coerceIn(150, 500),
-        oneHandedMode = parseEnum(p[Keys.ONE_HANDED_MODE], OneHandedMode.OFF),
-        hapticFeedback = p[Keys.HAPTIC_FEEDBACK] ?: true,
-        soundOnKeypress = p[Keys.SOUND_ON_KEYPRESS] ?: false,
+    private fun fromPreferences(p: Preferences): TapwingPrefs {
+        val showWritingLegacy = p[Keys.SHOW_WRITING_TOOLS_ICON] ?: true
+        val showClipboardLegacy = p[Keys.SHOW_CLIPBOARD_ICON] ?: true
+        val showScanLegacy = p[Keys.SHOW_SCAN_TEXT_ICON] ?: true
+        val resolvedQuickBar = p[Keys.QUICK_BAR_ACTIONS]?.let { QuickBarAction.parse(it) }
+            ?: QuickBarAction.fromLegacyToggles(
+                showWritingTools = showWritingLegacy,
+                showClipboard = showClipboardLegacy,
+                showScanText = showScanLegacy
+            )
 
-        themeMode = parseEnum(p[Keys.THEME_MODE], ThemeMode.PIXEL_SLATE),
-        darkMode = parseEnum(p[Keys.DARK_MODE], DarkModePreference.SYSTEM),
-        appleModeEnabled = p[Keys.APPLE_MODE_ENABLED] ?: false,
+        return TapwingPrefs(
+            activeLocale = p[Keys.ACTIVE_LOCALE] ?: "de",
+            showNumberRow = p[Keys.SHOW_NUMBER_ROW] ?: true,
+            showGermanUmlautKeys = p[Keys.SHOW_GERMAN_UMLAUTS] ?: false,
+            showSpacebarLanguageLabel = p[Keys.SHOW_SPACEBAR_LABEL] ?: false,
+            roundedExpressiveKeys = p[Keys.ROUNDED_EXPRESSIVE_KEYS] ?: true,
+            showKeyBorders = p[Keys.SHOW_KEY_BORDERS] ?: false,
+            keyboardHeight = parseEnum(p[Keys.KEYBOARD_HEIGHT], KeyboardHeightMode.NORMAL),
+            keyboardScalePercent = (p[Keys.KEYBOARD_SCALE_PERCENT] ?: 100).coerceIn(75, 135),
+            keyboardBottomLiftDp = (p[Keys.KEYBOARD_BOTTOM_LIFT_DP] ?: 0).coerceIn(0, 48),
+            longPressDelayMs = (p[Keys.LONG_PRESS_DELAY_MS] ?: 280).coerceIn(150, 500),
+            oneHandedMode = parseEnum(p[Keys.ONE_HANDED_MODE], OneHandedMode.OFF),
+            hapticFeedback = p[Keys.HAPTIC_FEEDBACK] ?: true,
+            soundOnKeypress = p[Keys.SOUND_ON_KEYPRESS] ?: false,
 
-        autoCorrect = p[Keys.AUTO_CORRECT] ?: true,
-        spellGrammarChips = p[Keys.SPELL_GRAMMAR_CHIPS] ?: true,
-        proactiveUndo = p[Keys.PROACTIVE_UNDO] ?: true,
-        doubleSpacePeriod = p[Keys.DOUBLE_SPACE_PERIOD] ?: true,
-        learningEnabled = p[Keys.LEARNING_ENABLED] ?: true,
-        incognitoMode = p[Keys.INCOGNITO_MODE] ?: false,
-        inlineMathEnabled = p[Keys.INLINE_MATH_ENABLED] ?: true,
-        swipeBackspaceDeleteWord = p[Keys.SWIPE_BACKSPACE_WORD] ?: true,
-        showWritingToolsIcon = p[Keys.SHOW_WRITING_TOOLS_ICON] ?: true,
-        showClipboardIcon = p[Keys.SHOW_CLIPBOARD_ICON] ?: true,
-        showScanTextIcon = p[Keys.SHOW_SCAN_TEXT_ICON] ?: true,
+            themeMode = parseEnum(p[Keys.THEME_MODE], ThemeMode.PIXEL_SLATE),
+            darkMode = parseEnum(p[Keys.DARK_MODE], DarkModePreference.SYSTEM),
+            appleModeEnabled = p[Keys.APPLE_MODE_ENABLED] ?: false,
 
-        voiceMode = parseEnum(p[Keys.VOICE_MODE], VoiceDictationMode.NATURAL_CLEANUP),
-        voiceRemoveFillers = p[Keys.VOICE_REMOVE_FILLERS] ?: true,
-        voiceAutoPunctuate = p[Keys.VOICE_AUTO_PUNCTUATE] ?: true,
-        voiceStrictLanguageLock = p[Keys.VOICE_STRICT_LANGUAGE_LOCK] ?: true,
-        voiceMinimizeButton = p[Keys.VOICE_MINIMIZE_BUTTON] ?: true,
-        voiceRotationGraceMs = (p[Keys.VOICE_ROTATION_GRACE_MS] ?: 1500L).coerceIn(500L, 4000L),
-        voiceAiPolish = p[Keys.VOICE_AI_POLISH] ?: false,
-        voiceOnboardingSeen = p[Keys.VOICE_ONBOARDING_SEEN] ?: false,
+            autoCorrect = p[Keys.AUTO_CORRECT] ?: true,
+            spellGrammarChips = p[Keys.SPELL_GRAMMAR_CHIPS] ?: true,
+            proactiveUndo = p[Keys.PROACTIVE_UNDO] ?: true,
+            doubleSpacePeriod = p[Keys.DOUBLE_SPACE_PERIOD] ?: true,
+            learningEnabled = p[Keys.LEARNING_ENABLED] ?: true,
+            incognitoMode = p[Keys.INCOGNITO_MODE] ?: false,
+            inlineMathEnabled = p[Keys.INLINE_MATH_ENABLED] ?: true,
+            swipeBackspaceDeleteWord = p[Keys.SWIPE_BACKSPACE_WORD] ?: true,
+            showWritingToolsIcon = QuickBarAction.WRITING_TOOLS in resolvedQuickBar,
+            showClipboardIcon = QuickBarAction.CLIPBOARD in resolvedQuickBar,
+            showScanTextIcon = QuickBarAction.SCAN_TEXT in resolvedQuickBar,
+            quickBarActions = resolvedQuickBar,
 
-        aiWritingToolsEnabled = p[Keys.AI_WRITING_TOOLS_ENABLED] ?: true,
-        aiSupportAllKeyboards = p[Keys.AI_SUPPORT_ALL_KEYBOARDS] ?: true,
-        aiProvider = parseEnum(p[Keys.AI_PROVIDER], AiProviderType.LOCAL_RULES),
-        aiModel = p[Keys.AI_MODEL] ?: "gemini-2.5-flash",
-        aiCustomEndpoint = p[Keys.AI_CUSTOM_ENDPOINT] ?: "",
-        aiOnboardingSeen = p[Keys.AI_ONBOARDING_SEEN] ?: false,
+            voiceMode = parseEnum(p[Keys.VOICE_MODE], VoiceDictationMode.NATURAL_CLEANUP),
+            voiceRemoveFillers = p[Keys.VOICE_REMOVE_FILLERS] ?: true,
+            voiceAutoPunctuate = p[Keys.VOICE_AUTO_PUNCTUATE] ?: true,
+            voiceStrictLanguageLock = p[Keys.VOICE_STRICT_LANGUAGE_LOCK] ?: true,
+            voiceMinimizeButton = p[Keys.VOICE_MINIMIZE_BUTTON] ?: true,
+            voiceRotationGraceMs = (p[Keys.VOICE_ROTATION_GRACE_MS] ?: 1500L).coerceIn(500L, 4000L),
+            voiceAiPolish = p[Keys.VOICE_AI_POLISH] ?: false,
+            voiceOnboardingSeen = p[Keys.VOICE_ONBOARDING_SEEN] ?: false,
 
-        clipboardEnabled = p[Keys.CLIPBOARD_ENABLED] ?: true,
-        clipboardRetention = parseEnum(p[Keys.CLIPBOARD_RETENTION], ClipboardRetention.DAYS_7),
-        clipboardMaxItems = (p[Keys.CLIPBOARD_MAX_ITEMS] ?: 100).coerceIn(20, 200),
-        screenshotSuggestionChip = p[Keys.SCREENSHOT_SUGGESTION_CHIP] ?: true,
+            aiWritingToolsEnabled = p[Keys.AI_WRITING_TOOLS_ENABLED] ?: true,
+            aiSupportAllKeyboards = p[Keys.AI_SUPPORT_ALL_KEYBOARDS] ?: true,
+            aiProvider = parseEnum(p[Keys.AI_PROVIDER], AiProviderType.LOCAL_RULES),
+            aiModel = p[Keys.AI_MODEL] ?: "gemini-2.5-flash",
+            aiCustomEndpoint = p[Keys.AI_CUSTOM_ENDPOINT] ?: "",
+            aiOnboardingSeen = p[Keys.AI_ONBOARDING_SEEN] ?: false,
 
-        emojiScale = (p[Keys.EMOJI_SCALE] ?: 26).coerceIn(20, 34),
-        candidateEmojiSuggestions = p[Keys.CANDIDATE_EMOJI_SUGGESTIONS] ?: true
-    )
+            clipboardEnabled = p[Keys.CLIPBOARD_ENABLED] ?: true,
+            clipboardRetention = parseEnum(p[Keys.CLIPBOARD_RETENTION], ClipboardRetention.DAYS_7),
+            clipboardMaxItems = (p[Keys.CLIPBOARD_MAX_ITEMS] ?: 100).coerceIn(20, 200),
+            screenshotSuggestionChip = p[Keys.SCREENSHOT_SUGGESTION_CHIP] ?: true,
+
+            emojiScale = (p[Keys.EMOJI_SCALE] ?: 26).coerceIn(20, 34),
+            candidateEmojiSuggestions = p[Keys.CANDIDATE_EMOJI_SUGGESTIONS] ?: true
+        )
+    }
 
     private fun writePreferences(mutable: MutablePreferences, next: TapwingPrefs) {
         mutable[Keys.ACTIVE_LOCALE] = next.activeLocale
@@ -285,9 +300,10 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.INCOGNITO_MODE] = next.incognitoMode
         mutable[Keys.INLINE_MATH_ENABLED] = next.inlineMathEnabled
         mutable[Keys.SWIPE_BACKSPACE_WORD] = next.swipeBackspaceDeleteWord
-        mutable[Keys.SHOW_WRITING_TOOLS_ICON] = next.showWritingToolsIcon
-        mutable[Keys.SHOW_CLIPBOARD_ICON] = next.showClipboardIcon
-        mutable[Keys.SHOW_SCAN_TEXT_ICON] = next.showScanTextIcon
+        mutable[Keys.QUICK_BAR_ACTIONS] = QuickBarAction.serialize(next.quickBarActions)
+        mutable[Keys.SHOW_WRITING_TOOLS_ICON] = QuickBarAction.WRITING_TOOLS in next.quickBarActions
+        mutable[Keys.SHOW_CLIPBOARD_ICON] = QuickBarAction.CLIPBOARD in next.quickBarActions
+        mutable[Keys.SHOW_SCAN_TEXT_ICON] = QuickBarAction.SCAN_TEXT in next.quickBarActions
         mutable[Keys.VOICE_MODE] = next.voiceMode.name
         mutable[Keys.VOICE_REMOVE_FILLERS] = next.voiceRemoveFillers
         mutable[Keys.VOICE_AUTO_PUNCTUATE] = next.voiceAutoPunctuate
