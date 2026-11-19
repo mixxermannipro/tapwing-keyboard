@@ -7,12 +7,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,8 +25,10 @@ import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -62,6 +62,7 @@ fun SuggestionStrip(
     onOpenToolsHub: () -> Unit,
     onOpenWritingTools: () -> Unit,
     onOpenClipboard: () -> Unit,
+    onOpenTextEdit: () -> Unit,
     onOpenScanText: () -> Unit,
     onOpenSettings: () -> Unit,
     onSelectSuggestion: (SuggestionChip) -> Unit,
@@ -104,19 +105,19 @@ fun SuggestionStrip(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Rounded.GridView,
+                imageVector = if (prefs.incognitoMode) Icons.Rounded.VisibilityOff else Icons.Rounded.GridView,
                 contentDescription = stringResource(R.string.cd_tools_hub),
                 tint = kbColors.modifierText,
                 modifier = Modifier.size(20.dp)
             )
         }
 
-        // Center area: Proactive Undo OR Screenshot OCR chip OR Typing Suggestions OR Quick Actions
         val hasScrollableChips = (proactiveUndo != null && prefs.proactiveUndo) ||
             (recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping) ||
-            (isTyping && suggestions.isNotEmpty())
+            (isTyping && suggestions.isNotEmpty()) ||
+            prefs.incognitoMode
 
-        if (hasScrollableChips) {
+        if (hasScrollableChips && (isTyping || proactiveUndo != null || recentScreenshot != null)) {
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -127,7 +128,7 @@ fun SuggestionStrip(
                 if (proactiveUndo != null && prefs.proactiveUndo) {
                     Surface(
                         shape = RoundedCornerShape(18.dp),
-                        color = kbColors.actionSurface.copy(alpha = 0.14f),
+                        color = kbColors.actionSurface.copy(alpha = 0.22f),
                         modifier = Modifier.clickable(onClick = onTriggerUndo)
                     ) {
                         Row(
@@ -138,7 +139,7 @@ fun SuggestionStrip(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Rounded.Undo,
                                 contentDescription = stringResource(R.string.btn_undo),
-                                tint = kbColors.actionSurface,
+                                tint = kbColors.actionText,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
@@ -173,7 +174,7 @@ fun SuggestionStrip(
                             Icon(
                                 imageVector = Icons.Rounded.Screenshot,
                                 contentDescription = null,
-                                tint = kbColors.actionSurface,
+                                tint = kbColors.keyText,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
@@ -187,7 +188,7 @@ fun SuggestionStrip(
                     }
                 }
 
-                if (isTyping && suggestions.isNotEmpty()) {
+                if (suggestions.isNotEmpty() && (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })) {
                     if (prefs.aiWritingToolsEnabled && prefs.showWritingToolsIcon) {
                         QuickIconPill(
                             icon = Icons.Rounded.AutoAwesome,
@@ -197,24 +198,26 @@ fun SuggestionStrip(
                         )
                     }
                     suggestions.forEach { chip ->
+                        val isEmphasized = chip.isCorrection || chip.isGrammarFix || chip.isShortcut || chip.isMath
                         Surface(
                             shape = RoundedCornerShape(16.dp),
-                            color = if (chip.isCorrection || chip.isGrammarFix) {
-                                kbColors.actionSurface.copy(alpha = 0.14f)
+                            color = if (isEmphasized) {
+                                kbColors.actionSurface.copy(alpha = 0.25f)
                             } else {
                                 kbColors.stripChipSurface
                             },
                             modifier = Modifier.clickable { onSelectSuggestion(chip) }
                         ) {
+                            val label = when {
+                                chip.isShortcut -> "⚡ ${chip.text}"
+                                chip.isMath -> "🧮 ${chip.text}"
+                                else -> chip.text
+                            }
                             Text(
-                                text = chip.text,
-                                color = if (chip.isCorrection || chip.isGrammarFix) {
-                                    kbColors.actionSurface
-                                } else {
-                                    kbColors.stripChipText
-                                },
+                                text = label,
+                                color = kbColors.stripChipText,
                                 fontSize = 14.sp,
-                                fontWeight = if (chip.isCorrection || chip.isGrammarFix) FontWeight.Bold else FontWeight.Medium,
+                                fontWeight = if (isEmphasized) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -245,6 +248,12 @@ fun SuggestionStrip(
                         onClick = onOpenClipboard
                     )
                 }
+                QuickIconPill(
+                    icon = Icons.Rounded.OpenWith,
+                    contentDescription = if (prefs.activeLocale == "de") "Textbearbeitung" else "Text editing",
+                    highlighted = false,
+                    onClick = onOpenTextEdit
+                )
                 if (prefs.showScanTextIcon) {
                     QuickIconPill(
                         icon = Icons.Rounded.DocumentScanner,
@@ -308,7 +317,6 @@ private fun VoiceToolbarRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Cancel X circle
         Box(
             modifier = Modifier
                 .size(38.dp)
@@ -325,7 +333,6 @@ private fun VoiceToolbarRow(
             )
         }
 
-        // Center live status / partial transcript
         Text(
             text = statusText,
             color = kbColors.keyText,
@@ -358,7 +365,6 @@ private fun VoiceToolbarRow(
             }
         }
 
-        // Primary violet circular confirm / mic button
         Box(
             modifier = Modifier
                 .size(40.dp)
@@ -390,8 +396,8 @@ private fun QuickIconPill(
             .size(36.dp)
             .clip(CircleShape)
             .background(
-                if (highlighted) kbColors.actionSurface.copy(alpha = 0.14f)
-                else kbColors.boardBackground
+                if (highlighted) kbColors.actionSurface.copy(alpha = 0.25f)
+                else kbColors.modifierSurface.copy(alpha = 0.35f)
             )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
@@ -399,7 +405,7 @@ private fun QuickIconPill(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = if (highlighted) kbColors.actionSurface else kbColors.modifierText,
+            tint = if (highlighted) kbColors.keyText else kbColors.modifierText,
             modifier = Modifier.size(19.dp)
         )
     }

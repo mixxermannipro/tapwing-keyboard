@@ -19,7 +19,10 @@ enum class KeyboardPanelMode {
     WRITING_ONBOARDING,
     VOICE_ONBOARDING,
     CLIPBOARD,
-    EMOJI
+    EMOJI,
+    RESIZE,
+    TEXT_EDIT,
+    QUICK_SEARCH
 }
 
 enum class KeyActionType {
@@ -47,141 +50,131 @@ data class KeySpec(
 
 object KeyboardLayouts {
 
-    private val germanRows: List<List<KeySpec>> = listOf(
+    /**
+     * 1:1 German QWERTZ layout matching PixelBoard's key arrangement & top-center symbol hints:
+     * Row 1: q(%) w(\) e(|) r(=) t([) z(]) u(<) i(>) o({) p(})
+     * Row 2: a(@) s(#) d(€) f(_) g(&) h(-) j(+) k(() l())
+     * Row 3: ⇧ y(*) x(") c(') v(:) b(;) n(!) m(?) ⌫
+     * Row 4: ?123 , ☺ [Space] . ↵
+     */
+    private val germanPixelRows: List<List<KeySpec>> = listOf(
         listOf(
-            KeySpec("q", hint = "1", alternates = listOf("1")),
-            KeySpec("w", hint = "2", alternates = listOf("2")),
-            KeySpec("e", hint = "3", alternates = listOf("3", "é", "è", "ê", "€")),
-            KeySpec("r", hint = "4", alternates = listOf("4")),
-            KeySpec("t", hint = "5", alternates = listOf("5")),
-            KeySpec("z", hint = "6", alternates = listOf("6")),
-            KeySpec("u", hint = "7", alternates = listOf("7", "ü", "ú", "ù")),
-            KeySpec("i", hint = "8", alternates = listOf("8", "í", "ì")),
-            KeySpec("o", hint = "9", alternates = listOf("9", "ö", "ó", "ò")),
-            KeySpec("p", hint = "0", alternates = listOf("0")),
-            KeySpec("ü", alternates = listOf("u", "ú"))
+            KeySpec("q", hint = "%", alternates = listOf("%", "1")),
+            KeySpec("w", hint = "\\", alternates = listOf("\\", "2")),
+            KeySpec("e", hint = "|", alternates = listOf("|", "€", "é", "è", "ê", "3")),
+            KeySpec("r", hint = "=", alternates = listOf("=", "4")),
+            KeySpec("t", hint = "[", alternates = listOf("[", "5")),
+            KeySpec("z", hint = "]", alternates = listOf("]", "6")),
+            KeySpec("u", hint = "<", alternates = listOf("<", "ü", "ú", "ù", "7")),
+            KeySpec("i", hint = ">", alternates = listOf(">", "í", "ì", "8")),
+            KeySpec("o", hint = "{", alternates = listOf("{", "ö", "ó", "ò", "9")),
+            KeySpec("p", hint = "}", alternates = listOf("}", "0"))
         ),
         listOf(
-            KeySpec("a", alternates = listOf("ä", "á", "à", "@")),
-            KeySpec("s", alternates = listOf("ß", "ś", "š")),
-            KeySpec("d"),
-            KeySpec("f"),
-            KeySpec("g"),
-            KeySpec("h"),
-            KeySpec("j"),
-            KeySpec("k"),
-            KeySpec("l"),
-            KeySpec("ö", alternates = listOf("o", "ó")),
-            KeySpec("ä", alternates = listOf("a", "á"))
+            KeySpec("a", hint = "@", alternates = listOf("@", "ä", "á", "à", "â")),
+            KeySpec("s", hint = "#", alternates = listOf("#", "ß", "ś", "š")),
+            KeySpec("d", hint = "€", alternates = listOf("€")),
+            KeySpec("f", hint = "_", alternates = listOf("_")),
+            KeySpec("g", hint = "&", alternates = listOf("&")),
+            KeySpec("h", hint = "-", alternates = listOf("-")),
+            KeySpec("j", hint = "+", alternates = listOf("+")),
+            KeySpec("k", hint = "(", alternates = listOf("(")),
+            KeySpec("l", hint = ")", alternates = listOf(")"))
         ),
         listOf(
             KeySpec("⇧", weight = 1.45f, type = KeyActionType.SHIFT),
-            KeySpec("y"),
-            KeySpec("x"),
-            KeySpec("c", alternates = listOf("ç", "ć")),
-            KeySpec("v"),
-            KeySpec("b"),
-            KeySpec("n", alternates = listOf("ñ")),
-            KeySpec("m"),
+            KeySpec("y", hint = "*", alternates = listOf("*")),
+            KeySpec("x", hint = "\"", alternates = listOf("\"")),
+            KeySpec("c", hint = "'", alternates = listOf("'", "ç", "ć")),
+            KeySpec("v", hint = ":", alternates = listOf(":")),
+            KeySpec("b", hint = ";", alternates = listOf(";")),
+            KeySpec("n", hint = "!", alternates = listOf("!", "ñ")),
+            KeySpec("m", hint = "?", alternates = listOf("?")),
             KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
         ),
         listOf(
             KeySpec("?123", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
             KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
             KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
-            KeySpec("Deutsch", output = " ", weight = 3.8f, type = KeyActionType.SPACE),
+            KeySpec("Deutsch", output = " ", weight = 3.85f, type = KeyActionType.SPACE),
             KeySpec(".", weight = 1f, type = KeyActionType.PERIOD, alternates = listOf("?", "!", ",", ":", ";", "-", "'")),
-            KeySpec("↵", weight = 1.55f, type = KeyActionType.ENTER)
+            KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
         )
     )
 
-    private val germanRowsCompact: List<List<KeySpec>> = listOf(
+    private val germanRowsWithDirectUmlauts: List<List<KeySpec>> = listOf(
         listOf(
-            KeySpec("q", hint = "1", alternates = listOf("1")),
-            KeySpec("w", hint = "2", alternates = listOf("2")),
-            KeySpec("e", hint = "3", alternates = listOf("3", "é", "è", "€")),
-            KeySpec("r", hint = "4", alternates = listOf("4")),
-            KeySpec("t", hint = "5", alternates = listOf("5")),
-            KeySpec("z", hint = "6", alternates = listOf("6")),
-            KeySpec("u", hint = "7", alternates = listOf("7", "ü")),
-            KeySpec("i", hint = "8", alternates = listOf("8")),
-            KeySpec("o", hint = "9", alternates = listOf("9", "ö")),
-            KeySpec("p", hint = "0", alternates = listOf("0"))
+            KeySpec("q", hint = "%", alternates = listOf("%", "1")),
+            KeySpec("w", hint = "\\", alternates = listOf("\\", "2")),
+            KeySpec("e", hint = "|", alternates = listOf("|", "é", "è", "€", "3")),
+            KeySpec("r", hint = "=", alternates = listOf("=", "4")),
+            KeySpec("t", hint = "[", alternates = listOf("[", "5")),
+            KeySpec("z", hint = "]", alternates = listOf("]", "6")),
+            KeySpec("u", hint = "<", alternates = listOf("<", "ü", "ú", "7")),
+            KeySpec("i", hint = ">", alternates = listOf(">", "í", "8")),
+            KeySpec("o", hint = "{", alternates = listOf("{", "ö", "ó", "9")),
+            KeySpec("p", hint = "}", alternates = listOf("}", "0")),
+            KeySpec("ü", alternates = listOf("u", "ú"))
         ),
         listOf(
-            KeySpec("a", alternates = listOf("ä", "á", "à")),
-            KeySpec("s", alternates = listOf("ß")),
-            KeySpec("d"),
-            KeySpec("f"),
-            KeySpec("g"),
-            KeySpec("h"),
-            KeySpec("j"),
-            KeySpec("k"),
-            KeySpec("l")
+            KeySpec("a", hint = "@", alternates = listOf("@", "ä", "á", "à")),
+            KeySpec("s", hint = "#", alternates = listOf("#", "ß", "ś")),
+            KeySpec("d", hint = "€", alternates = listOf("€")),
+            KeySpec("f", hint = "_", alternates = listOf("_")),
+            KeySpec("g", hint = "&", alternates = listOf("&")),
+            KeySpec("h", hint = "-", alternates = listOf("-")),
+            KeySpec("j", hint = "+", alternates = listOf("+")),
+            KeySpec("k", hint = "(", alternates = listOf("(")),
+            KeySpec("l", hint = ")", alternates = listOf(")")),
+            KeySpec("ö", alternates = listOf("o", "ó")),
+            KeySpec("ä", alternates = listOf("a", "á"))
         ),
-        listOf(
-            KeySpec("⇧", weight = 1.45f, type = KeyActionType.SHIFT),
-            KeySpec("y"),
-            KeySpec("x"),
-            KeySpec("c"),
-            KeySpec("v"),
-            KeySpec("b"),
-            KeySpec("n"),
-            KeySpec("m"),
-            KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
-        ),
-        listOf(
-            KeySpec("?123", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
-            KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
-            KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
-            KeySpec("Deutsch", output = " ", weight = 3.8f, type = KeyActionType.SPACE),
-            KeySpec(".", weight = 1f, type = KeyActionType.PERIOD, alternates = listOf("?", "!", ",", ":", ";", "-")),
-            KeySpec("↵", weight = 1.55f, type = KeyActionType.ENTER)
-        )
+        germanPixelRows[2],
+        germanPixelRows[3]
     )
 
     private val englishRows: List<List<KeySpec>> = listOf(
         listOf(
-            KeySpec("q", hint = "1", alternates = listOf("1")),
-            KeySpec("w", hint = "2", alternates = listOf("2")),
-            KeySpec("e", hint = "3", alternates = listOf("3", "é", "è")),
-            KeySpec("r", hint = "4", alternates = listOf("4")),
-            KeySpec("t", hint = "5", alternates = listOf("5")),
-            KeySpec("y", hint = "6", alternates = listOf("6")),
-            KeySpec("u", hint = "7", alternates = listOf("7", "ü")),
-            KeySpec("i", hint = "8", alternates = listOf("8")),
-            KeySpec("o", hint = "9", alternates = listOf("9", "ö")),
-            KeySpec("p", hint = "0", alternates = listOf("0"))
+            KeySpec("q", hint = "%", alternates = listOf("%", "1")),
+            KeySpec("w", hint = "\\", alternates = listOf("\\", "2")),
+            KeySpec("e", hint = "|", alternates = listOf("|", "é", "è", "3")),
+            KeySpec("r", hint = "=", alternates = listOf("=", "4")),
+            KeySpec("t", hint = "[", alternates = listOf("[", "5")),
+            KeySpec("y", hint = "]", alternates = listOf("]", "6")),
+            KeySpec("u", hint = "<", alternates = listOf("<", "ü", "7")),
+            KeySpec("i", hint = ">", alternates = listOf(">", "8")),
+            KeySpec("o", hint = "{", alternates = listOf("{", "ö", "9")),
+            KeySpec("p", hint = "}", alternates = listOf("}", "0"))
         ),
         listOf(
-            KeySpec("a", alternates = listOf("ä", "á", "à", "@")),
-            KeySpec("s", alternates = listOf("ß", "$")),
-            KeySpec("d"),
-            KeySpec("f"),
-            KeySpec("g"),
-            KeySpec("h"),
-            KeySpec("j"),
-            KeySpec("k"),
-            KeySpec("l")
+            KeySpec("a", hint = "@", alternates = listOf("@", "ä", "á", "à")),
+            KeySpec("s", hint = "#", alternates = listOf("#", "ß", "$")),
+            KeySpec("d", hint = "$", alternates = listOf("$")),
+            KeySpec("f", hint = "_", alternates = listOf("_")),
+            KeySpec("g", hint = "&", alternates = listOf("&")),
+            KeySpec("h", hint = "-", alternates = listOf("-")),
+            KeySpec("j", hint = "+", alternates = listOf("+")),
+            KeySpec("k", hint = "(", alternates = listOf("(")),
+            KeySpec("l", hint = ")", alternates = listOf(")"))
         ),
         listOf(
             KeySpec("⇧", weight = 1.45f, type = KeyActionType.SHIFT),
-            KeySpec("z"),
-            KeySpec("x"),
-            KeySpec("c", alternates = listOf("ç")),
-            KeySpec("v"),
-            KeySpec("b"),
-            KeySpec("n", alternates = listOf("ñ")),
-            KeySpec("m"),
+            KeySpec("z", hint = "*", alternates = listOf("*")),
+            KeySpec("x", hint = "\"", alternates = listOf("\"")),
+            KeySpec("c", hint = "'", alternates = listOf("'", "ç")),
+            KeySpec("v", hint = ":", alternates = listOf(":")),
+            KeySpec("b", hint = ";", alternates = listOf(";")),
+            KeySpec("n", hint = "!", alternates = listOf("!", "ñ")),
+            KeySpec("m", hint = "?", alternates = listOf("?")),
             KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
         ),
         listOf(
             KeySpec("?123", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
             KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
             KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
-            KeySpec("English", output = " ", weight = 3.8f, type = KeyActionType.SPACE),
+            KeySpec("English", output = " ", weight = 3.85f, type = KeyActionType.SPACE),
             KeySpec(".", weight = 1f, type = KeyActionType.PERIOD, alternates = listOf("?", "!", ",", ":", ";", "-", "'")),
-            KeySpec("↵", weight = 1.55f, type = KeyActionType.ENTER)
+            KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
         )
     )
 
@@ -205,9 +198,9 @@ object KeyboardLayouts {
             KeySpec("ABC", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
             KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
             KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
-            KeySpec(" ", weight = 3.8f, type = KeyActionType.SPACE),
+            KeySpec(" ", weight = 3.85f, type = KeyActionType.SPACE),
             KeySpec(".", weight = 1f, type = KeyActionType.PERIOD),
-            KeySpec("↵", weight = 1.55f, type = KeyActionType.ENTER)
+            KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
         )
     )
 
@@ -229,9 +222,9 @@ object KeyboardLayouts {
             KeySpec("ABC", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
             KeySpec("<", weight = 1f),
             KeySpec(">", weight = 1f),
-            KeySpec(" ", weight = 3.8f, type = KeyActionType.SPACE),
+            KeySpec(" ", weight = 3.85f, type = KeyActionType.SPACE),
             KeySpec(".", weight = 1f, type = KeyActionType.PERIOD),
-            KeySpec("↵", weight = 1.55f, type = KeyActionType.ENTER)
+            KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
         )
     )
 
@@ -244,8 +237,8 @@ object KeyboardLayouts {
         return when (page) {
             KeyboardLayoutPage.LETTERS -> {
                 val base = when {
-                    locale.startsWith("de") && showGermanUmlauts -> germanRows
-                    locale.startsWith("de") -> germanRowsCompact
+                    locale.startsWith("de") && showGermanUmlauts -> germanRowsWithDirectUmlauts
+                    locale.startsWith("de") -> germanPixelRows
                     else -> englishRows
                 }
                 if (showNumberRow) listOf(numberRow) + base else base

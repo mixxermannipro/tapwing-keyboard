@@ -19,14 +19,19 @@ import com.tapwing.keyboard.data.ThemeMode
 
 @Immutable
 data class TapwingKeyboardColors(
+    val isDark: Boolean,
+    val appleLiquidGlass: Boolean,
     val boardBackground: Color,
+    val boardGradientBottom: Color,
     val keySurface: Color,
     val keyPressed: Color,
     val keyText: Color,
     val keyHintText: Color,
     val keyBorder: Color,
+    val keyGlassHighlight: Color,
     val modifierSurface: Color,
     val modifierText: Color,
+    val spacebarSurface: Color,
     val actionSurface: Color,
     val actionText: Color,
     val stripChipSurface: Color,
@@ -37,22 +42,87 @@ data class TapwingKeyboardColors(
 
 val LocalTapwingKeyboardColors = staticCompositionLocalOf {
     TapwingKeyboardColors(
-        boardBackground = Color(0xFFF3EDF9),
-        keySurface = Color(0xFFFFFFFF),
-        keyPressed = Color(0xFFE5DCF4),
-        keyText = Color(0xFF1D1B20),
-        keyHintText = Color(0xFF6B6575),
-        keyBorder = Color(0x141D1B20),
-        modifierSurface = Color(0xFFE4DBF1),
-        modifierText = Color(0xFF282038),
-        actionSurface = Color(0xFF6750A4),
-        actionText = Color(0xFFFFFFFF),
-        stripChipSurface = Color(0xFFE9E0F7),
-        stripChipText = Color(0xFF231937),
-        cardSurface = Color(0xFFFFFFFF),
-        cardAltSurface = Color(0xFFECE4F6)
+        isDark = true,
+        appleLiquidGlass = false,
+        boardBackground = Color(0xFF141518),
+        boardGradientBottom = Color(0xFF101114),
+        keySurface = Color(0xFF24262C),
+        keyPressed = Color(0xFF363A45),
+        keyText = Color(0xFFF1F3F6),
+        keyHintText = Color(0xFFA0A6B4),
+        keyBorder = Color(0x14FFFFFF),
+        keyGlassHighlight = Color(0x28FFFFFF),
+        modifierSurface = Color(0xFF303542),
+        modifierText = Color(0xFFE7ECF5),
+        spacebarSurface = Color(0xFF272A32),
+        actionSurface = Color(0xFF3E475C),
+        actionText = Color(0xFFF3F6FC),
+        stripChipSurface = Color(0xFF282C36),
+        stripChipText = Color(0xFFEAEFF8),
+        cardSurface = Color(0xFF1E2026),
+        cardAltSurface = Color(0xFF2A2E39)
     )
 }
+
+private val PixelSlateLightScheme = lightColorScheme(
+    primary = Color(0xFF3B5998),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFD9E3F8),
+    onPrimaryContainer = Color(0xFF112244),
+    secondary = Color(0xFF566074),
+    secondaryContainer = Color(0xFFE3E8F2),
+    background = Color(0xFFECEFF4),
+    onBackground = Color(0xFF16181D),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF16181D),
+    surfaceVariant = Color(0xFFE1E6EF),
+    onSurfaceVariant = Color(0xFF555E6F)
+)
+
+private val PixelSlateDarkScheme = darkColorScheme(
+    primary = Color(0xFFA9C0EE),
+    onPrimary = Color(0xFF162747),
+    primaryContainer = Color(0xFF38445C),
+    onPrimaryContainer = Color(0xFFE5ECFA),
+    secondary = Color(0xFFBEC6D8),
+    secondaryContainer = Color(0xFF2B303C),
+    background = Color(0xFF121316),
+    onBackground = Color(0xFFF0F2F6),
+    surface = Color(0xFF1C1E24),
+    onSurface = Color(0xFFF0F2F6),
+    surfaceVariant = Color(0xFF272B34),
+    onSurfaceVariant = Color(0xFFA6AEBD)
+)
+
+private val AppleLightScheme = lightColorScheme(
+    primary = Color(0xFF007AFF),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFD6EAFF),
+    onPrimaryContainer = Color(0xFF002B5C),
+    secondary = Color(0xFF34C759),
+    secondaryContainer = Color(0xFFE5E5EA),
+    background = Color(0xFFF2F2F7),
+    onBackground = Color(0xFF000000),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF000000),
+    surfaceVariant = Color(0xFFE9E9EF),
+    onSurfaceVariant = Color(0xFF6C6C70)
+)
+
+private val AppleDarkScheme = darkColorScheme(
+    primary = Color(0xFF0A84FF),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFF1C3A5E),
+    onPrimaryContainer = Color(0xFFD6EAFF),
+    secondary = Color(0xFF30D158),
+    secondaryContainer = Color(0xFF2C2C2E),
+    background = Color(0xFF000000),
+    onBackground = Color(0xFFFFFFFF),
+    surface = Color(0xFF1C1C1E),
+    onSurface = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFF2C2C2E),
+    onSurfaceVariant = Color(0xFF98989F)
+)
 
 private val LavenderLightScheme = lightColorScheme(
     primary = Color(0xFF6750A4),
@@ -133,8 +203,9 @@ private val AmoledDarkScheme = darkColorScheme(
 
 @Composable
 fun TapwingTheme(
-    themeMode: ThemeMode = ThemeMode.EXPRESSIVE_LAVENDER,
+    themeMode: ThemeMode = ThemeMode.PIXEL_SLATE,
     darkModePreference: DarkModePreference = DarkModePreference.SYSTEM,
+    appleModeEnabled: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -145,20 +216,25 @@ fun TapwingTheme(
     }
 
     val context = LocalContext.current
-    val colorScheme: ColorScheme = when (themeMode) {
-        ThemeMode.DYNAMIC -> {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (useDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            } else {
-                if (useDark) LavenderDarkScheme else LavenderLightScheme
+    val colorScheme: ColorScheme = if (appleModeEnabled) {
+        if (useDark) AppleDarkScheme else AppleLightScheme
+    } else {
+        when (themeMode) {
+            ThemeMode.DYNAMIC -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (useDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+                } else {
+                    if (useDark) PixelSlateDarkScheme else PixelSlateLightScheme
+                }
             }
+            ThemeMode.PIXEL_SLATE -> if (useDark) PixelSlateDarkScheme else PixelSlateLightScheme
+            ThemeMode.EXPRESSIVE_LAVENDER -> if (useDark) LavenderDarkScheme else LavenderLightScheme
+            ThemeMode.PIXEL_BLUE -> if (useDark) PixelBlueDarkScheme else PixelBlueLightScheme
+            ThemeMode.AMOLED_DARK -> AmoledDarkScheme
         }
-        ThemeMode.EXPRESSIVE_LAVENDER -> if (useDark) LavenderDarkScheme else LavenderLightScheme
-        ThemeMode.PIXEL_BLUE -> if (useDark) PixelBlueDarkScheme else PixelBlueLightScheme
-        ThemeMode.AMOLED_DARK -> AmoledDarkScheme
     }
 
-    val keyboardColors = buildKeyboardColors(themeMode, useDark, colorScheme)
+    val keyboardColors = buildKeyboardColors(themeMode, useDark, appleModeEnabled, colorScheme)
 
     CompositionLocalProvider(LocalTapwingKeyboardColors provides keyboardColors) {
         MaterialTheme(
@@ -171,18 +247,114 @@ fun TapwingTheme(
 private fun buildKeyboardColors(
     themeMode: ThemeMode,
     useDark: Boolean,
+    appleModeEnabled: Boolean,
     scheme: ColorScheme
 ): TapwingKeyboardColors {
+    if (appleModeEnabled) {
+        return if (useDark) {
+            TapwingKeyboardColors(
+                isDark = true,
+                appleLiquidGlass = true,
+                boardBackground = Color(0xEB151822),
+                boardGradientBottom = Color(0xF50B0D14),
+                keySurface = Color(0xB8323644),
+                keyPressed = Color(0xE04A5166),
+                keyText = Color(0xFFF7F9FC),
+                keyHintText = Color(0xFFAAB2C5),
+                keyBorder = Color(0x28FFFFFF),
+                keyGlassHighlight = Color(0x45FFFFFF),
+                modifierSurface = Color(0x9E262B38),
+                modifierText = Color(0xFFE7ECF8),
+                spacebarSurface = Color(0xB8343948),
+                actionSurface = Color(0xCC0A84FF),
+                actionText = Color(0xFFFFFFFF),
+                stripChipSurface = Color(0xA6292E3C),
+                stripChipText = Color(0xFFF0F4FC),
+                cardSurface = Color(0xD61F232E),
+                cardAltSurface = Color(0xBA2A3040)
+            )
+        } else {
+            TapwingKeyboardColors(
+                isDark = false,
+                appleLiquidGlass = true,
+                boardBackground = Color(0xE8E5EAF3),
+                boardGradientBottom = Color(0xF5D7DFEC),
+                keySurface = Color(0xD9FFFFFF),
+                keyPressed = Color(0xFFF2F6FC),
+                keyText = Color(0xFF111318),
+                keyHintText = Color(0xFF687082),
+                keyBorder = Color(0x66FFFFFF),
+                keyGlassHighlight = Color(0xD9FFFFFF),
+                modifierSurface = Color(0xB8CDD6E6),
+                modifierText = Color(0xFF1D2230),
+                spacebarSurface = Color(0xDEFFFFFF),
+                actionSurface = Color(0xE6007AFF),
+                actionText = Color(0xFFFFFFFF),
+                stripChipSurface = Color(0xC7F3F6FB),
+                stripChipText = Color(0xFF151924),
+                cardSurface = Color(0xE8FFFFFF),
+                cardAltSurface = Color(0xCCDDE4F0)
+            )
+        }
+    }
+
     return when {
+        themeMode == ThemeMode.PIXEL_SLATE && useDark -> TapwingKeyboardColors(
+            isDark = true,
+            appleLiquidGlass = false,
+            boardBackground = Color(0xFF121316),
+            boardGradientBottom = Color(0xFF121316),
+            keySurface = Color(0xFF23252A),
+            keyPressed = Color(0xFF353944),
+            keyText = Color(0xFFF2F4F8),
+            keyHintText = Color(0xFFA0A7B5),
+            keyBorder = Color(0x10FFFFFF),
+            keyGlassHighlight = Color(0x20FFFFFF),
+            modifierSurface = Color(0xFF303542),
+            modifierText = Color(0xFFE7ECF6),
+            spacebarSurface = Color(0xFF272A32),
+            actionSurface = Color(0xFF3D475D),
+            actionText = Color(0xFFF4F7FD),
+            stripChipSurface = Color(0xFF262A34),
+            stripChipText = Color(0xFFEBF0F9),
+            cardSurface = Color(0xFF1D1F25),
+            cardAltSurface = Color(0xFF292D37)
+        )
+        themeMode == ThemeMode.PIXEL_SLATE -> TapwingKeyboardColors(
+            isDark = false,
+            appleLiquidGlass = false,
+            boardBackground = Color(0xFFECEFF4),
+            boardGradientBottom = Color(0xFFECEFF4),
+            keySurface = Color(0xFFFFFFFF),
+            keyPressed = Color(0xFFDDE3EE),
+            keyText = Color(0xFF181B22),
+            keyHintText = Color(0xFF646D7E),
+            keyBorder = Color(0x14000000),
+            keyGlassHighlight = Color(0x55FFFFFF),
+            modifierSurface = Color(0xFFD8DFEC),
+            modifierText = Color(0xFF1E2430),
+            spacebarSurface = Color(0xFFFFFFFF),
+            actionSurface = Color(0xFF3B5998),
+            actionText = Color(0xFFFFFFFF),
+            stripChipSurface = Color(0xFFDCE3F0),
+            stripChipText = Color(0xFF192234),
+            cardSurface = Color(0xFFFFFFFF),
+            cardAltSurface = Color(0xFFE3E8F2)
+        )
         themeMode == ThemeMode.AMOLED_DARK -> TapwingKeyboardColors(
+            isDark = true,
+            appleLiquidGlass = false,
             boardBackground = Color(0xFF000000),
+            boardGradientBottom = Color(0xFF000000),
             keySurface = Color(0xFF18181D),
             keyPressed = Color(0xFF2D283A),
             keyText = Color(0xFFF3F3F7),
             keyHintText = Color(0xFF9E9CB0),
             keyBorder = Color(0x1FFFFFFF),
+            keyGlassHighlight = Color(0x22FFFFFF),
             modifierSurface = Color(0xFF24222D),
             modifierText = Color(0xFFE7E0F4),
+            spacebarSurface = Color(0xFF1C1C23),
             actionSurface = Color(0xFF6750A4),
             actionText = Color(0xFFFFFFFF),
             stripChipSurface = Color(0xFF211F29),
@@ -191,14 +363,19 @@ private fun buildKeyboardColors(
             cardAltSurface = Color(0xFF1B1923)
         )
         themeMode == ThemeMode.PIXEL_BLUE && useDark -> TapwingKeyboardColors(
+            isDark = true,
+            appleLiquidGlass = false,
             boardBackground = Color(0xFF11151C),
+            boardGradientBottom = Color(0xFF11151C),
             keySurface = Color(0xFF232934),
             keyPressed = Color(0xFF334157),
             keyText = Color(0xFFF3F5F8),
             keyHintText = Color(0xFF9AA4B4),
             keyBorder = Color(0x1AFFFFFF),
+            keyGlassHighlight = Color(0x22FFFFFF),
             modifierSurface = Color(0xFF1B222D),
             modifierText = Color(0xFFD6E2F5),
+            spacebarSurface = Color(0xFF262D39),
             actionSurface = Color(0xFF8AB4F8),
             actionText = Color(0xFF062E6F),
             stripChipSurface = Color(0xFF1D2634),
@@ -207,14 +384,19 @@ private fun buildKeyboardColors(
             cardAltSurface = Color(0xFF202A38)
         )
         themeMode == ThemeMode.PIXEL_BLUE -> TapwingKeyboardColors(
+            isDark = false,
+            appleLiquidGlass = false,
             boardBackground = Color(0xFFEDF2FA),
+            boardGradientBottom = Color(0xFFEDF2FA),
             keySurface = Color(0xFFFFFFFF),
             keyPressed = Color(0xFFDDE7F9),
             keyText = Color(0xFF101828),
             keyHintText = Color(0xFF637082),
             keyBorder = Color(0x140F172A),
+            keyGlassHighlight = Color(0x55FFFFFF),
             modifierSurface = Color(0xFFD8E4F7),
             modifierText = Color(0xFF172B4D),
+            spacebarSurface = Color(0xFFFFFFFF),
             actionSurface = Color(0xFF1A73E8),
             actionText = Color(0xFFFFFFFF),
             stripChipSurface = Color(0xFFE1EBFC),
@@ -223,14 +405,19 @@ private fun buildKeyboardColors(
             cardAltSurface = Color(0xFFE6EFFB)
         )
         themeMode == ThemeMode.EXPRESSIVE_LAVENDER && !useDark -> TapwingKeyboardColors(
+            isDark = false,
+            appleLiquidGlass = false,
             boardBackground = Color(0xFFF3EDF9),
+            boardGradientBottom = Color(0xFFF3EDF9),
             keySurface = Color(0xFFFFFFFF),
             keyPressed = Color(0xFFE4DAF3),
             keyText = Color(0xFF1D1B20),
             keyHintText = Color(0xFF6B6575),
             keyBorder = Color(0x121D1B20),
+            keyGlassHighlight = Color(0x66FFFFFF),
             modifierSurface = Color(0xFFE3DAF0),
             modifierText = Color(0xFF261C38),
+            spacebarSurface = Color(0xFFFFFFFF),
             actionSurface = Color(0xFF5E41A8),
             actionText = Color(0xFFFFFFFF),
             stripChipSurface = Color(0xFFE8DFF6),
@@ -239,14 +426,19 @@ private fun buildKeyboardColors(
             cardAltSurface = Color(0xFFECE4F7)
         )
         themeMode == ThemeMode.EXPRESSIVE_LAVENDER && useDark -> TapwingKeyboardColors(
+            isDark = true,
+            appleLiquidGlass = false,
             boardBackground = Color(0xFF17141D),
+            boardGradientBottom = Color(0xFF17141D),
             keySurface = Color(0xFF292433),
             keyPressed = Color(0xFF3E3550),
             keyText = Color(0xFFF2ECF8),
             keyHintText = Color(0xFFABA3B8),
             keyBorder = Color(0x18FFFFFF),
+            keyGlassHighlight = Color(0x28FFFFFF),
             modifierSurface = Color(0xFF211C2A),
             modifierText = Color(0xFFE5DCF4),
+            spacebarSurface = Color(0xFF2D2738),
             actionSurface = Color(0xFFD0BCFF),
             actionText = Color(0xFF381E72),
             stripChipSurface = Color(0xFF272133),
@@ -254,31 +446,20 @@ private fun buildKeyboardColors(
             cardSurface = Color(0xFF1F1B26),
             cardAltSurface = Color(0xFF2A2336)
         )
-        useDark -> TapwingKeyboardColors(
-            boardBackground = scheme.surfaceVariant,
-            keySurface = scheme.surface,
-            keyPressed = scheme.primaryContainer,
-            keyText = scheme.onSurface,
-            keyHintText = scheme.onSurfaceVariant,
-            keyBorder = Color(0x18FFFFFF),
-            modifierSurface = scheme.secondaryContainer,
-            modifierText = scheme.onSecondaryContainer,
-            actionSurface = scheme.primary,
-            actionText = scheme.onPrimary,
-            stripChipSurface = scheme.secondaryContainer,
-            stripChipText = scheme.onSecondaryContainer,
-            cardSurface = scheme.surface,
-            cardAltSurface = scheme.surfaceVariant
-        )
         else -> TapwingKeyboardColors(
+            isDark = useDark,
+            appleLiquidGlass = false,
             boardBackground = scheme.surfaceVariant,
+            boardGradientBottom = scheme.surfaceVariant,
             keySurface = scheme.surface,
             keyPressed = scheme.primaryContainer,
             keyText = scheme.onSurface,
             keyHintText = scheme.onSurfaceVariant,
-            keyBorder = Color(0x14000000),
+            keyBorder = Color(if (useDark) 0x18FFFFFF else 0x14000000),
+            keyGlassHighlight = Color(0x28FFFFFF),
             modifierSurface = scheme.secondaryContainer,
             modifierText = scheme.onSecondaryContainer,
+            spacebarSurface = scheme.surface,
             actionSurface = scheme.primary,
             actionText = scheme.onPrimary,
             stripChipSurface = scheme.secondaryContainer,

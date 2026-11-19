@@ -10,6 +10,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import com.tapwing.keyboard.data.TapwingPrefs
+import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 import com.tapwing.keyboard.ui.theme.TapwingTheme
 import kotlinx.coroutines.launch
 
@@ -21,6 +22,7 @@ class SettingsActivity : ComponentActivity() {
 
         val prefsRepo = TapwingPreferencesRepository(this)
         val secureKeyStorage = SecureKeyStorage(this)
+        val dictionaryStore = AdaptiveDictionaryStore.createForContext(this)
 
         setContent {
             val prefs by prefsRepo.prefsFlow.collectAsState(initial = TapwingPrefs())
@@ -28,11 +30,13 @@ class SettingsActivity : ComponentActivity() {
 
             TapwingTheme(
                 themeMode = prefs.themeMode,
-                darkModePreference = prefs.darkMode
+                darkModePreference = prefs.darkMode,
+                appleModeEnabled = prefs.appleModeEnabled
             ) {
                 TapwingSettingsApp(
                     prefs = prefs,
                     secureKeyStorage = secureKeyStorage,
+                    dictionaryStore = dictionaryStore,
                     onUpdatePrefs = { transform ->
                         scope.launch {
                             prefsRepo.update(transform)

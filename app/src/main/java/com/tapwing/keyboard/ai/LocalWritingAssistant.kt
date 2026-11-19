@@ -1,5 +1,6 @@
 package com.tapwing.keyboard.ai
 
+import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 import com.tapwing.keyboard.dictionary.SuggestionEngine
 
 enum class WritingAction {
@@ -17,22 +18,32 @@ enum class WritingAction {
  */
 object LocalWritingAssistant {
 
-    fun transform(input: String, action: WritingAction, locale: String): String {
+    fun transform(
+        input: String,
+        action: WritingAction,
+        locale: String,
+        dictionaryStore: AdaptiveDictionaryStore? = null
+    ): String {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) return ""
         val de = locale.lowercase().startsWith("de")
+        val lang = if (de) "de" else "en"
 
         return when (action) {
-            WritingAction.PROOFREAD -> proofread(trimmed, if (de) "de" else "en")
-            WritingAction.PROFESSIONAL -> makeProfessional(proofread(trimmed, if (de) "de" else "en"), de)
-            WritingAction.CASUAL -> makeCasual(proofread(trimmed, if (de) "de" else "en"), de)
-            WritingAction.CONCISE -> makeConcise(proofread(trimmed, if (de) "de" else "en"), de)
-            WritingAction.EMOTIVE -> makeEmotive(proofread(trimmed, if (de) "de" else "en"), de)
-            WritingAction.REPHRASE -> rephrase(proofread(trimmed, if (de) "de" else "en"), de)
+            WritingAction.PROOFREAD -> proofread(trimmed, lang, dictionaryStore)
+            WritingAction.PROFESSIONAL -> makeProfessional(proofread(trimmed, lang, dictionaryStore), de)
+            WritingAction.CASUAL -> makeCasual(proofread(trimmed, lang, dictionaryStore), de)
+            WritingAction.CONCISE -> makeConcise(proofread(trimmed, lang, dictionaryStore), de)
+            WritingAction.EMOTIVE -> makeEmotive(proofread(trimmed, lang, dictionaryStore), de)
+            WritingAction.REPHRASE -> rephrase(proofread(trimmed, lang, dictionaryStore), de)
         }
     }
 
-    fun proofread(input: String, locale: String): String {
+    fun proofread(
+        input: String,
+        locale: String,
+        dictionaryStore: AdaptiveDictionaryStore? = null
+    ): String {
         var text = input.trim()
             .replace(Regex("""[ \t]+"""), " ")
             .replace(Regex(""" *([,.!?;:])"""), "$1")
@@ -41,11 +52,13 @@ object LocalWritingAssistant {
         // Fix consecutive repeated words ("the the" -> "the")
         text = text.replace(Regex("""\b(\p{L}{2,})\s+\1\b""", RegexOption.IGNORE_CASE), "$1")
 
-        // Fix known typos token-by-token while keeping punctuation
+        // Fix known typos & apply custom dictionary casing token-by-token while keeping punctuation
         val wordRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
         text = wordRegex.replace(text) { match ->
             val word = match.value
-            SuggestionEngine.autoCorrectionFor(word, locale) ?: word
+            val customCanonical = dictionaryStore?.allKnownVocabularyWords()
+                ?.firstOrNull { it.equals(word, ignoreCase = true) }
+            customCanonical ?: SuggestionEngine.autoCorrectionFor(word, locale, dictionaryStore) ?: word
         }
 
         text = capitalizeSentences(text)

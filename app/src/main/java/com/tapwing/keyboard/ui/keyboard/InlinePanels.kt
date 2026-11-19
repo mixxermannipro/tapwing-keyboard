@@ -1,7 +1,9 @@
 package com.tapwing.keyboard.ui.keyboard
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,21 +25,36 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Backspace
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DocumentScanner
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EmojiEmotions
+import androidx.compose.material.icons.rounded.Height
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.OpenInBrowser
+import androidx.compose.material.icons.rounded.OpenWith
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PushPin
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -45,11 +62,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -57,6 +77,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -67,9 +88,24 @@ import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.ai.WritingToolsOutput
 import com.tapwing.keyboard.clipboard.ClipboardClip
+import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.emoji.EmojiCatalog
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
+import kotlin.math.roundToInt
+
+enum class TextEditAction {
+    LEFT,
+    RIGHT,
+    UP,
+    DOWN,
+    LINE_START,
+    LINE_END,
+    SELECT_ALL,
+    COPY,
+    CUT,
+    PASTE
+}
 
 @Composable
 fun ToolsHubPanel(
@@ -77,31 +113,47 @@ fun ToolsHubPanel(
     onClose: () -> Unit,
     onOpenWritingTools: () -> Unit,
     onOpenClipboard: () -> Unit,
+    onOpenResize: () -> Unit,
+    onOpenTextEdit: () -> Unit,
     onOpenScanText: () -> Unit,
     onStartVoice: () -> Unit,
     onOpenEmoji: () -> Unit,
-    onCycleTheme: () -> Unit,
+    onCycleOneHanded: () -> Unit,
+    onToggleIncognito: () -> Unit,
+    onOpenQuickSearch: () -> Unit,
+    onToggleAppleMode: () -> Unit,
     onOpenSettings: () -> Unit,
     onSwitchLanguage: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val de = prefs.activeLocale == "de"
 
+    val oneHandedLabel = when (prefs.oneHandedMode) {
+        OneHandedMode.OFF -> if (de) "Einhändig" else "One-hand"
+        OneHandedMode.RIGHT -> if (de) "Rechts" else "Right"
+        OneHandedMode.LEFT -> if (de) "Links" else "Left"
+    }
+
     val items = listOf(
-        ToolTileSpec(if (de) "Schreibhilfe" else "Writing", Icons.Rounded.AutoAwesome, onOpenWritingTools),
-        ToolTileSpec(if (de) "Ablage" else "Clipboard", Icons.Rounded.ContentPaste, onOpenClipboard),
-        ToolTileSpec(if (de) "Scannen" else "Scan OCR", Icons.Rounded.DocumentScanner, onOpenScanText),
-        ToolTileSpec(if (de) "Diktat" else "Voice", Icons.Rounded.Mic, onStartVoice),
-        ToolTileSpec("Emoji", Icons.Rounded.EmojiEmotions, onOpenEmoji),
-        ToolTileSpec(if (de) "Design" else "Theme", Icons.Rounded.Palette, onCycleTheme),
-        ToolTileSpec(if (de) "Optionen" else "Settings", Icons.Rounded.Settings, onOpenSettings),
-        ToolTileSpec(if (de) "Sprache (${prefs.activeLocale.uppercase()})" else "Lang (${prefs.activeLocale.uppercase()})", Icons.Rounded.Language, onSwitchLanguage)
+        ToolTileSpec(if (de) "Schreibhilfe" else "Writing", Icons.Rounded.AutoAwesome, onClick = onOpenWritingTools),
+        ToolTileSpec(if (de) "Ablage" else "Clipboard", Icons.Rounded.ContentPaste, onClick = onOpenClipboard),
+        ToolTileSpec(if (de) "Größe" else "Resize", Icons.Rounded.Height, onClick = onOpenResize),
+        ToolTileSpec(if (de) "Text-Edit" else "Text edit", Icons.Rounded.OpenWith, onClick = onOpenTextEdit),
+        ToolTileSpec(if (de) "Scannen" else "Scan OCR", Icons.Rounded.DocumentScanner, onClick = onOpenScanText),
+        ToolTileSpec(if (de) "Diktat" else "Voice", Icons.Rounded.Mic, onClick = onStartVoice),
+        ToolTileSpec("Emoji", Icons.Rounded.EmojiEmotions, onClick = onOpenEmoji),
+        ToolTileSpec(oneHandedLabel, Icons.Rounded.PhoneAndroid, active = prefs.oneHandedMode != OneHandedMode.OFF, onClick = onCycleOneHanded),
+        ToolTileSpec(if (de) "Inkognito" else "Incognito", Icons.Rounded.VisibilityOff, active = prefs.incognitoMode, onClick = onToggleIncognito),
+        ToolTileSpec(if (de) "Websuche" else "Search", Icons.Rounded.Search, onClick = onOpenQuickSearch),
+        ToolTileSpec(if (de) "Apple Glas" else "Liquid Glass", Icons.Rounded.Smartphone, active = prefs.appleModeEnabled, onClick = onToggleAppleMode),
+        ToolTileSpec(if (de) "Optionen" else "Settings", Icons.Rounded.Settings, onClick = onOpenSettings),
+        ToolTileSpec(if (de) "Sprache (${prefs.activeLocale.uppercase()})" else "Lang (${prefs.activeLocale.uppercase()})", Icons.Rounded.Language, onClick = onSwitchLanguage)
     )
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(256.dp)
+            .height(278.dp)
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
         Row(
@@ -121,29 +173,30 @@ fun ToolsHubPanel(
         Spacer(Modifier.height(6.dp))
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             items(items) { tile ->
                 Surface(
                     shape = RoundedCornerShape(18.dp),
-                    color = kbColors.cardSurface,
+                    color = if (tile.active) kbColors.actionSurface.copy(alpha = 0.28f) else kbColors.cardSurface,
+                    border = if (tile.active) BorderStroke(1.dp, kbColors.actionSurface) else null,
                     modifier = Modifier.clickable(onClick = tile.onClick)
                 ) {
                     Column(
-                        modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp),
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(34.dp)
                                 .clip(CircleShape)
                                 .background(kbColors.cardAltSurface),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(tile.icon, contentDescription = null, tint = kbColors.actionSurface, modifier = Modifier.size(20.dp))
+                            Icon(tile.icon, contentDescription = null, tint = kbColors.keyText, modifier = Modifier.size(18.dp))
                         }
                         Text(
                             text = tile.label,
@@ -164,8 +217,398 @@ fun ToolsHubPanel(
 private data class ToolTileSpec(
     val label: String,
     val icon: ImageVector,
+    val active: Boolean = false,
     val onClick: () -> Unit
 )
+
+/**
+ * Dynamic live keyboard resizer modeled on PixelBoard's resize frame:
+ * lets the user drag the top handle OR use the fine slider & bottom-lift buttons while watching
+ * the actual KeyboardGrid scale smoothly in real time.
+ */
+@Composable
+fun KeyboardResizePanel(
+    prefs: TapwingPrefs,
+    layoutPage: KeyboardLayoutPage,
+    shiftState: ShiftState,
+    imeActionLabel: KeyActionLabel,
+    onScaleChange: (Int) -> Unit,
+    onBottomLiftChange: (Int) -> Unit,
+    onReset: () -> Unit,
+    onDone: () -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    val de = prefs.activeLocale == "de"
+    var dragAccumulator by remember { mutableFloatStateOf(0f) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = kbColors.cardSurface,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (de) "Tastaturgröße: ${prefs.keyboardScalePercent}%"
+                        else "Keyboard height: ${prefs.keyboardScalePercent}%",
+                        color = kbColors.keyText,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TextButton(onClick = onReset, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                            Text("100%", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = onDone,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                            shape = CircleShape
+                        ) {
+                            Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (de) "Fertig" else "Done", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Slider(
+                    value = prefs.keyboardScalePercent.toFloat(),
+                    onValueChange = { onScaleChange(it.roundToInt()) },
+                    valueRange = 75f..135f
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (de) "Abstand unten: ${prefs.keyboardBottomLiftDp} dp"
+                        else "Bottom offset: ${prefs.keyboardBottomLiftDp} dp",
+                        color = kbColors.keyHintText,
+                        fontSize = 12.sp
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(
+                            onClick = { onBottomLiftChange((prefs.keyboardBottomLiftDp - 6).coerceAtLeast(0)) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) { Text("−", fontSize = 14.sp) }
+                        OutlinedButton(
+                            onClick = { onBottomLiftChange((prefs.keyboardBottomLiftDp + 6).coerceAtMost(48)) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) { Text("+", fontSize = 14.sp) }
+                    }
+                }
+            }
+        }
+
+        // Draggable resize border around the live KeyboardGrid
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = kbColors.boardBackground,
+            border = BorderStroke(1.5.dp, kbColors.actionSurface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(26.dp)
+                        .pointerInput(prefs.keyboardScalePercent) {
+                            detectVerticalDragGestures(
+                                onDragStart = { dragAccumulator = 0f },
+                                onVerticalDrag = { _, dragAmount ->
+                                    // Dragging UP (negative dy) increases keyboard height
+                                    dragAccumulator -= dragAmount
+                                    val stepPx = 12f
+                                    var updated = prefs.keyboardScalePercent
+                                    while (dragAccumulator >= stepPx) {
+                                        updated = (updated + 1).coerceIn(75, 135)
+                                        dragAccumulator -= stepPx
+                                    }
+                                    while (dragAccumulator <= -stepPx) {
+                                        updated = (updated - 1).coerceIn(75, 135)
+                                        dragAccumulator += stepPx
+                                    }
+                                    if (updated != prefs.keyboardScalePercent) {
+                                        onScaleChange(updated)
+                                    }
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.DragHandle,
+                        contentDescription = null,
+                        tint = kbColors.keyText
+                    )
+                }
+
+                KeyboardGrid(
+                    prefs = prefs,
+                    layoutPage = layoutPage,
+                    shiftState = shiftState,
+                    imeActionLabel = imeActionLabel,
+                    onKeyPress = { _, _ -> },
+                    onCursorMoveSteps = {},
+                    onDeletePreviousWord = {},
+                    onSwitchLanguage = {}
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Precision Cursor & Selection editing panel addressing one of the top Gboard user requests.
+ */
+@Composable
+fun TextEditPanel(
+    prefs: TapwingPrefs,
+    selectionActive: Boolean,
+    onBack: () -> Unit,
+    onToggleSelection: () -> Unit,
+    onAction: (TextEditAction) -> Unit,
+    onUndo: () -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    val de = prefs.activeLocale == "de"
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(268.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_back), tint = kbColors.keyText)
+            }
+            Text(
+                text = if (de) "Cursor & Textbearbeitung" else "Cursor & Text Edit",
+                color = kbColors.keyText,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = selectionActive,
+                onClick = onToggleSelection,
+                label = { Text(if (de) "Auswählen" else "Select", fontSize = 12.sp) }
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left: 4-way precision cursor D-pad
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                EditPadButton(Icons.Rounded.KeyboardArrowUp, if (de) "Hoch" else "Up") {
+                    onAction(TextEditAction.UP)
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    EditPadButton(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, if (de) "Links" else "Left") {
+                        onAction(TextEditAction.LEFT)
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (selectionActive) kbColors.actionSurface else kbColors.cardSurface,
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clickable(onClick = onToggleSelection)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = if (de) "SEL" else "SEL",
+                                color = if (selectionActive) kbColors.actionText else kbColors.keyText,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    EditPadButton(Icons.AutoMirrored.Rounded.KeyboardArrowRight, if (de) "Rechts" else "Right") {
+                        onAction(TextEditAction.RIGHT)
+                    }
+                }
+                EditPadButton(Icons.Rounded.KeyboardArrowDown, if (de) "Runter" else "Down") {
+                    onAction(TextEditAction.DOWN)
+                }
+            }
+
+            // Right: Select All, Copy, Cut, Paste, Line Home/End, Undo
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    EditActionTile(Modifier.weight(1f), Icons.Rounded.SelectAll, if (de) "Alles" else "All") {
+                        onAction(TextEditAction.SELECT_ALL)
+                    }
+                    EditActionTile(Modifier.weight(1f), Icons.Rounded.ContentCopy, if (de) "Kopieren" else "Copy") {
+                        onAction(TextEditAction.COPY)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    EditActionTile(Modifier.weight(1f), Icons.Rounded.ContentCut, if (de) "Aussch." else "Cut") {
+                        onAction(TextEditAction.CUT)
+                    }
+                    EditActionTile(Modifier.weight(1f), Icons.Rounded.ContentPaste, if (de) "Einfügen" else "Paste") {
+                        onAction(TextEditAction.PASTE)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    EditActionTile(Modifier.weight(1f), Icons.AutoMirrored.Rounded.Undo, if (de) "Zurück" else "Undo", onClick = onUndo)
+                    EditActionTile(Modifier.weight(1f), Icons.AutoMirrored.Rounded.KeyboardArrowRight, if (de) "Ende" else "End") {
+                        onAction(TextEditAction.LINE_END)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditPadButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = kbColors.modifierSurface,
+        modifier = Modifier
+            .size(52.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = contentDescription, tint = kbColors.modifierText, modifier = Modifier.size(26.dp))
+        }
+    }
+}
+
+@Composable
+private fun EditActionTile(
+    modifier: Modifier,
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = kbColors.cardSurface,
+        modifier = modifier
+            .height(52.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(4.dp)
+        ) {
+            Icon(icon, contentDescription = null, tint = kbColors.keyText, modifier = Modifier.size(18.dp))
+            Text(label, color = kbColors.keyText, fontSize = 11.sp, maxLines = 1)
+        }
+    }
+}
+
+/**
+ * In-keyboard Web Search panel (restores one of the most missed Gboard features on Android).
+ */
+@Composable
+fun QuickSearchPanel(
+    prefs: TapwingPrefs,
+    initialQuery: String,
+    onBack: () -> Unit,
+    onInsertSearchLink: (String) -> Unit,
+    onOpenInBrowser: (String) -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    val de = prefs.activeLocale == "de"
+    var query by remember(initialQuery) { mutableStateOf(initialQuery) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(250.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_back), tint = kbColors.keyText)
+            }
+            Text(
+                text = if (de) "Schnellsuche in Tastatur" else "Quick Search",
+                color = kbColors.keyText,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = {
+                Text(if (de) "Suchbegriff eingeben oder aus Feld übernehmen…" else "Enter query or use current text…")
+            }
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = { onInsertSearchLink(query) },
+                enabled = query.isNotBlank(),
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(if (de) "Link einfügen" else "Insert link", fontSize = 12.sp)
+            }
+            Button(
+                onClick = { onOpenInBrowser(query) },
+                enabled = query.isNotBlank(),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Rounded.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(if (de) "Im Browser" else "Open web", fontSize = 12.sp)
+            }
+        }
+    }
+}
 
 @Composable
 fun WritingToolsPanel(
@@ -216,7 +659,7 @@ fun WritingToolsPanel(
                 Surface(shape = RoundedCornerShape(12.dp), color = kbColors.cardAltSurface) {
                     Text(
                         text = output.badge,
-                        color = kbColors.actionSurface,
+                        color = kbColors.keyText,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -225,7 +668,6 @@ fun WritingToolsPanel(
             }
         }
 
-        // White rounded main preview card matching showcase.png
         Surface(
             shape = RoundedCornerShape(22.dp),
             color = kbColors.cardSurface,
@@ -242,7 +684,7 @@ fun WritingToolsPanel(
                     Icon(
                         imageVector = Icons.Rounded.AutoFixHigh,
                         contentDescription = null,
-                        tint = kbColors.actionSurface,
+                        tint = kbColors.keyText,
                         modifier = Modifier.size(28.dp)
                     )
                     Spacer(Modifier.height(6.dp))
@@ -325,7 +767,6 @@ fun WritingToolsPanel(
             }
         }
 
-        // Action chips row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -408,7 +849,7 @@ fun NaturalVoiceOnboardingSheet(
                 Icon(
                     imageVector = Icons.Rounded.Mic,
                     contentDescription = null,
-                    tint = kbColors.actionSurface,
+                    tint = kbColors.keyText,
                     modifier = Modifier
                         .align(Alignment.Center)
                         .size(26.dp)
@@ -647,7 +1088,7 @@ fun EmojiPanel(
                     val selected = cat.id == activeCategory.id
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = if (selected) kbColors.actionSurface.copy(alpha = 0.16f) else kbColors.boardBackground,
+                        color = if (selected) kbColors.actionSurface.copy(alpha = 0.28f) else kbColors.boardBackground,
                         modifier = Modifier.clickable { selectedCategoryId = cat.id }
                     ) {
                         Text(
