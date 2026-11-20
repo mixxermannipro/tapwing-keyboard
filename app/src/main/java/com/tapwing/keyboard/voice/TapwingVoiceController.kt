@@ -34,6 +34,7 @@ data class VoiceUiState(
     val elapsedSeconds: Int = 0,
     val isLocalWhisper: Boolean = false,
     val partialText: String = "",
+    val processingLabel: String? = null,
     val errorMessage: String? = null,
     val activeLocaleTag: String = "de-DE"
 )
@@ -100,6 +101,29 @@ class TapwingVoiceController(
 
     fun toggleMinimized() {
         _state.value = _state.value.copy(isMinimized = !_state.value.isMinimized)
+    }
+
+    fun clearError() {
+        if (_state.value.errorMessage != null) {
+            _state.value = _state.value.copy(errorMessage = null)
+        }
+    }
+
+    fun beginExternalProcessing(label: String) {
+        mainHandler.post {
+            _state.value = _state.value.copy(
+                isListening = false,
+                isProcessing = true,
+                processingLabel = label,
+                errorMessage = null
+            )
+        }
+    }
+
+    fun finishExternalProcessing(errorMessage: String? = null) {
+        mainHandler.post {
+            _state.value = VoiceUiState(errorMessage = errorMessage)
+        }
     }
 
     fun startListening(
@@ -401,38 +425,68 @@ class TapwingVoiceController(
             if (usingLocalAudioCapture) {
                 val modelFile = activeWhisperFile
                 val locale = activeLocale
+                val base = KeyboardLocales.baseLang(locale)
                 val gen = sessionGeneration
                 stopRequested = true
-                _state.value = _state.value.copy(isListening = false, isProcessing = true)
+                _state.value = _state.value.copy(
+                    isListening = false,
+                    isProcessing = true,
+                    processingLabel = if (base == "de") "Transkribiere lokal…" else "Transcribing locally…"
+                )
                 controllerScope.launch {
-                    val wavFile = wavRecorder.stopAndGetFile()
+                    val recResult = wavRecorder.stopAndGetResult()
+                    val wavFile = recResult?.file
                     if (gen != sessionGeneration) {
                         wavFile?.delete()
                         return@launch
                     }
-                    if (wavFile == null || modelFile == null) {
+                    if (recResult == null || wavFile == null || modelFile == null || recResult.durationMs < 250L) {
+                        wavFile?.delete()
                         finishSession()
-                        _state.value = VoiceUiState()
+                        _state.value = VoiceUiState(
+                            errorMessage = if (base == "de") "Zu kurz — erst sprechen, dann ✓" else "Too short — speak before ✓"
+                        )
+                        return@launch
+                    }
+                    if (recResult.peakSampleAbs < 35) {
+                        wavFile.delete()
+                        finishSession()
+                        _state.value = VoiceUiState(
+                            errorMessage = if (base == "de") "Kein Mikrofonsignal erkannt" else "No microphone signal detected"
+                        )
                         return@launch
                     }
                     val langCode = KeyboardLocales.baseLang(locale)
                     val initialPrompt = initialPromptProvider().take(300)
-                    val res = LocalInferenceEngine.transcribeWav(
-                        wavPath = wavFile.absolutePath,
-                        modelFile = modelFile,
-                        languageCode = langCode,
-                        initialPrompt = initialPrompt.takeIf { it.isNotBlank() }
-                    )
-                    wavFile.delete()
+                    val res = try {
+                        LocalInferenceEngine.transcribeWav(
+                            wavPath = wavFile.absolutePath,
+                            modelFile = modelFile,
+                            languageCode = langCode,
+                            initialPrompt = initialPrompt.takeIf { it.isNotBlank() }
+                        )
+                    } finally {
+                        wavFile.delete()
+                    }
                     if (gen != sessionGeneration) return@launch
                     finishSession()
                     val transcript = res.getOrNull()?.trim().orEmpty()
                     if (transcript.isNotEmpty()) {
-                        _state.value = VoiceUiState()
+                        _state.value = VoiceUiState(
+                            isListening = false,
+                            isProcessing = true,
+                            isLocalWhisper = true,
+                            processingLabel = if (base == "de") "Bereinige Text…" else "Polishing text…"
+                        )
                         onTranscriptReady(transcript)
                     } else {
+                        val fallbackErr = if (base == "de") {
+                            "Keine Sprache verstanden — bitte deutlicher sprechen"
+                        } else {
+                            "No speech detected — please try again"
+                        }
                         _state.value = VoiceUiState(
-                            errorMessage = res.exceptionOrNull()?.localizedMessage
+                            errorMessage = res.exceptionOrNull()?.localizedMessage ?: fallbackErr
                         )
                     }
                 }

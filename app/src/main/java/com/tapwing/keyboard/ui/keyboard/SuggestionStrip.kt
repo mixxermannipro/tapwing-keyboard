@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -100,22 +101,24 @@ fun SuggestionStrip(
     onStartVoice: () -> Unit,
     onFinishVoice: () -> Unit,
     onCancelVoice: () -> Unit,
-    onToggleVoiceMinimize: () -> Unit
+    onToggleVoiceMinimize: () -> Unit,
+    onDismissVoiceError: () -> Unit = {}
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val view = LocalView.current
     val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
 
     val voiceActive = voiceState.isListening || voiceState.isProcessing
-    val showUndo = proactiveUndo != null && prefs.proactiveUndo
-    val showOtp = !showUndo && !otpChipText.isNullOrBlank() && !isTyping
-    val showShot = !showUndo && !showOtp && recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
-    val showAutofill = !showUndo && !showOtp && !showShot && inlineAutofillViews.isNotEmpty() && !isTyping
-    val showSuggestions = !showUndo && !showOtp && !showShot && !showAutofill && suggestions.isNotEmpty() &&
+    val showVoiceError = !voiceActive && !voiceState.errorMessage.isNullOrBlank() && !isTyping
+    val showUndo = !showVoiceError && proactiveUndo != null && prefs.proactiveUndo
+    val showOtp = !showVoiceError && !showUndo && !otpChipText.isNullOrBlank() && !isTyping
+    val showShot = !showVoiceError && !showUndo && !showOtp && recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
+    val showAutofill = !showVoiceError && !showUndo && !showOtp && !showShot && inlineAutofillViews.isNotEmpty() && !isTyping
+    val showSuggestions = !showVoiceError && !showUndo && !showOtp && !showShot && !showAutofill && suggestions.isNotEmpty() &&
         (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
-    // 0 = quick bar, 1 = undo / otp / screenshot chip, 2 = suggestion cells, 3 = inline autofill (Bitwarden, etc.)
+    // 0 = quick bar, 1 = error / undo / otp / screenshot chip, 2 = suggestion cells, 3 = inline autofill (Bitwarden, etc.)
     val middleKind = when {
-        showUndo || showOtp || showShot -> 1
+        showVoiceError || showUndo || showOtp || showShot -> 1
         showAutofill -> 3
         showSuggestions -> 2
         else -> 0
@@ -192,6 +195,40 @@ fun SuggestionStrip(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            if (showVoiceError && !voiceState.errorMessage.isNullOrBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = MaterialTheme.colorScheme.errorContainer,
+                                    modifier = Modifier.clickable(onClick = onDismissVoiceError)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.WarningAmber,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = voiceState.errorMessage,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
                             if (proactiveUndo != null && showUndo) {
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
@@ -554,6 +591,7 @@ private fun VoiceToolbarRow(
     }
     val statusText = when {
         voiceState.partialText.isNotBlank() -> voiceState.partialText
+        voiceState.isProcessing && !voiceState.processingLabel.isNullOrBlank() -> voiceState.processingLabel
         voiceState.isProcessing && voiceState.isLocalWhisper -> stringResource(R.string.voice_processing_local)
         voiceState.isProcessing -> stringResource(R.string.voice_tidying_up)
         else -> "$timerText${stringResource(R.string.voice_hint_finish)}"
