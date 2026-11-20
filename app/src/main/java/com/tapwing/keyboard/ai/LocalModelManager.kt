@@ -51,9 +51,12 @@ class LocalModelManager(context: Context) {
                 next[spec.id] = current
             } else {
                 val file = modelFileFor(spec)
-                if (file.isFile && file.length() > MIN_VALID_MODEL_BYTES) {
+                if (file.isFile && file.length() > MIN_VALID_MODEL_BYTES && hasValidModelHeader(file, spec.kind)) {
                     next[spec.id] = ModelInstallState.Installed(file.absolutePath, file.length())
                 } else {
+                    if (file.isFile && (file.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(file, spec.kind))) {
+                        file.delete()
+                    }
                     next[spec.id] = ModelInstallState.NotInstalled
                 }
             }
@@ -71,7 +74,7 @@ class LocalModelManager(context: Context) {
     fun installedModelFile(modelId: String): File? {
         val spec = LocalModelCatalog.findById(modelId) ?: return null
         val f = modelFileFor(spec)
-        return if (f.isFile && f.length() > MIN_VALID_MODEL_BYTES) f else null
+        return if (f.isFile && f.length() > MIN_VALID_MODEL_BYTES && hasValidModelHeader(f, spec.kind)) f else null
     }
 
     fun firstInstalledModel(kind: LocalModelKind, preferredId: String): Pair<LocalModelSpec, File>? {
@@ -100,9 +103,9 @@ class LocalModelManager(context: Context) {
                     val progress = (downloaded.toFloat() / effectiveTotal.toFloat()).coerceIn(0f, 0.99f)
                     updateState(spec.id, ModelInstallState.Downloading(progress, downloaded, effectiveTotal))
                 }
-                if (!part.isFile || part.length() <= MIN_VALID_MODEL_BYTES) {
+                if (!part.isFile || part.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(part, spec.kind)) {
                     part.delete()
-                    updateState(spec.id, ModelInstallState.Error("Downloaded file was incomplete"))
+                    updateState(spec.id, ModelInstallState.Error("Downloaded file was incomplete or invalid"))
                     return@launch
                 }
                 if (target.exists()) target.delete()
@@ -161,9 +164,9 @@ class LocalModelManager(context: Context) {
                 }
             } ?: error("Cannot open selected file")
 
-            if (!part.isFile || part.length() <= MIN_VALID_MODEL_BYTES) {
+            if (!part.isFile || part.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(part, spec.kind)) {
                 part.delete()
-                updateState(spec.id, ModelInstallState.Error("Selected file is too small or invalid"))
+                updateState(spec.id, ModelInstallState.Error("Selected file is not a valid Whisper/GGUF model"))
                 return@withContext false
             }
             if (target.exists()) target.delete()
@@ -246,5 +249,19 @@ class LocalModelManager(context: Context) {
 
     companion object {
         private const val MIN_VALID_MODEL_BYTES = 1_000_000L
+
+        internal fun hasValidModelHeader(file: File, kind: LocalModelKind): Boolean {
+            return runCatching {
+                val hdr = ByteArray(4)
+                file.inputStream().use { input ->
+                    if (input.read(hdr) < 4) return false
+                }
+                val s = String(hdr, Charsets.US_ASCII)
+                when (kind) {
+                    LocalModelKind.CLEANUP_LLM -> s == "GGUF"
+                    LocalModelKind.WHISPER_STT -> s in setOf("lmgg", "ggml", "fmgg", "ggmf", "tjgg", "ggjt", "GGUF")
+                }
+            }.getOrDefault(false)
+        }
     }
 }

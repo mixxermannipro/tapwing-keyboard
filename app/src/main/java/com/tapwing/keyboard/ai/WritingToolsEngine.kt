@@ -90,10 +90,10 @@ class WritingToolsEngine(
     }
 
     /**
-     * Cleans up voice dictation text using:
-     * 1) Installed Local LLM (if voiceAiPolish is enabled and an LLM model is downloaded)
-     * 2) Optional Cloud AI (if user explicitly picked a cloud provider + API key + voiceAiPolish)
-     * 3) Enhanced offline rule-based NaturalVoiceCleaner (instant fallback)
+     * Cleans up voice dictation text using the configured AI backend:
+     * 1) Local LLM (when prefs.aiProvider == LOCAL_LLM, or Cloud fallback when no API key is configured)
+     * 2) Cloud AI (when Gemini/OpenAI provider is chosen with an API key)
+     * 3) Instant offline rule-based NaturalVoiceCleaner (when LOCAL_RULES or as fallback)
      */
     suspend fun cleanupVoiceTranscript(
         rawTranscript: String,
@@ -102,7 +102,8 @@ class WritingToolsEngine(
         if (rawTranscript.isBlank()) return WritingToolsOutput("", "On-Device")
 
         val installed = modelManager?.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
-        if (prefs.voiceAiPolish && installed != null) {
+
+        if (prefs.voiceAiPolish && prefs.aiProvider == AiProviderType.LOCAL_LLM && installed != null) {
             val (spec, file) = installed
             val sysPrompt = CleanupPromptBuilder.resolveSystemPrompt(
                 customPrompt = prefs.voiceCleanupPrompt,
@@ -117,10 +118,13 @@ class WritingToolsEngine(
                 userText = rawTranscript
             )
             if (llmRes.isSuccess) {
-                return WritingToolsOutput(
-                    rewrittenText = llmRes.getOrThrow(),
-                    badge = "${spec.displayName} (Local)"
-                )
+                val candidate = llmRes.getOrThrow()
+                if (!looksOverTruncated(rawTranscript, candidate)) {
+                    return WritingToolsOutput(
+                        rewrittenText = candidate,
+                        badge = "${spec.displayName} (Local)"
+                    )
+                }
             }
         }
 
@@ -146,6 +150,29 @@ class WritingToolsEngine(
                         badge = res.providerLabel
                     )
                 }
+            } else if (installed != null) {
+                val (spec, file) = installed
+                val sysPrompt = CleanupPromptBuilder.resolveSystemPrompt(
+                    customPrompt = prefs.voiceCleanupPrompt,
+                    useSystemLanguage = prefs.voiceCleanupUseSystemLanguage,
+                    activeKeyboardLocale = prefs.activeLocale,
+                    customVocabulary = dictionaryStore?.allKnownVocabularyWords().orEmpty()
+                )
+                val llmRes = LocalInferenceEngine.generateWithLocalLlm(
+                    modelFile = file,
+                    spec = spec,
+                    systemPrompt = sysPrompt,
+                    userText = rawTranscript
+                )
+                if (llmRes.isSuccess) {
+                    val candidate = llmRes.getOrThrow()
+                    if (!looksOverTruncated(rawTranscript, candidate)) {
+                        return WritingToolsOutput(
+                            rewrittenText = candidate,
+                            badge = "${spec.displayName} (Local)"
+                        )
+                    }
+                }
             }
         }
 
@@ -159,6 +186,16 @@ class WritingToolsEngine(
             rewrittenText = ruleCleaned,
             badge = "On-Device Rules"
         )
+    }
+
+    private fun looksOverTruncated(raw: String, cleaned: String): Boolean {
+        val rawWords = raw.trim().split(Regex("""\s+""")).count { it.isNotBlank() }
+        if (rawWords < 6) return false
+        val lower = raw.lowercase()
+        val hasShortenCmd = lower.contains("kürzer") || lower.contains("shorter") || lower.contains("zusammenfass") || lower.contains("summarize")
+        if (hasShortenCmd) return false
+        val cleanWords = cleaned.trim().split(Regex("""\s+""")).count { it.isNotBlank() }
+        return cleanWords * 100 < rawWords * 45
     }
 
     private suspend fun runWithLocalLlm(

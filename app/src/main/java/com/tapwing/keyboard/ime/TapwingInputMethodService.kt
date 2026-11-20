@@ -240,9 +240,7 @@ class TapwingInputMethodService :
             modelManager = modelManager,
             onTranscriptReady = { raw -> handleVoiceTranscript(raw) },
             onNeedAudioPermission = { PermissionBridgeActivity.requestRecordAudio(this) },
-            initialPromptProvider = {
-                dictionaryStore.allKnownVocabularyWords().take(25).joinToString(", ")
-            }
+            initialPromptProvider = { "" }
         )
 
         serviceScope.launch {
@@ -434,6 +432,7 @@ class TapwingInputMethodService :
                     onFinishVoice = { voiceController.finishAndCommit() },
                     onCancelVoice = { voiceController.cancel() },
                     onToggleVoiceMinimize = { voiceController.toggleMinimized() },
+                    onDismissVoiceError = { voiceController.clearError() },
                     onHideKeyboard = ::hideKeyboard
                 )
             }
@@ -603,6 +602,8 @@ class TapwingInputMethodService :
         super.onTrimMemory(level)
         if (level >= TRIM_MEMORY_BACKGROUND) {
             LocalInferenceEngine.unloadAll()
+        } else if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            LocalInferenceEngine.unloadWhisper()
         }
     }
 
@@ -1124,6 +1125,7 @@ class TapwingInputMethodService :
             panelMode = KeyboardPanelMode.VOICE_ONBOARDING
             return
         }
+        panelMode = KeyboardPanelMode.KEYS
         voiceController.startListening(
             locale = currentPrefs.activeLocale,
             strictLanguageLock = currentPrefs.voiceStrictLanguageLock,
@@ -1135,6 +1137,8 @@ class TapwingInputMethodService :
     private fun handleVoiceTranscript(rawTranscript: String) {
         if (currentPrefs.voiceMode == VoiceDictationMode.STANDARD) {
             commitTextWithSpaceSafety(rawTranscript)
+            statsStore.recordVoiceDictation(rawTranscript.length, currentPrefs.incognitoMode)
+            voiceController.finishExternalProcessing()
             return
         }
 
@@ -1147,41 +1151,64 @@ class TapwingInputMethodService :
         )
 
         when (parsed) {
-            is VoiceCommandResult.DeleteLastWord -> deletePreviousWord()
+            is VoiceCommandResult.DeleteLastWord -> {
+                deletePreviousWord()
+                voiceController.finishExternalProcessing()
+            }
             is VoiceCommandResult.RewriteAction -> {
                 val fieldText = readWholeFieldText()
                 if (fieldText.isNotBlank()) {
+                    val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
+                    voiceController.beginExternalProcessing(
+                        if (de) "Überarbeite Text mit KI…" else "Rewriting with AI…"
+                    )
                     serviceScope.launch {
-                        val out = writingToolsEngine.runAction(fieldText, parsed.action, currentPrefs)
-                        if (out.rewrittenText.isNotBlank()) {
-                            replaceWholeFieldText(out.rewrittenText)
-                            val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
-                            undoManager.record(
-                                beforeText = fieldText,
-                                afterText = out.rewrittenText,
-                                reason = UndoReason.AI_REWRITE,
-                                label = if (de) "KI rückgängig" else "Undo AI edit"
-                            )
-                            proactiveUndoState = undoManager.activeBanner()
+                        try {
+                            val out = writingToolsEngine.runAction(fieldText, parsed.action, currentPrefs)
+                            if (out.rewrittenText.isNotBlank()) {
+                                replaceWholeFieldText(out.rewrittenText)
+                                undoManager.record(
+                                    beforeText = fieldText,
+                                    afterText = out.rewrittenText,
+                                    reason = UndoReason.AI_REWRITE,
+                                    label = if (de) "KI rückgängig" else "Undo AI edit"
+                                )
+                                proactiveUndoState = undoManager.activeBanner()
+                            }
+                        } finally {
+                            voiceController.finishExternalProcessing()
                         }
                     }
+                } else {
+                    voiceController.finishExternalProcessing()
                 }
             }
             is VoiceCommandResult.Text -> {
+                val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
+                val willRunLlmOrCloud = currentPrefs.voiceAiPolish &&
+                    (currentPrefs.aiProvider != com.tapwing.keyboard.data.AiProviderType.LOCAL_RULES)
+                if (willRunLlmOrCloud) {
+                    voiceController.beginExternalProcessing(
+                        if (de) "Bereinige mit KI…" else "Cleaning up with AI…"
+                    )
+                }
                 serviceScope.launch {
-                    val out = writingToolsEngine.cleanupVoiceTranscript(rawTranscript, currentPrefs)
-                    val finalText = out.rewrittenText.ifBlank { parsed.cleanedText }
-                    if (finalText.isNotBlank()) {
-                        commitTextWithSpaceSafety(finalText)
-                        statsStore.recordVoiceDictation(finalText.length, currentPrefs.incognitoMode)
-                        val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
-                        undoManager.record(
-                            beforeText = "",
-                            afterText = finalText,
-                            reason = UndoReason.VOICE_INSERT,
-                            label = if (de) "Diktat rückgängig" else "Undo dictation"
-                        )
-                        proactiveUndoState = undoManager.activeBanner()
+                    try {
+                        val out = writingToolsEngine.cleanupVoiceTranscript(rawTranscript, currentPrefs)
+                        val finalText = out.rewrittenText.ifBlank { parsed.cleanedText }
+                        if (finalText.isNotBlank()) {
+                            commitTextWithSpaceSafety(finalText)
+                            statsStore.recordVoiceDictation(finalText.length, currentPrefs.incognitoMode)
+                            undoManager.record(
+                                beforeText = "",
+                                afterText = finalText,
+                                reason = UndoReason.VOICE_INSERT,
+                                label = if (de) "Diktat rückgängig" else "Undo dictation"
+                            )
+                            proactiveUndoState = undoManager.activeBanner()
+                        }
+                    } finally {
+                        voiceController.finishExternalProcessing()
                     }
                 }
             }

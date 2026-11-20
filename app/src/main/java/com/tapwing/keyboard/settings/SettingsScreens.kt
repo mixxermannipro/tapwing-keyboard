@@ -125,10 +125,14 @@ import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.CleanupPromptBuilder
 import com.tapwing.keyboard.ai.CloudAiClient
 import com.tapwing.keyboard.ai.CloudAiResult
+import com.tapwing.keyboard.ai.LocalInferenceEngine
 import com.tapwing.keyboard.ai.LocalModelCatalog
+import com.tapwing.keyboard.ai.LocalModelKind
 import com.tapwing.keyboard.ai.LocalModelManager
 import com.tapwing.keyboard.ai.LocalModelSpec
 import com.tapwing.keyboard.ai.ModelInstallState
+import com.tapwing.keyboard.voice.VoiceSelfTest
+import com.tapwing.keyboard.voice.WavAudioRecorder
 import com.tapwing.keyboard.clipboard.ScreenshotMonitor
 import com.tapwing.keyboard.data.AiProviderType
 import com.tapwing.keyboard.data.ClipboardRetention
@@ -153,8 +157,10 @@ import com.tapwing.keyboard.ui.keyboard.icon
 import com.tapwing.keyboard.ui.keyboard.isHighlighted
 import com.tapwing.keyboard.ui.keyboard.title
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.math.roundToInt
 
 enum class SettingsRoute {
@@ -2312,6 +2318,195 @@ private fun VoiceSettingsScreen(
                         textColor = if (micGranted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
                     ) {
                         micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            }
+        }
+
+        item {
+            var diagRunning by remember { mutableStateOf(false) }
+            var diagReport by remember { mutableStateOf<String?>(null) }
+            val installedWhisper = remember(modelStates, prefs.selectedWhisperModelId) {
+                modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, prefs.selectedWhisperModelId)
+            }
+            val installedLlm = remember(modelStates, prefs.selectedLocalLlmId) {
+                modelManager.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
+            }
+            Column {
+                AppleSectionHeader(if (de) "On-Device Diagnose & Test" else "On-Device Diagnostics")
+                AppleGroupedSurface {
+                    MinimalValueRow(
+                        if (de) "Aktives Whisper-Modell" else "Active Whisper model",
+                        installedWhisper?.first?.displayName ?: (if (de) "Keines geladen" else "None")
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalValueRow(
+                        if (de) "Aktive KI-Bereinigung" else "Active cleanup AI",
+                        when (prefs.aiProvider) {
+                            AiProviderType.LOCAL_LLM -> installedLlm?.first?.displayName ?: (if (de) "Kein GGUF" else "No GGUF")
+                            AiProviderType.LOCAL_RULES -> if (de) "On-Device Regeln" else "Local Rules"
+                            AiProviderType.GEMINI_API -> "Gemini API"
+                            AiProviderType.OPENAI_COMPATIBLE -> "OpenAI API"
+                        }
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                if (!micGranted) {
+                                    micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    return@FilledTonalButton
+                                }
+                                val target = installedWhisper
+                                if (target == null) {
+                                    diagReport = if (de) "Bitte zuerst ein Whisper-Modell laden." else "Please download a Whisper model first."
+                                    return@FilledTonalButton
+                                }
+                                diagRunning = true
+                                diagReport = if (de) "Aufnahme läuft (3 Sek.)… jetzt sprechen!" else "Recording (3 sec)… speak now!"
+                                scope.launch {
+                                    val wav = File(context.cacheDir, "tapwing_diag_voice.wav")
+                                    val rec = WavAudioRecorder()
+                                    val started = rec.start(wav, {}, {}, { err ->
+                                        diagReport = "Mic error: $err"
+                                    })
+                                    if (!started) {
+                                        diagRunning = false
+                                        return@launch
+                                    }
+                                    delay(3000L)
+                                    val result = rec.stopAndGetResult()
+                                    if (result == null) {
+                                        diagRunning = false
+                                        diagReport = if (de) "Keine Audiodatei erzeugt." else "Failed to record WAV."
+                                        return@launch
+                                    }
+                                    diagReport = if (de) {
+                                        "Transkribiere (${result.durationMs} ms, Pegel ${result.peakSampleAbs})…"
+                                    } else {
+                                        "Transcribing (${result.durationMs} ms, peak ${result.peakSampleAbs})…"
+                                    }
+                                    val t0 = System.currentTimeMillis()
+                                    val tr = LocalInferenceEngine.transcribeWav(
+                                        wavPath = result.file.absolutePath,
+                                        modelFile = target.second,
+                                        languageCode = KeyboardLocales.baseLang(prefs.activeLocale)
+                                    )
+                                    val ms = System.currentTimeMillis() - t0
+                                    result.file.delete()
+                                    diagRunning = false
+                                    diagReport = tr.fold(
+                                        onSuccess = { txt ->
+                                            "Mic Peak=${result.peakSampleAbs}, Whisper=${ms}ms → '${txt.ifBlank { "(Stille)" }}'"
+                                        },
+                                        onFailure = { err ->
+                                            "Whisper error (${ms}ms): ${err.localizedMessage}"
+                                        }
+                                    )
+                                }
+                            },
+                            enabled = !diagRunning,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (de) "3s Mic + Whisper" else "3s Mic + Whisper", fontSize = 12.sp)
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                val target = installedLlm
+                                if (target == null) {
+                                    diagReport = if (de) "Kein lokales GGUF-Modell installiert." else "No local GGUF LLM installed."
+                                    return@FilledTonalButton
+                                }
+                                diagRunning = true
+                                diagReport = if (de) "Teste ${target.first.displayName}…" else "Testing ${target.first.displayName}…"
+                                scope.launch {
+                                    val prompt = CleanupPromptBuilder.resolveSystemPrompt(
+                                        customPrompt = prefs.voiceCleanupPrompt,
+                                        useSystemLanguage = prefs.voiceCleanupUseSystemLanguage,
+                                        activeKeyboardLocale = prefs.activeLocale
+                                    )
+                                    val t0 = System.currentTimeMillis()
+                                    val res = LocalInferenceEngine.generateWithLocalLlm(
+                                        modelFile = target.second,
+                                        spec = target.first,
+                                        systemPrompt = prompt,
+                                        userText = "äh hallo ich wollte fragen treffen wir uns um 14 uhr nein warte 15 uhr im büro"
+                                    )
+                                    val ms = System.currentTimeMillis() - t0
+                                    diagRunning = false
+                                    diagReport = res.fold(
+                                        onSuccess = { out -> "${target.first.displayName} (${ms}ms) → '$out'" },
+                                        onFailure = { err -> "LLM error (${ms}ms): ${err.localizedMessage}" }
+                                    )
+                                }
+                            },
+                            enabled = !diagRunning,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (de) "Lokale KI testen" else "Test Local LLM", fontSize = 12.sp)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                val target = installedWhisper
+                                if (target == null) {
+                                    diagReport = if (de) "Bitte zuerst ein Whisper-Modell laden." else "Please download a Whisper model first."
+                                    return@FilledTonalButton
+                                }
+                                diagRunning = true
+                                diagReport = if (de) "Erzeuge deutsches TTS-Audio & transkribiere…" else "Synthesizing German TTS & transcribing…"
+                                scope.launch {
+                                    val wav = File(context.cacheDir, "tapwing_tts_16k.wav")
+                                    val synth = VoiceSelfTest.synthesizeGermanWav16k(
+                                        context = context,
+                                        text = "Hallo, treffen wir uns morgen um fünfzehn Uhr im Büro?",
+                                        dest16kWav = wav
+                                    )
+                                    if (synth.isFailure) {
+                                        diagRunning = false
+                                        diagReport = "TTS Fehler: ${synth.exceptionOrNull()?.localizedMessage}"
+                                        return@launch
+                                    }
+                                    val (file, wavInfo) = synth.getOrThrow()
+                                    val t0 = System.currentTimeMillis()
+                                    val tr = LocalInferenceEngine.transcribeWav(
+                                        wavPath = file.absolutePath,
+                                        modelFile = target.second,
+                                        languageCode = KeyboardLocales.baseLang(prefs.activeLocale)
+                                    )
+                                    val ms = System.currentTimeMillis() - t0
+                                    file.delete()
+                                    diagRunning = false
+                                    diagReport = tr.fold(
+                                        onSuccess = { txt -> "TTS ($wavInfo) → Whisper=${ms}ms → '${txt.ifBlank { "(leer)" }}'" },
+                                        onFailure = { err -> "Whisper Fehler (${ms}ms): ${err.localizedMessage}" }
+                                    )
+                                }
+                            },
+                            enabled = !diagRunning,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (de) "TTS-Sprache → Whisper testen" else "Test TTS Speech → Whisper", fontSize = 12.sp)
+                        }
+                    }
+                    if (!diagReport.isNullOrBlank()) {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        Text(
+                            text = diagReport!!,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
                     }
                 }
             }

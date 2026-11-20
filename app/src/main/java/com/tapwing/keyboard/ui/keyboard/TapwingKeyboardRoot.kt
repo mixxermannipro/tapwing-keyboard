@@ -139,6 +139,7 @@ fun TapwingKeyboardRoot(
     onFinishVoice: () -> Unit,
     onCancelVoice: () -> Unit,
     onToggleVoiceMinimize: () -> Unit,
+    onDismissVoiceError: () -> Unit = {},
     onHideKeyboard: () -> Unit
 ) {
     val baseCtx = LocalContext.current
@@ -358,7 +359,8 @@ fun TapwingKeyboardRoot(
                                         onStartVoice = onStartVoice,
                                         onFinishVoice = onFinishVoice,
                                         onCancelVoice = onCancelVoice,
-                                        onToggleVoiceMinimize = onToggleVoiceMinimize
+                                        onToggleVoiceMinimize = onToggleVoiceMinimize,
+                                        onDismissVoiceError = onDismissVoiceError
                                     )
 
                                     if (!((voiceState.isListening || voiceState.isProcessing) && voiceState.isMinimized)) {
