@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.EmojiEmotions
 import androidx.compose.material.icons.rounded.Height
@@ -33,6 +34,7 @@ fun QuickBarAction.icon(): ImageVector = when (this) {
     QuickBarAction.APPLE_MODE -> Icons.Rounded.Smartphone
     QuickBarAction.LANGUAGE -> Icons.Rounded.Language
     QuickBarAction.UNDO -> Icons.AutoMirrored.Rounded.Undo
+    QuickBarAction.SNIPPETS -> Icons.Rounded.Description
 }
 
 fun QuickBarAction.shortLabel(de: Boolean, prefs: TapwingPrefs): String = when (this) {
@@ -53,6 +55,7 @@ fun QuickBarAction.shortLabel(de: Boolean, prefs: TapwingPrefs): String = when (
     QuickBarAction.APPLE_MODE -> if (de) "Apple Glas" else "Liquid Glass"
     QuickBarAction.LANGUAGE -> if (de) "Sprache" else "Language"
     QuickBarAction.UNDO -> if (de) "Zurück" else "Undo"
+    QuickBarAction.SNIPPETS -> if (de) "Bausteine" else "Snippets"
 }
 
 fun QuickBarAction.title(de: Boolean): String = when (this) {
@@ -69,6 +72,7 @@ fun QuickBarAction.title(de: Boolean): String = when (this) {
     QuickBarAction.APPLE_MODE -> if (de) "Apple Modus (Liquid Glass)" else "Apple Mode (Liquid Glass)"
     QuickBarAction.LANGUAGE -> if (de) "Sprache wechseln (DE/EN)" else "Switch language (DE/EN)"
     QuickBarAction.UNDO -> if (de) "Letzte Änderung rückgängig" else "Undo last change"
+    QuickBarAction.SNIPPETS -> if (de) "Textbausteine mit Platzhaltern" else "Multi-line text snippets"
 }
 
 fun QuickBarAction.description(de: Boolean): String = when (this) {
@@ -85,6 +89,7 @@ fun QuickBarAction.description(de: Boolean): String = when (this) {
     QuickBarAction.APPLE_MODE -> if (de) "Liquid Glass Tasten umschalten" else "Toggle Liquid Glass keyboard"
     QuickBarAction.LANGUAGE -> if (de) "Zwischen Deutsch & Englisch umschalten" else "Toggle German & English layout"
     QuickBarAction.UNDO -> if (de) "Letzte Autokorrektur oder KI-Edit zurücknehmen" else "Revert last autocorrect or AI edit"
+    QuickBarAction.SNIPPETS -> if (de) "Mehrzeilige Vorlagen mit {DATUM}, {NAME} & Co. einfügen" else "Insert multi-line templates with dynamic placeholders"
 }
 
 fun QuickBarAction.isHighlighted(prefs: TapwingPrefs): Boolean = when (this) {

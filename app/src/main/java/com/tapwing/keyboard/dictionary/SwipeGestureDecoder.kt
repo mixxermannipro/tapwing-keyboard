@@ -28,7 +28,8 @@ object SwipeGestureDecoder {
         previousWord: String? = null,
         dictionaryStore: AdaptiveDictionaryStore? = null,
         secondaryLocales: List<String> = emptyList(),
-        atSentenceStart: Boolean = false
+        atSentenceStart: Boolean = false,
+        offlinePack: LoadedDictionaryPack? = null
     ): List<String> {
         if (points.size < 2 || keyCenters.isEmpty()) return emptyList()
 
@@ -46,6 +47,7 @@ object SwipeGestureDecoder {
         val pool = linkedSetOf<String>()
         dictionaryStore?.allKnownVocabularyWords()?.let { pool.addAll(it) }
         pool.addAll(LanguageVocabularies.vocabularyFor(locale))
+        offlinePack?.topSwipePool?.let { pool.addAll(it) }
         secondaryLocales.forEach { sec ->
             pool.addAll(LanguageVocabularies.vocabularyFor(sec))
         }

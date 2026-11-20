@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
@@ -103,9 +104,12 @@ import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.ai.WritingToolsOutput
 import com.tapwing.keyboard.clipboard.ClipboardClip
+import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.TapwingPrefs
+import com.tapwing.keyboard.dictionary.SnippetPlaceholderResolver
+import com.tapwing.keyboard.dictionary.TextSnippet
 import com.tapwing.keyboard.emoji.EmojiCatalog
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
 import kotlinx.coroutines.Dispatchers
@@ -132,6 +136,7 @@ fun ToolsHubPanel(
     onOpenCustomizeBar: () -> Unit,
     onOpenWritingTools: () -> Unit,
     onOpenClipboard: () -> Unit,
+    onOpenSnippets: () -> Unit = {},
     onOpenResize: () -> Unit,
     onOpenTextEdit: () -> Unit,
     onOpenScanText: () -> Unit,
@@ -156,6 +161,7 @@ fun ToolsHubPanel(
     val items = listOf(
         ToolTileSpec(if (de) "Schreibhilfe" else "Writing", Icons.Rounded.AutoAwesome, onClick = onOpenWritingTools),
         ToolTileSpec(if (de) "Ablage" else "Clipboard", Icons.Rounded.ContentPaste, onClick = onOpenClipboard),
+        ToolTileSpec(if (de) "Bausteine" else "Snippets", Icons.Rounded.Description, onClick = onOpenSnippets),
         ToolTileSpec(if (de) "Größe" else "Resize", Icons.Rounded.Height, onClick = onOpenResize),
         ToolTileSpec(if (de) "Text-Edit" else "Text edit", Icons.Rounded.OpenWith, onClick = onOpenTextEdit),
         ToolTileSpec(if (de) "Scannen" else "Scan OCR", Icons.Rounded.DocumentScanner, onClick = onOpenScanText),
@@ -1127,6 +1133,122 @@ fun ClipboardPanel(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SnippetsPanel(
+    prefs: TapwingPrefs,
+    snippets: List<TextSnippet>,
+    latestClipboardText: String,
+    onBack: () -> Unit,
+    onInsertSnippet: (TextSnippet, String) -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_back), tint = kbColors.keyText)
+            }
+            Text(
+                text = if (de) "Textbausteine (${snippets.size})" else "Text Snippets (${snippets.size})",
+                color = kbColors.keyText,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        if (snippets.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (de) "Erstelle Bausteine in Einstellungen → Wörterbuch."
+                    else "Create snippets in Settings → Dictionary.",
+                    color = kbColors.keyHintText,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                items(snippets, key = { it.id }) { snippet ->
+                    val resolved = remember(snippet, prefs.activeLocale, latestClipboardText, prefs.snippetUserName, prefs.snippetUserEmail) {
+                        SnippetPlaceholderResolver.resolve(
+                            template = snippet.body,
+                            locale = prefs.activeLocale,
+                            latestClipboardText = latestClipboardText,
+                            userName = prefs.snippetUserName,
+                            userEmail = prefs.snippetUserEmail
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = kbColors.cardSurface,
+                        modifier = Modifier.clickable { onInsertSnippet(snippet, resolved) }
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = kbColors.actionSurface.copy(alpha = 0.22f)
+                                ) {
+                                    Text(
+                                        text = snippet.trigger,
+                                        color = kbColors.keyText,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(
+                                    text = snippet.title,
+                                    color = kbColors.keyText,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Text(
+                                text = resolved,
+                                color = kbColors.keyHintText,
+                                fontSize = 11.sp,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }

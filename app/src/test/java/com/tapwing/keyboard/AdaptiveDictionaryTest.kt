@@ -94,4 +94,40 @@ class AdaptiveDictionaryTest {
         assertNotNull(store.lookupShortcut("/woche", "de"))
         assertNotNull(store.lookupShortcut("/jahr", "en"))
     }
+
+    @Test
+    fun perAppContextLearnsWordsAndWritingTonesSeparately() {
+        val store = AdaptiveDictionaryStore(storageFile = null)
+
+        // Teach "Quartalsbericht" specifically for Gmail and "Brudi" for WhatsApp
+        repeat(4) {
+            store.recordTypedWord(
+                word = "Quartalsbericht",
+                previousWord = null,
+                learningEnabled = true,
+                incognito = false,
+                locale = "de",
+                appPackage = "com.google.android.gm"
+            )
+            store.recordTypedWord(
+                word = "Quartalsplan",
+                previousWord = null,
+                learningEnabled = true,
+                incognito = false,
+                locale = "de",
+                appPackage = "com.slack"
+            )
+        }
+
+        val gmCandidates = store.rankedPrefixCandidates("Quar", appPackage = "com.google.android.gm")
+        val slackCandidates = store.rankedPrefixCandidates("Quar", appPackage = "com.slack")
+        assertEquals("Quartalsbericht", gmCandidates.first())
+        assertEquals("Quartalsplan", slackCandidates.first())
+
+        assertEquals(WritingAction.CASUAL, store.preferredToneForApp("com.whatsapp"))
+        assertEquals(WritingAction.PROFESSIONAL, store.preferredToneForApp("com.google.android.gm"))
+
+        store.recordAppWritingAction("com.whatsapp", WritingAction.CONCISE, learningEnabled = true, incognito = false)
+        assertEquals(WritingAction.CONCISE, store.preferredToneForApp("com.whatsapp"))
+    }
 }

@@ -44,6 +44,12 @@ enum class OneHandedMode {
     RIGHT
 }
 
+enum class SplitKeyboardMode {
+    OFF,
+    AUTO,
+    ALWAYS
+}
+
 enum class VoiceDictationMode {
     NATURAL_CLEANUP,
     STANDARD
@@ -85,6 +91,7 @@ data class TapwingPrefs(
     val keyboardBottomLiftDp: Int = 0,
     val longPressDelayMs: Int = 280,
     val oneHandedMode: OneHandedMode = OneHandedMode.OFF,
+    val splitKeyboardMode: SplitKeyboardMode = SplitKeyboardMode.AUTO,
     val hapticFeedback: Boolean = true,
     val soundOnKeypress: Boolean = false,
 
@@ -99,7 +106,11 @@ data class TapwingPrefs(
     val glideTypingEnabled: Boolean = true,
     val doubleSpacePeriod: Boolean = true,
     val learningEnabled: Boolean = true,
+    val perAppLearningEnabled: Boolean = true,
+    val inlineAutofillEnabled: Boolean = true,
     val incognitoMode: Boolean = false,
+    val snippetUserName: String = "",
+    val snippetUserEmail: String = "",
     val inlineMathEnabled: Boolean = true,
     val swipeBackspaceDeleteWord: Boolean = true,
     val showWritingToolsIcon: Boolean = true,
@@ -164,6 +175,7 @@ class TapwingPreferencesRepository(context: Context) {
         val KEYBOARD_BOTTOM_LIFT_DP = intPreferencesKey("keyboard_bottom_lift_dp")
         val LONG_PRESS_DELAY_MS = intPreferencesKey("long_press_delay_ms")
         val ONE_HANDED_MODE = stringPreferencesKey("one_handed_mode")
+        val SPLIT_KEYBOARD_MODE = stringPreferencesKey("split_keyboard_mode")
         val HAPTIC_FEEDBACK = booleanPreferencesKey("haptic_feedback")
         val SOUND_ON_KEYPRESS = booleanPreferencesKey("sound_on_keypress")
 
@@ -178,7 +190,11 @@ class TapwingPreferencesRepository(context: Context) {
         val GLIDE_TYPING_ENABLED = booleanPreferencesKey("glide_typing_enabled")
         val DOUBLE_SPACE_PERIOD = booleanPreferencesKey("double_space_period")
         val LEARNING_ENABLED = booleanPreferencesKey("learning_enabled")
+        val PER_APP_LEARNING_ENABLED = booleanPreferencesKey("per_app_learning_enabled")
+        val INLINE_AUTOFILL_ENABLED = booleanPreferencesKey("inline_autofill_enabled")
         val INCOGNITO_MODE = booleanPreferencesKey("incognito_mode")
+        val SNIPPET_USER_NAME = stringPreferencesKey("snippet_user_name")
+        val SNIPPET_USER_EMAIL = stringPreferencesKey("snippet_user_email")
         val INLINE_MATH_ENABLED = booleanPreferencesKey("inline_math_enabled")
         val SWIPE_BACKSPACE_WORD = booleanPreferencesKey("swipe_backspace_word")
         val SHOW_WRITING_TOOLS_ICON = booleanPreferencesKey("show_writing_tools_icon")
@@ -265,6 +281,7 @@ class TapwingPreferencesRepository(context: Context) {
             keyboardBottomLiftDp = (p[Keys.KEYBOARD_BOTTOM_LIFT_DP] ?: 0).coerceIn(0, 48),
             longPressDelayMs = (p[Keys.LONG_PRESS_DELAY_MS] ?: 280).coerceIn(150, 500),
             oneHandedMode = parseEnum(p[Keys.ONE_HANDED_MODE], OneHandedMode.OFF),
+            splitKeyboardMode = parseEnum(p[Keys.SPLIT_KEYBOARD_MODE], SplitKeyboardMode.AUTO),
             hapticFeedback = p[Keys.HAPTIC_FEEDBACK] ?: true,
             soundOnKeypress = p[Keys.SOUND_ON_KEYPRESS] ?: false,
 
@@ -279,7 +296,11 @@ class TapwingPreferencesRepository(context: Context) {
             glideTypingEnabled = p[Keys.GLIDE_TYPING_ENABLED] ?: true,
             doubleSpacePeriod = p[Keys.DOUBLE_SPACE_PERIOD] ?: true,
             learningEnabled = p[Keys.LEARNING_ENABLED] ?: true,
+            perAppLearningEnabled = p[Keys.PER_APP_LEARNING_ENABLED] ?: true,
+            inlineAutofillEnabled = p[Keys.INLINE_AUTOFILL_ENABLED] ?: true,
             incognitoMode = p[Keys.INCOGNITO_MODE] ?: false,
+            snippetUserName = p[Keys.SNIPPET_USER_NAME] ?: "",
+            snippetUserEmail = p[Keys.SNIPPET_USER_EMAIL] ?: "",
             inlineMathEnabled = p[Keys.INLINE_MATH_ENABLED] ?: true,
             swipeBackspaceDeleteWord = p[Keys.SWIPE_BACKSPACE_WORD] ?: true,
             showWritingToolsIcon = QuickBarAction.WRITING_TOOLS in resolvedQuickBar,
@@ -338,6 +359,7 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.KEYBOARD_BOTTOM_LIFT_DP] = next.keyboardBottomLiftDp.coerceIn(0, 48)
         mutable[Keys.LONG_PRESS_DELAY_MS] = next.longPressDelayMs.coerceIn(150, 500)
         mutable[Keys.ONE_HANDED_MODE] = next.oneHandedMode.name
+        mutable[Keys.SPLIT_KEYBOARD_MODE] = next.splitKeyboardMode.name
         mutable[Keys.HAPTIC_FEEDBACK] = next.hapticFeedback
         mutable[Keys.SOUND_ON_KEYPRESS] = next.soundOnKeypress
         mutable[Keys.THEME_MODE] = next.themeMode.name
@@ -350,7 +372,11 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.GLIDE_TYPING_ENABLED] = next.glideTypingEnabled
         mutable[Keys.DOUBLE_SPACE_PERIOD] = next.doubleSpacePeriod
         mutable[Keys.LEARNING_ENABLED] = next.learningEnabled
+        mutable[Keys.PER_APP_LEARNING_ENABLED] = next.perAppLearningEnabled
+        mutable[Keys.INLINE_AUTOFILL_ENABLED] = next.inlineAutofillEnabled
         mutable[Keys.INCOGNITO_MODE] = next.incognitoMode
+        mutable[Keys.SNIPPET_USER_NAME] = next.snippetUserName
+        mutable[Keys.SNIPPET_USER_EMAIL] = next.snippetUserEmail
         mutable[Keys.INLINE_MATH_ENABLED] = next.inlineMathEnabled
         mutable[Keys.SWIPE_BACKSPACE_WORD] = next.swipeBackspaceDeleteWord
         mutable[Keys.QUICK_BAR_ACTIONS] = QuickBarAction.serialize(next.quickBarActions)

@@ -130,6 +130,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     implementation("androidx.datastore:datastore-preferences:1.1.3")
+    implementation("androidx.autofill:autofill:1.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
     implementation("com.google.android.material:material:1.12.0")
 

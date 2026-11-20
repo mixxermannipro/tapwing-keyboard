@@ -31,21 +31,42 @@ object SuggestionEngine {
         dictionaryStore: AdaptiveDictionaryStore? = null,
         secondaryLocales: List<String> = emptyList(),
         isEmailField: Boolean = false,
-        isUrlField: Boolean = false
+        isUrlField: Boolean = false,
+        offlinePack: LoadedDictionaryPack? = null,
+        appPackage: String? = null,
+        latestClipboardText: String = "",
+        userName: String = "",
+        userEmail: String = ""
     ): List<SuggestionChip> {
         val results = mutableListOf<SuggestionChip>()
         val baseLocale = KeyboardLocales.baseLang(locale)
 
-        // 1. Text shortcuts (e.g. "mfg", "/datum", "/zeit", "/woche", or imported shortcuts)
+        // 1. Text shortcuts & Multi-line Snippets with Placeholders (e.g. "mfg", "/sig", "/termin")
         val trailingToken = extractTrailingToken(textBeforeCursor)
         if (trailingToken.isNotEmpty() && dictionaryStore != null) {
-            val expansion = dictionaryStore.lookupShortcut(trailingToken, locale)
-            if (!expansion.isNullOrBlank()) {
+            val snippet = dictionaryStore.lookupSnippet(trailingToken)
+            if (snippet != null) {
+                val resolved = SnippetPlaceholderResolver.resolve(
+                    template = snippet.body,
+                    locale = locale,
+                    latestClipboardText = latestClipboardText,
+                    userName = userName,
+                    userEmail = userEmail
+                )
                 results += SuggestionChip(
-                    text = expansion,
+                    text = resolved,
                     isShortcut = true,
                     replaceCharCount = trailingToken.length
                 )
+            } else {
+                val expansion = dictionaryStore.lookupShortcut(trailingToken, locale)
+                if (!expansion.isNullOrBlank()) {
+                    results += SuggestionChip(
+                        text = expansion,
+                        isShortcut = true,
+                        replaceCharCount = trailingToken.length
+                    )
+                }
             }
         }
 
@@ -99,12 +120,13 @@ object SuggestionEngine {
         )
 
         if (currentWord.isBlank()) {
-            // Context-aware Trigram + Bigram next-word predictions from adaptive learning
+            // Context-aware Trigram + Bigram + Per-App next-word predictions from adaptive learning
             if (prevWord.isNotEmpty() && dictionaryStore != null) {
                 dictionaryStore.predictNextWords(
                     previousWord = prevWord,
                     limit = 3,
-                    previousTwoWord = prevTwoWord.takeIf { it.isNotEmpty() }
+                    previousTwoWord = prevTwoWord.takeIf { it.isNotEmpty() },
+                    appPackage = appPackage
                 ).forEach { predicted ->
                     val safeCased = enforceMidSentenceCasingRule(predicted, locale, atSentenceStart, dictionaryStore)
                     if (results.size < 3 && results.none { it.text == safeCased }) {
@@ -160,14 +182,15 @@ object SuggestionEngine {
             }
         }
 
-        // Prioritize context-aware learned vocabulary & custom dictionary
+        // Prioritize context-aware learned vocabulary, per-app words & custom dictionary
         if (dictionaryStore != null) {
             dictionaryStore.rankedPrefixCandidates(
                 prefix = currentWord,
                 limit = 4,
                 previousWord = prevWord.takeIf { it.isNotEmpty() },
                 previousTwoWord = prevTwoWord.takeIf { it.isNotEmpty() },
-                atSentenceStart = atSentenceStart
+                atSentenceStart = atSentenceStart,
+                appPackage = appPackage
             ).forEach { match ->
                 val adjusted = adjustCandidateCase(currentWord, match, locale, atSentenceStart, dictionaryStore)
                 if (results.size < 3 && adjusted != currentWord && results.none { it.text == adjusted }) {
@@ -180,13 +203,14 @@ object SuggestionEngine {
             }
         }
 
-        // Active language stock vocabulary (already frequency-ordered)
+        // Active language stock vocabulary + 50k offline pack prefix completions
         val vocab = LanguageVocabularies.vocabularyFor(locale)
-        val prefixMatches = vocab
+        val packPrefixes = offlinePack?.prefixMatches(lower, limit = 6).orEmpty()
+        val prefixMatches = (vocab
             .asSequence()
             .filter { it.lowercase().startsWith(lower) && it != currentWord }
             .take(5)
-            .toList()
+            .toList() + packPrefixes).distinct()
 
         for (match in prefixMatches) {
             if (results.size >= 3) break
@@ -233,12 +257,13 @@ object SuggestionEngine {
         }
 
         // Fuzzy Damerau-Levenshtein matching (handles transpositions like "udn"->"und" with dist 1)
-        if (results.size < 3 && lower.length >= 3 && !knownByUser) {
+        if (results.size < 3 && lower.length >= 3 && !knownByUser && offlinePack?.contains(lower) != true) {
             val customFuzzyPool = dictionaryStore?.allKnownVocabularyWords().orEmpty()
+            val packPool = offlinePack?.topSwipePool?.take(4_000).orEmpty()
             val secondaryPool = secondaryLocales
                 .filter { KeyboardLocales.baseLang(it) != baseLocale }
                 .flatMap { LanguageVocabularies.vocabularyFor(it) }
-            val combinedPool = (customFuzzyPool + vocab + secondaryPool).distinct()
+            val combinedPool = (customFuzzyPool + vocab + packPool + secondaryPool).distinct()
 
             val fuzzy = combinedPool
                 .asSequence()
@@ -274,7 +299,8 @@ object SuggestionEngine {
         locale: String,
         dictionaryStore: AdaptiveDictionaryStore? = null,
         atSentenceStart: Boolean = false,
-        secondaryLocales: List<String> = emptyList()
+        secondaryLocales: List<String> = emptyList(),
+        offlinePack: LoadedDictionaryPack? = null
     ): String? {
         if (word.length < 2) return null
         if (dictionaryStore?.isKnownWord(word) == true) {
@@ -314,8 +340,10 @@ object SuggestionEngine {
             if (secMapped != null) return preserveLeadingCase(word, secMapped)
         }
 
-        // If the word is already a valid lowercase word in the active vocab, don't force fuzzy change
-        if (LanguageVocabularies.vocabularyFor(locale).any { it.equals(word, ignoreCase = false) }) {
+        // If the word is already valid in stock vocab or downloaded 50k pack, don't force fuzzy change
+        if (LanguageVocabularies.vocabularyFor(locale).any { it.equals(word, ignoreCase = false) } ||
+            offlinePack?.contains(word) == true
+        ) {
             return null
         }
 

@@ -73,6 +73,7 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -81,6 +82,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tapwing.keyboard.data.OneHandedMode
+import com.tapwing.keyboard.data.SplitKeyboardMode
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.KeyCenter
 import com.tapwing.keyboard.dictionary.SwipePoint
@@ -150,6 +152,14 @@ fun KeyboardGrid(
     val rowGap = if (prefs.showNumberRow) 5.dp else 6.dp
     val halfRowGap = rowGap / 2
 
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val isSplitActive = prefs.oneHandedMode == OneHandedMode.OFF && when (prefs.splitKeyboardMode) {
+        SplitKeyboardMode.OFF -> false
+        SplitKeyboardMode.ALWAYS -> true
+        SplitKeyboardMode.AUTO -> screenWidthDp >= 600
+    }
+    val splitCenterGap = if (screenWidthDp >= 720) 108.dp else 72.dp
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -177,142 +187,155 @@ fun KeyboardGrid(
                     .padding(horizontal = 2.5.dp, vertical = 1.dp)
             ) {
                 rows.forEachIndexed { rowIndex, row ->
-                    val isIndentedAlphaRow = row.size == 9 && row.first().type == KeyActionType.CHAR
+                    val isIndentedAlphaRow = !isSplitActive && row.size == 9 && row.first().type == KeyActionType.CHAR
+                    val renderRowKeys = remember(row, isSplitActive) {
+                        if (isSplitActive) splitKeyboardRow(row) else listOf(row)
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = if (isIndentedAlphaRow) 16.dp else 0.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        row.forEach { key ->
-                            val isLetterCharKey = currentLayoutPage == KeyboardLayoutPage.LETTERS &&
-                                key.type == KeyActionType.CHAR &&
-                                key.label.length == 1 &&
-                                key.label[0].isLetter()
-                            val keyIdentity = "${layoutPage.name}_${rowIndex}_${key.type.name}_${key.label}"
+                        renderRowKeys.forEachIndexed { halfIdx, halfKeys ->
+                            if (halfIdx > 0) {
+                                Spacer(Modifier.width(splitCenterGap))
+                            }
+                            Row(
+                                modifier = if (isSplitActive) Modifier.weight(1f) else Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                halfKeys.forEachIndexed { keyIdx, key ->
+                                    val isLetterCharKey = currentLayoutPage == KeyboardLayoutPage.LETTERS &&
+                                        key.type == KeyActionType.CHAR &&
+                                        key.label.length == 1 &&
+                                        key.label[0].isLetter()
+                                    val keyIdentity = "${layoutPage.name}_${rowIndex}_${halfIdx}_${keyIdx}_${key.type.name}_${key.label}"
 
-                            ExpressiveKeyCap(
-                                modifier = Modifier
-                                    .weight(key.weight)
-                                    .height(rowHeight + rowGap),
-                                innerPaddingHorizontal = 2.5.dp,
-                                innerPaddingVertical = halfRowGap,
-                                keyIdentity = keyIdentity,
-                                key = key,
-                                prefs = prefs,
-                                shiftState = shiftState,
-                                imeActionLabel = imeActionLabel,
-                                canSwipeFromKey = isLetterCharKey && prefs.glideTypingEnabled,
-                                swipeSlopPx = swipeSlopPx,
-                                onCenterMeasured = { cx, cy ->
-                                    if (isLetterCharKey) {
-                                        keyCenterMap[key.label] = KeyCenter(
-                                            char = key.label[0],
-                                            x = cx - gridLeftRoot,
-                                            y = cy - gridTopRoot
-                                        )
-                                    }
-                                },
-                                onPressStateChanged = { isDown, cx, topY ->
-                                    if (isDown && key.type == KeyActionType.CHAR) {
-                                        activePreview = KeyPreviewBubble(
-                                            keyId = keyIdentity,
-                                            char = applyShiftCase(key.label, currentShiftState),
-                                            centerXRoot = cx,
-                                            topYRoot = topY
-                                        )
-                                    } else if (!isDown && activePreview?.keyId == keyIdentity) {
-                                        activePreview = null
-                                    }
-                                },
-                                onKeySound = {
-                                    if (currentPrefs.soundOnKeypress) {
-                                        audioManager?.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD, -1f)
-                                    }
-                                },
-                                onPress = { resolvedOutput ->
-                                    altPopup = null
-                                    onKeyPress(key, resolvedOutput)
-                                },
-                                onLongPress = { centerX ->
-                                    when {
-                                        key.type == KeyActionType.SPACE -> onSwitchLanguage()
-                                        key.alternates.size == 1 -> {
-                                            onKeyPress(key, applyShiftCase(key.alternates.first(), currentShiftState))
-                                        }
-                                        key.alternates.size > 1 -> {
-                                            val sorted = key.alternates.sortedBy { alt ->
-                                                if (alt.firstOrNull()?.isLetter() == true) 0 else 1
+                                    ExpressiveKeyCap(
+                                        modifier = Modifier
+                                            .weight(key.weight)
+                                            .height(rowHeight + rowGap),
+                                        innerPaddingHorizontal = 2.5.dp,
+                                        innerPaddingVertical = halfRowGap,
+                                        keyIdentity = keyIdentity,
+                                        key = key,
+                                        prefs = prefs,
+                                        shiftState = shiftState,
+                                        imeActionLabel = imeActionLabel,
+                                        canSwipeFromKey = isLetterCharKey && prefs.glideTypingEnabled,
+                                        swipeSlopPx = swipeSlopPx,
+                                        onCenterMeasured = { cx, cy ->
+                                            if (isLetterCharKey) {
+                                                keyCenterMap[key.label] = KeyCenter(
+                                                    char = key.label[0],
+                                                    x = cx - gridLeftRoot,
+                                                    y = cy - gridTopRoot
+                                                )
                                             }
-                                            val isRightHalf = centerX > gridLeftRoot + gridWidthPx * 0.55f
-                                            val items = if (isRightHalf) sorted.reversed() else sorted
-                                            val defaultIndex = if (isRightHalf) items.lastIndex else 0
-                                            val total = items.size * itemWidthPx
-                                            val minLeft = gridLeftRoot + edgePx
-                                            val maxLeft = (gridLeftRoot + gridWidthPx - total - edgePx).coerceAtLeast(minLeft)
-                                            val rawLeft = if (isRightHalf) {
-                                                centerX - total + itemWidthPx / 2f
-                                            } else {
-                                                centerX - itemWidthPx / 2f
+                                        },
+                                        onPressStateChanged = { isDown, cx, topY ->
+                                            if (isDown && key.type == KeyActionType.CHAR) {
+                                                activePreview = KeyPreviewBubble(
+                                                    keyId = keyIdentity,
+                                                    char = applyShiftCase(key.label, currentShiftState),
+                                                    centerXRoot = cx,
+                                                    topYRoot = topY
+                                                )
+                                            } else if (!isDown && activePreview?.keyId == keyIdentity) {
+                                                activePreview = null
                                             }
-                                            val left = rawLeft.coerceIn(minLeft, maxLeft)
-                                            altPopup = AlternatePopup(
-                                                items = items,
-                                                origin = key,
-                                                selected = defaultIndex,
-                                                leftRootPx = left,
-                                                startXPx = centerX
-                                            )
-                                        }
-                                    }
-                                },
-                                onAlternateDrag = { x ->
-                                    val p = altPopup
-                                    if (p != null) {
-                                        val idx = if (kotlin.math.abs(x - p.startXPx) < deadZonePx) {
-                                            p.selected
-                                        } else {
-                                            ((x - p.leftRootPx) / itemWidthPx).toInt().coerceIn(0, p.items.lastIndex)
-                                        }
-                                        if (idx != p.selected) {
-                                            if (currentPrefs.hapticFeedback) {
-                                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                        },
+                                        onKeySound = {
+                                            if (currentPrefs.soundOnKeypress) {
+                                                audioManager?.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD, -1f)
                                             }
-                                            altPopup = p.copy(selected = idx)
-                                        }
-                                    }
-                                },
-                                onAlternateRelease = {
-                                    val p = altPopup
-                                    altPopup = null
-                                    if (p != null) {
-                                        onKeyPress(p.origin, applyShiftCase(p.items[p.selected], currentShiftState))
-                                    }
-                                },
-                                onSwipeStart = { rx, ry ->
-                                    activePreview = null
-                                    swipeTrail.clear()
-                                    swipeTrail.add(SwipePoint(rx - gridLeftRoot, ry - gridTopRoot))
-                                },
-                                onSwipeMove = { rx, ry ->
-                                    val lx = rx - gridLeftRoot
-                                    val ly = ry - gridTopRoot
-                                    val last = swipeTrail.lastOrNull()
-                                    if (last == null || hypot(lx - last.x, ly - last.y) >= 6f) {
-                                        swipeTrail.add(SwipePoint(lx, ly))
-                                    }
-                                },
-                                onSwipeFinish = {
-                                    val pts = swipeTrail.toList()
-                                    swipeTrail.clear()
-                                    if (pts.size >= 2) {
-                                        currentOnSwipeWord(pts, keyCenterMap.values.toList())
-                                    }
-                                },
-                                onSwipeCancel = { swipeTrail.clear() },
-                                onCursorMoveSteps = onCursorMoveSteps,
-                                onSwipeBackspaceWord = onDeletePreviousWord
-                            )
+                                        },
+                                        onPress = { resolvedOutput ->
+                                            altPopup = null
+                                            onKeyPress(key, resolvedOutput)
+                                        },
+                                        onLongPress = { centerX ->
+                                            when {
+                                                key.type == KeyActionType.SPACE -> onSwitchLanguage()
+                                                key.alternates.size == 1 -> {
+                                                    onKeyPress(key, applyShiftCase(key.alternates.first(), currentShiftState))
+                                                }
+                                                key.alternates.size > 1 -> {
+                                                    val sorted = key.alternates.sortedBy { alt ->
+                                                        if (alt.firstOrNull()?.isLetter() == true) 0 else 1
+                                                    }
+                                                    val isRightHalf = centerX > gridLeftRoot + gridWidthPx * 0.55f
+                                                    val items = if (isRightHalf) sorted.reversed() else sorted
+                                                    val defaultIndex = if (isRightHalf) items.lastIndex else 0
+                                                    val total = items.size * itemWidthPx
+                                                    val minLeft = gridLeftRoot + edgePx
+                                                    val maxLeft = (gridLeftRoot + gridWidthPx - total - edgePx).coerceAtLeast(minLeft)
+                                                    val rawLeft = if (isRightHalf) {
+                                                        centerX - total + itemWidthPx / 2f
+                                                    } else {
+                                                        centerX - itemWidthPx / 2f
+                                                    }
+                                                    val left = rawLeft.coerceIn(minLeft, maxLeft)
+                                                    altPopup = AlternatePopup(
+                                                        items = items,
+                                                        origin = key,
+                                                        selected = defaultIndex,
+                                                        leftRootPx = left,
+                                                        startXPx = centerX
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onAlternateDrag = { x ->
+                                            val p = altPopup
+                                            if (p != null) {
+                                                val idx = if (kotlin.math.abs(x - p.startXPx) < deadZonePx) {
+                                                    p.selected
+                                                } else {
+                                                    ((x - p.leftRootPx) / itemWidthPx).toInt().coerceIn(0, p.items.lastIndex)
+                                                }
+                                                if (idx != p.selected) {
+                                                    if (currentPrefs.hapticFeedback) {
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                    }
+                                                    altPopup = p.copy(selected = idx)
+                                                }
+                                            }
+                                        },
+                                        onAlternateRelease = {
+                                            val p = altPopup
+                                            altPopup = null
+                                            if (p != null) {
+                                                onKeyPress(p.origin, applyShiftCase(p.items[p.selected], currentShiftState))
+                                            }
+                                        },
+                                        onSwipeStart = { rx, ry ->
+                                            activePreview = null
+                                            swipeTrail.clear()
+                                            swipeTrail.add(SwipePoint(rx - gridLeftRoot, ry - gridTopRoot))
+                                        },
+                                        onSwipeMove = { rx, ry ->
+                                            val lx = rx - gridLeftRoot
+                                            val ly = ry - gridTopRoot
+                                            val last = swipeTrail.lastOrNull()
+                                            if (last == null || hypot(lx - last.x, ly - last.y) >= 6f) {
+                                                swipeTrail.add(SwipePoint(lx, ly))
+                                            }
+                                        },
+                                        onSwipeFinish = {
+                                            val pts = swipeTrail.toList()
+                                            swipeTrail.clear()
+                                            if (pts.size >= 2) {
+                                                currentOnSwipeWord(pts, keyCenterMap.values.toList())
+                                            }
+                                        },
+                                        onSwipeCancel = { swipeTrail.clear() },
+                                        onCursorMoveSteps = onCursorMoveSteps,
+                                        onSwipeBackspaceWord = onDeletePreviousWord
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -911,6 +934,23 @@ private fun ExpressiveKeyCap(
             }
         }
     }
+}
+
+internal fun splitKeyboardRow(row: List<KeySpec>): List<List<KeySpec>> {
+    val spaceIdx = row.indexOfFirst { it.type == KeyActionType.SPACE }
+    if (spaceIdx >= 0) {
+        val spaceKey = row[spaceIdx]
+        val left = row.subList(0, spaceIdx) + spaceKey.copy(weight = 1.95f)
+        val right = listOf(spaceKey.copy(weight = 1.95f, label = " ")) + row.subList(spaceIdx + 1, row.size)
+        return listOf(left, right)
+    }
+    val splitAt = when {
+        row.size >= 10 -> 5
+        row.size == 9 && row.first().type == KeyActionType.SHIFT -> 4
+        row.size == 9 -> 5
+        else -> row.size / 2
+    }
+    return listOf(row.subList(0, splitAt), row.subList(splitAt, row.size))
 }
 
 private fun applyShiftCase(raw: String, shiftState: ShiftState): String {

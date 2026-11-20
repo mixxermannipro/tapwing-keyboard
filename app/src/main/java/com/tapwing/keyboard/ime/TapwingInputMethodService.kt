@@ -1,24 +1,41 @@
 package com.tapwing.keyboard.ime
 
+import android.annotation.SuppressLint
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.res.Configuration
 import android.database.ContentObserver
+import android.graphics.drawable.Icon
 import android.inputmethodservice.InputMethodService
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.LocaleList
 import android.os.SystemClock
 import android.text.InputType
+import android.util.Size
+import android.util.TypedValue
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
+import android.view.inputmethod.InlineSuggestionsRequest
+import android.view.inputmethod.InlineSuggestionsResponse
+import android.widget.inline.InlinePresentationSpec
+import androidx.annotation.RequiresApi
+import androidx.autofill.inline.UiVersions
+import androidx.autofill.inline.common.ImageViewStyle
+import androidx.autofill.inline.common.TextViewStyle
+import androidx.autofill.inline.common.ViewStyle
+import androidx.autofill.inline.v1.InlineSuggestionUi
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.core.content.ContextCompat
 import androidx.core.view.inputmethod.EditorInfoCompat
 import androidx.core.view.inputmethod.InputConnectionCompat
 import androidx.core.view.inputmethod.InputContentInfoCompat
@@ -33,6 +50,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.LocalInferenceEngine
 import com.tapwing.keyboard.ai.LocalModelManager
 import com.tapwing.keyboard.ai.WritingAction
@@ -48,13 +66,17 @@ import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import com.tapwing.keyboard.data.TapwingPrefs
+import com.tapwing.keyboard.data.TypingStatsStore
 import com.tapwing.keyboard.data.VoiceDictationMode
 import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 import com.tapwing.keyboard.dictionary.KeyCenter
+import com.tapwing.keyboard.dictionary.OfflineDictionaryPackManager
+import com.tapwing.keyboard.dictionary.SnippetPlaceholderResolver
 import com.tapwing.keyboard.dictionary.SuggestionChip
 import com.tapwing.keyboard.dictionary.SuggestionEngine
 import com.tapwing.keyboard.dictionary.SwipeGestureDecoder
 import com.tapwing.keyboard.dictionary.SwipePoint
+import com.tapwing.keyboard.dictionary.TextSnippet
 import com.tapwing.keyboard.ocr.OcrResultBus
 import com.tapwing.keyboard.ocr.ScanTextActivity
 import com.tapwing.keyboard.settings.SettingsActivity
@@ -97,6 +119,8 @@ class TapwingInputMethodService :
     private lateinit var prefsRepo: TapwingPreferencesRepository
     private lateinit var secureKeyStorage: SecureKeyStorage
     private lateinit var dictionaryStore: AdaptiveDictionaryStore
+    private lateinit var offlinePackManager: OfflineDictionaryPackManager
+    private lateinit var statsStore: TypingStatsStore
     private lateinit var modelManager: LocalModelManager
     private lateinit var writingToolsEngine: WritingToolsEngine
     private lateinit var clipboardStore: ClipboardStore
@@ -114,6 +138,9 @@ class TapwingInputMethodService :
     private var recentScreenshot by mutableStateOf<RecentScreenshot?>(null)
     private var otpChipText by mutableStateOf<String?>(null)
     private var otpClipAddedAtMs: Long = 0L
+    private var inlineAutofillViews by mutableStateOf<List<View>>(emptyList())
+    private var snippetsSnapshot by mutableStateOf<List<TextSnippet>>(emptyList())
+    private var currentTargetPackage: String = ""
 
     private var writingSourceText by mutableStateOf("")
     private var writingOutput by mutableStateOf<WritingToolsOutput?>(null)
@@ -202,9 +229,12 @@ class TapwingInputMethodService :
         prefsRepo = TapwingPreferencesRepository(this)
         secureKeyStorage = SecureKeyStorage(this)
         dictionaryStore = AdaptiveDictionaryStore.createForContext(this)
+        offlinePackManager = OfflineDictionaryPackManager(this)
+        statsStore = TypingStatsStore.createForContext(this)
         modelManager = LocalModelManager(this)
         writingToolsEngine = WritingToolsEngine(secureKeyStorage, dictionaryStore, modelManager)
         clipboardStore = ClipboardStore.createForContext(this)
+        snippetsSnapshot = dictionaryStore.listSnippets()
         voiceController = TapwingVoiceController(
             context = this,
             modelManager = modelManager,
@@ -218,6 +248,7 @@ class TapwingInputMethodService :
         serviceScope.launch {
             prefsRepo.prefsFlow.collect { prefs ->
                 currentPrefs = prefs
+                offlinePackManager.preloadLocaleAsync(prefs.activeLocale)
                 clipboardStore.prune(prefs.clipboardRetention, prefs.clipboardMaxItems)
                 ensureScreenshotObserverIfPermitted()
             }
@@ -259,6 +290,8 @@ class TapwingInputMethodService :
                     proactiveUndo = proactiveUndoState,
                     recentScreenshot = recentScreenshot,
                     otpChipText = otpChipText,
+                    inlineAutofillViews = inlineAutofillViews,
+                    snippets = snippetsSnapshot,
                     voiceState = voiceUiState,
                     writingSourceText = writingSourceText,
                     writingOutput = writingOutput,
@@ -305,6 +338,15 @@ class TapwingInputMethodService :
                     onRunWritingAction = ::runWritingAction,
                     onApplyWritingResult = ::applyWritingToolsResult,
                     onOpenClipboard = { panelMode = KeyboardPanelMode.CLIPBOARD },
+                    onOpenSnippets = {
+                        snippetsSnapshot = dictionaryStore.listSnippets()
+                        panelMode = KeyboardPanelMode.SNIPPETS
+                    },
+                    onInsertSnippet = { _, resolvedText ->
+                        commitTextWithSpaceSafety(resolvedText)
+                        statsStore.recordSnippetInserted(resolvedText.length, currentPrefs.incognitoMode)
+                        panelMode = KeyboardPanelMode.KEYS
+                    },
                     onPasteClip = { clip ->
                         if (clip.isImage) {
                             pasteImageClip(clip)
@@ -405,9 +447,14 @@ class TapwingInputMethodService :
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
         dictionaryStore.reloadIfModifiedOnDisk()
+        snippetsSnapshot = dictionaryStore.listSnippets()
+        offlinePackManager.refreshStates()
+        offlinePackManager.preloadLocaleAsync(currentPrefs.activeLocale)
         modelManager.refreshStates()
         ensureScreenshotObserverIfPermitted()
 
+        currentTargetPackage = info?.packageName.orEmpty()
+        inlineAutofillViews = emptyList()
         val variation = (info?.inputType ?: 0) and InputType.TYPE_MASK_VARIATION
         isEmailField = variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS ||
             variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
@@ -435,10 +482,102 @@ class TapwingInputMethodService :
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        inlineAutofillViews = emptyList()
         if (!finishingInput) {
             voiceController.markConfigurationPause()
         }
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+    }
+
+    // ViewStyle.BaseBuilder carries a library restriction annotation in androidx.autofill 1.3.0
+    // even though ViewStyle.Builder is the documented public builder API for IME inline chips.
+    @SuppressLint("RestrictedApi")
+    @RequiresApi(Build.VERSION_CODES.R)
+    override fun onCreateInlineSuggestionsRequest(uiExtras: Bundle): InlineSuggestionsRequest? {
+        if (!currentPrefs.inlineAutofillEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return null
+        }
+        val density = resources.displayMetrics.density
+        val minW = (96f * density).toInt()
+        val minH = (36f * density).toInt()
+        val maxW = (280f * density).toInt()
+        val maxH = (44f * density).toInt()
+
+        val chipBg = android.graphics.Color.valueOf(0xFF2B2F3A.toInt()).toArgb()
+        val textColor = android.graphics.Color.valueOf(0xFFF3F5FA.toInt()).toArgb()
+
+        val style = InlineSuggestionUi.newStyleBuilder()
+            .setChipStyle(
+                ViewStyle.Builder()
+                    .setBackground(Icon.createWithResource(this, R.drawable.bg_autofill_chip))
+                    .setBackgroundColor(chipBg)
+                    .setPadding((10f * density).toInt(), (4f * density).toInt(), (10f * density).toInt(), (4f * density).toInt())
+                    .build()
+            )
+            .setTitleStyle(
+                TextViewStyle.Builder()
+                    .setTextColor(textColor)
+                    .setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    .build()
+            )
+            .setSubtitleStyle(
+                TextViewStyle.Builder()
+                    .setTextColor(0xFFB4BAC8.toInt())
+                    .setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+                    .build()
+            )
+            .setStartIconStyle(
+                ImageViewStyle.Builder()
+                    .setMaxWidth((18f * density).toInt())
+                    .setMaxHeight((18f * density).toInt())
+                    .build()
+            )
+            .build()
+
+        val stylesBundle = UiVersions.newStylesBuilder()
+            .addStyle(style)
+            .build()
+
+        val spec = InlinePresentationSpec.Builder(Size(minW, minH), Size(maxW, maxH))
+            .setStyle(stylesBundle)
+            .build()
+
+        return InlineSuggestionsRequest.Builder(listOf(spec))
+            .setMaxSuggestionCount(4)
+            .setSupportedLocales(LocaleList.getDefault())
+            .build()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
+        if (!currentPrefs.inlineAutofillEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            inlineAutofillViews = emptyList()
+            return false
+        }
+        val suggestions = response.inlineSuggestions
+        if (suggestions.isEmpty()) {
+            inlineAutofillViews = emptyList()
+            return false
+        }
+        val density = resources.displayMetrics.density
+        val size = Size(
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            (40f * density).toInt()
+        )
+        val executor = ContextCompat.getMainExecutor(this)
+        val collected = ArrayList<View>(suggestions.size)
+        val expected = suggestions.take(4).size
+        suggestions.take(4).forEach { inlineSuggestion ->
+            inlineSuggestion.inflate(this, size, executor) { contentView ->
+                if (contentView != null) {
+                    collected.add(contentView)
+                    inlineAutofillViews = collected.toList()
+                } else if (collected.size >= expected) {
+                    inlineAutofillViews = collected.toList()
+                }
+            }
+        }
+        return true
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -576,6 +715,7 @@ class TapwingInputMethodService :
                     pendingSuggestionTrailingSpace = false
                 }
                 ic.commitText(output, 1)
+                statsStore.recordKeystroke(output.length, currentPrefs.incognitoMode)
                 undoManager.notifyUnrelatedTyping()
                 proactiveUndoState = undoManager.activeBanner()
                 if (shiftState == ShiftState.ONCE) {
@@ -600,12 +740,14 @@ class TapwingInputMethodService :
             previousWord = prevWord,
             dictionaryStore = dictionaryStore,
             secondaryLocales = secondaryLocales(),
-            atSentenceStart = atStart
+            atSentenceStart = atStart,
+            offlinePack = offlinePackManager.getLoadedPack(currentPrefs.activeLocale)
         )
         val top = candidates.firstOrNull() ?: return
         val needsSpace = before.isNotEmpty() && !before.last().isWhitespace()
         val insertion = (if (needsSpace) " " else "") + top + " "
         ic.commitText(insertion, 1)
+        statsStore.recordSwipeWord(top.length, currentPrefs.incognitoMode)
         pendingSuggestionTrailingSpace = true
         pendingSmartUndoPair = null
 
@@ -617,7 +759,8 @@ class TapwingInputMethodService :
             incognito = currentPrefs.incognitoMode,
             previousTwoWord = p2.takeIf { it.isNotEmpty() },
             wasSentenceStart = atStart,
-            locale = currentPrefs.activeLocale
+            locale = currentPrefs.activeLocale,
+            appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null
         )
 
         undoManager.record(
@@ -688,6 +831,7 @@ class TapwingInputMethodService :
         val prefixBeforeTrailing = before.dropLast(trailing.length)
         val atSentenceStart = SuggestionEngine.isAtSentenceStart(prefixBeforeTrailing, "")
         val (prev1, prev2) = SuggestionEngine.extractPreviousTwoWords(prefixBeforeTrailing)
+        statsStore.recordWordCompleted(currentPrefs.incognitoMode)
         dictionaryStore.recordTypedWord(
             word = trailing,
             previousWord = prev1.takeIf { it.isNotEmpty() },
@@ -695,7 +839,8 @@ class TapwingInputMethodService :
             incognito = currentPrefs.incognitoMode,
             previousTwoWord = prev2.takeIf { it.isNotEmpty() },
             wasSentenceStart = atSentenceStart,
-            locale = currentPrefs.activeLocale
+            locale = currentPrefs.activeLocale,
+            appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null
         )
     }
 
@@ -712,13 +857,15 @@ class TapwingInputMethodService :
             locale = currentPrefs.activeLocale,
             dictionaryStore = dictionaryStore,
             atSentenceStart = atStart,
-            secondaryLocales = secondaryLocales()
+            secondaryLocales = secondaryLocales(),
+            offlinePack = offlinePackManager.getLoadedPack(currentPrefs.activeLocale)
         )
         if (correction != null && correction != trailing) {
             ic.beginBatchEdit()
             ic.deleteSurroundingText(trailing.length, 0)
             ic.commitText(correction, 1)
             ic.endBatchEdit()
+            statsStore.recordAutocorrect(currentPrefs.incognitoMode)
             val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
             undoManager.record(
                 beforeText = trailing,
@@ -847,6 +994,12 @@ class TapwingInputMethodService :
         ic.endBatchEdit()
 
         pendingSuggestionTrailingSpace = insertion.endsWith(" ") && !chip.isEmoji && !chip.isMath
+        val saved = (chip.text.length - before.length).coerceAtLeast(0)
+        if (chip.isShortcut) {
+            statsStore.recordSnippetInserted(chip.text.length, currentPrefs.incognitoMode)
+        } else if (!chip.isEmoji && !chip.isMath) {
+            statsStore.recordSuggestionAccepted(saved, currentPrefs.incognitoMode)
+        }
 
         if (!chip.isEmoji && !chip.isMath && !chip.isShortcut) {
             val cleanWord = chip.text.trim()
@@ -861,7 +1014,8 @@ class TapwingInputMethodService :
                 incognito = currentPrefs.incognitoMode,
                 previousTwoWord = prev2.takeIf { it.isNotEmpty() },
                 wasSentenceStart = atStart,
-                locale = currentPrefs.activeLocale
+                locale = currentPrefs.activeLocale,
+                appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null
             )
         }
 
@@ -934,6 +1088,7 @@ class TapwingInputMethodService :
         val before = ic?.getTextBeforeCursor(100, 0)?.toString().orEmpty()
         val trailing = SuggestionEngine.extractTrailingWord(before)
         isTyping = trailing.isNotEmpty()
+        val latestClipText = clipboardStore.items.value.firstOrNull { !it.isImage }?.text.orEmpty()
         suggestions = SuggestionEngine.suggestionsFor(
             textBeforeCursor = before,
             locale = currentPrefs.activeLocale,
@@ -943,7 +1098,12 @@ class TapwingInputMethodService :
             dictionaryStore = dictionaryStore,
             secondaryLocales = secondaryLocales(),
             isEmailField = isEmailField,
-            isUrlField = isUrlField
+            isUrlField = isUrlField,
+            offlinePack = offlinePackManager.getLoadedPack(currentPrefs.activeLocale),
+            appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null,
+            latestClipboardText = latestClipText,
+            userName = currentPrefs.snippetUserName,
+            userEmail = currentPrefs.snippetUserEmail
         )
 
         if (layoutPage == KeyboardLayoutPage.LETTERS && shiftState != ShiftState.CAPS_LOCK) {
@@ -1013,6 +1173,7 @@ class TapwingInputMethodService :
                     val finalText = out.rewrittenText.ifBlank { parsed.cleanedText }
                     if (finalText.isNotBlank()) {
                         commitTextWithSpaceSafety(finalText)
+                        statsStore.recordVoiceDictation(finalText.length, currentPrefs.incognitoMode)
                         val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
                         undoManager.record(
                             beforeText = "",
@@ -1057,6 +1218,14 @@ class TapwingInputMethodService :
 
         writingAction = action
         writingLoading = true
+        if (currentPrefs.perAppLearningEnabled) {
+            dictionaryStore.recordAppWritingAction(
+                appPackage = currentTargetPackage,
+                action = action,
+                learningEnabled = currentPrefs.learningEnabled,
+                incognito = currentPrefs.incognitoMode
+            )
+        }
         serviceScope.launch {
             val out = writingToolsEngine.runAction(currentSource, action, currentPrefs)
             writingLoading = false
@@ -1331,6 +1500,10 @@ class TapwingInputMethodService :
             QuickBarAction.APPLE_MODE -> updatePref { it.copy(appleModeEnabled = !it.appleModeEnabled) }
             QuickBarAction.LANGUAGE -> toggleLocale()
             QuickBarAction.UNDO -> performUndo()
+            QuickBarAction.SNIPPETS -> {
+                snippetsSnapshot = dictionaryStore.listSnippets()
+                panelMode = KeyboardPanelMode.SNIPPETS
+            }
         }
     }
 

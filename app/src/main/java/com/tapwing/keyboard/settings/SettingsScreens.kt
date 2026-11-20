@@ -48,6 +48,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -136,11 +137,17 @@ import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.SecureKeyStorage
+import com.tapwing.keyboard.data.SplitKeyboardMode
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.data.ThemeMode
+import com.tapwing.keyboard.data.TypingStats
+import com.tapwing.keyboard.data.TypingStatsStore
 import com.tapwing.keyboard.data.VoiceDictationMode
 import com.tapwing.keyboard.data.VoiceEngineMode
 import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
+import com.tapwing.keyboard.dictionary.OfflineDictionaryPackManager
+import com.tapwing.keyboard.dictionary.OfflinePackSpec
+import com.tapwing.keyboard.dictionary.PackInstallState
 import com.tapwing.keyboard.ocr.ScanTextActivity
 import com.tapwing.keyboard.ui.keyboard.icon
 import com.tapwing.keyboard.ui.keyboard.isHighlighted
@@ -161,6 +168,7 @@ enum class SettingsRoute {
     WRITING_TOOLS,
     CLIPBOARD,
     EMOJI,
+    STATS,
     ABOUT
 }
 
@@ -171,6 +179,8 @@ fun TapwingSettingsApp(
     secureKeyStorage: SecureKeyStorage,
     dictionaryStore: AdaptiveDictionaryStore,
     modelManager: LocalModelManager,
+    packManager: OfflineDictionaryPackManager,
+    statsStore: TypingStatsStore,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
@@ -224,6 +234,8 @@ fun TapwingSettingsApp(
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshImeStatus()
                 dictionaryStore.reloadIfModifiedOnDisk()
+                statsStore.reloadIfModifiedOnDisk()
+                packManager.refreshStates()
                 dictRevision++
             }
         }
@@ -256,6 +268,7 @@ fun TapwingSettingsApp(
                     SettingsRoute.WRITING_TOOLS -> stringResource(R.string.nav_writing_tools)
                     SettingsRoute.CLIPBOARD -> stringResource(R.string.nav_clipboard)
                     SettingsRoute.EMOJI -> stringResource(R.string.nav_emoji)
+                    SettingsRoute.STATS -> if (de) "Tastatur-Statistik" else "Typing Statistics"
                     SettingsRoute.ABOUT -> stringResource(R.string.nav_about)
                 }
                 CenterAlignedTopAppBar(
@@ -302,6 +315,7 @@ fun TapwingSettingsApp(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            val liveStats by statsStore.stats.collectAsState()
             AnimatedContent(
                 targetState = route,
                 transitionSpec = {
@@ -326,6 +340,7 @@ fun TapwingSettingsApp(
                         imeEnabled = imeEnabled,
                         imeSelected = imeSelected,
                         dictWordCount = remember(dictRevision) { dictionaryStore.stats().customWordCount },
+                        wordsTypedCount = liveStats.wordsTyped,
                         searchQuery = searchQuery,
                         onSearchQueryChange = { searchQuery = it },
                         testInputText = testInputText,
@@ -360,6 +375,7 @@ fun TapwingSettingsApp(
                         prefs = prefs,
                         de = de,
                         dictionaryStore = dictionaryStore,
+                        packManager = packManager,
                         onDictionaryChanged = { dictRevision++ },
                         onUpdatePrefs = onUpdatePrefs
                     )
@@ -373,6 +389,11 @@ fun TapwingSettingsApp(
                     SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(prefs, de, secureKeyStorage, modelManager, onUpdatePrefs)
                     SettingsRoute.CLIPBOARD -> ClipboardSettingsScreen(prefs, de, onUpdatePrefs)
                     SettingsRoute.EMOJI -> EmojiSettingsScreen(prefs, de, onUpdatePrefs)
+                    SettingsRoute.STATS -> TypingStatsScreen(
+                        stats = liveStats,
+                        de = de,
+                        onReset = { statsStore.reset() }
+                    )
                     SettingsRoute.ABOUT -> AboutSettingsScreen(
                         de = de,
                         onOpenImeSystemSettings = {
@@ -419,6 +440,7 @@ private fun HomeSettingsScreen(
     imeEnabled: Boolean,
     imeSelected: Boolean,
     dictWordCount: Int,
+    wordsTypedCount: Long,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     testInputText: String,
@@ -528,6 +550,14 @@ private fun HomeSettingsScreen(
             icon = Icons.Rounded.EmojiEmotions,
             badgeColor = Color(0xFFFF9F0A),
             keywords = "emoji größe vorschläge"
+        ),
+        HomeNavItem(
+            route = SettingsRoute.STATS,
+            title = if (de) "Tastatur-Statistik" else "Typing Statistics",
+            value = "$wordsTypedCount",
+            icon = Icons.Rounded.BarChart,
+            badgeColor = Color(0xFF34C759),
+            keywords = "statistik wpm geschwindigkeit wörter gespart zeichen swipe"
         ),
         HomeNavItem(
             route = SettingsRoute.ABOUT,
@@ -843,6 +873,29 @@ private fun AppearanceScreen(
                         if (idx < OneHandedMode.entries.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
                     }
                 }
+            }
+        }
+
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Geteilte Tastatur (Tablet & Foldable)" else "Split Keyboard (Tablet & Foldable)")
+                AppleGroupedSurface {
+                    SplitKeyboardMode.entries.forEachIndexed { idx, mode ->
+                        val label = when (mode) {
+                            SplitKeyboardMode.OFF -> if (de) "Geteiltes Layout: Aus" else "Split layout: Off"
+                            SplitKeyboardMode.AUTO -> if (de) "Automatisch (ab 600dp / Falt-Displays)" else "Auto (tablets & foldables ≥ 600dp)"
+                            SplitKeyboardMode.ALWAYS -> if (de) "Immer geteilt anzeigen" else "Always split"
+                        }
+                        MinimalCheckRow(label, selected = prefs.splitKeyboardMode == mode) {
+                            onUpdatePrefs { it.copy(splitKeyboardMode = mode) }
+                        }
+                        if (idx < SplitKeyboardMode.entries.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                    }
+                }
+                AppleSectionFooter(
+                    if (de) "Teilt die Tastenreihen ergonomisch für Daumen auf Tablets, Foldables oder im Querformat."
+                    else "Splits key rows ergonomically for thumbs on tablets, foldables, or landscape screens."
+                )
             }
         }
     }
@@ -1319,22 +1372,30 @@ private fun DictionaryLearningScreen(
     prefs: TapwingPrefs,
     de: Boolean,
     dictionaryStore: AdaptiveDictionaryStore,
+    packManager: OfflineDictionaryPackManager,
     onDictionaryChanged: () -> Unit,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val packStates by packManager.states.collectAsState()
     var revision by remember { mutableIntStateOf(0) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var newWordInput by remember { mutableStateOf("") }
     var newShortcutTrigger by remember { mutableStateOf("") }
     var newShortcutExpansion by remember { mutableStateOf("") }
+    var newSnippetTrigger by remember { mutableStateOf("") }
+    var newSnippetTitle by remember { mutableStateOf("") }
+    var newSnippetBody by remember { mutableStateOf("") }
+    var profileName by remember(prefs.snippetUserName) { mutableStateOf(prefs.snippetUserName) }
+    var profileEmail by remember(prefs.snippetUserEmail) { mutableStateOf(prefs.snippetUserEmail) }
 
     val stats = remember(revision) { dictionaryStore.stats() }
     val customWords = remember(revision) { dictionaryStore.listCustomWords().take(25) }
     val learnedWords = remember(revision) { dictionaryStore.listTopLearnedWords(12) }
     val rejectedWords = remember(revision) { dictionaryStore.listRejectedCorrections().take(12) }
     val shortcuts = remember(revision) { dictionaryStore.listShortcuts().take(20) }
+    val snippets = remember(revision) { dictionaryStore.listSnippets() }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -1657,6 +1718,199 @@ private fun DictionaryLearningScreen(
             }
         }
 
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Offline-Wörterbuch-Pakete (50.000 Wörter)" else "Offline Dictionary Packs (50k words)")
+                AppleGroupedSurface {
+                    OfflineDictionaryPackManager.availablePacks.forEachIndexed { idx, spec ->
+                        if (idx > 0) AppleHairlineDivider(startIndent = 16.dp)
+                        val state = packStates[spec.langCode] ?: PackInstallState.NotInstalled
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(spec.displayName, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    val sub = when (state) {
+                                        PackInstallState.NotInstalled -> "~${spec.approxSizeKb} KB · Offline"
+                                        is PackInstallState.Downloading -> "${(state.progress * 100).roundToInt()}%"
+                                        is PackInstallState.Installed -> if (de) {
+                                            "Installiert · ${state.wordCount} Wörter"
+                                        } else {
+                                            "Installed · ${state.wordCount} words"
+                                        }
+                                        is PackInstallState.Error -> state.message
+                                    }
+                                    Text(
+                                        text = sub,
+                                        fontSize = 12.sp,
+                                        color = if (state is PackInstallState.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                when (state) {
+                                    is PackInstallState.Downloading -> {
+                                        TextButton(onClick = { packManager.cancelDownload(spec.langCode) }) {
+                                            Text(if (de) "Stopp" else "Cancel", fontSize = 12.sp)
+                                        }
+                                    }
+                                    is PackInstallState.Installed -> {
+                                        IconButton(
+                                            onClick = { packManager.deletePack(spec.langCode) },
+                                            modifier = Modifier.size(30.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                    else -> {
+                                        FilledTonalButton(
+                                            onClick = { packManager.startDownload(spec) },
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(if (de) "Laden" else "Download", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                            if (state is PackInstallState.Downloading) {
+                                LinearProgressIndicator(
+                                    progress = { state.progress },
+                                    modifier = Modifier.fillMaxWidth().height(4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                AppleSectionFooter(
+                    if (de) "Lädt bis zu 50.000 häufige Wörter pro Sprache lokal aufs Gerät — verbessert Wisch-Tippen & Korrektur ohne Internet."
+                    else "Downloads 50,000 high-frequency words locally per language — improves swipe typing & autocorrection offline."
+                )
+            }
+        }
+
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Textbausteine & Platzhalter" else "Multi-line Snippets & Placeholders")
+                AppleGroupedSurface {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AppleInlineField(
+                                value = profileName,
+                                onValueChange = {
+                                    profileName = it
+                                    onUpdatePrefs { p -> p.copy(snippetUserName = it) }
+                                },
+                                placeholder = "{NAME}",
+                                modifier = Modifier.weight(1f)
+                            )
+                            AppleInlineField(
+                                value = profileEmail,
+                                onValueChange = {
+                                    profileEmail = it
+                                    onUpdatePrefs { p -> p.copy(snippetUserEmail = it) }
+                                },
+                                placeholder = "{EMAIL}",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AppleInlineField(
+                                value = newSnippetTrigger,
+                                onValueChange = { newSnippetTrigger = it },
+                                placeholder = if (de) "Kürzel (z.B. /sig)" else "Trigger (e.g. /sig)",
+                                modifier = Modifier.weight(0.4f)
+                            )
+                            AppleInlineField(
+                                value = newSnippetTitle,
+                                onValueChange = { newSnippetTitle = it },
+                                placeholder = if (de) "Titel" else "Title",
+                                modifier = Modifier.weight(0.6f)
+                            )
+                        }
+                        OutlinedTextField(
+                            value = newSnippetBody,
+                            onValueChange = { newSnippetBody = it },
+                            placeholder = {
+                                Text(
+                                    if (de) "Mehrzeiliger Text mit {DATUM}, {ZEIT}, {NAME}, {EMAIL}, {ZWISCHENABLAGE}…"
+                                    else "Multi-line text with {DATE}, {TIME}, {NAME}, {EMAIL}, {CLIPBOARD}…",
+                                    fontSize = 13.sp
+                                )
+                            },
+                            minLines = 3,
+                            maxLines = 6,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        FilledTonalButton(
+                            onClick = {
+                                dictionaryStore.addOrUpdateSnippet(
+                                    trigger = newSnippetTrigger,
+                                    title = newSnippetTitle,
+                                    body = newSnippetBody
+                                )
+                                newSnippetTrigger = ""
+                                newSnippetTitle = ""
+                                newSnippetBody = ""
+                                revision++
+                                onDictionaryChanged()
+                            },
+                            enabled = newSnippetTrigger.isNotBlank() && newSnippetBody.isNotBlank(),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (de) "Textbaustein speichern" else "Save snippet", fontSize = 13.sp)
+                        }
+                    }
+                    snippets.forEach { snippet ->
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("${snippet.trigger} · ${snippet.title}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = snippet.body,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    dictionaryStore.deleteSnippet(snippet.id)
+                                    revision++
+                                    onDictionaryChanged()
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+                AppleSectionFooter(
+                    if (de) "Platzhalter: {DATUM}, {ZEIT}, {WOCHE}, {MONAT}, {JAHR}, {WOCHENTAG}, {NAME}, {EMAIL}, {ZWISCHENABLAGE}"
+                    else "Placeholders: {DATE}, {TIME}, {WEEK}, {MONTH}, {YEAR}, {WEEKDAY}, {NAME}, {EMAIL}, {CLIPBOARD}"
+                )
+            }
+        }
+
         if (learnedWords.isNotEmpty() || rejectedWords.isNotEmpty()) {
             item {
                 Column {
@@ -1770,6 +2024,14 @@ private fun CorrectionsScreen(
                     AppleHairlineDivider(startIndent = 16.dp)
                     MinimalToggleRow(if (de) "Adaptives Lernen" else "Adaptive learning", prefs.learningEnabled) { v ->
                         onUpdatePrefs { it.copy(learningEnabled = v) }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(if (de) "Pro-App Schreibstil & Kontext lernen" else "Learn style & words per app", prefs.perAppLearningEnabled) { v ->
+                        onUpdatePrefs { it.copy(perAppLearningEnabled = v) }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(if (de) "Passwort-Autofill in Leiste (Bitwarden & Co.)" else "Inline password autofill (Bitwarden, etc.)", prefs.inlineAutofillEnabled) { v ->
+                        onUpdatePrefs { it.copy(inlineAutofillEnabled = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
                     MinimalToggleRow(if (de) "Inline-Taschenrechner" else "Inline math", prefs.inlineMathEnabled) { v ->
@@ -2889,5 +3151,80 @@ private fun MinimalActionRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+@Composable
+private fun TypingStatsScreen(
+    stats: TypingStats,
+    de: Boolean,
+    onReset: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Geschwindigkeit & Leistung" else "Speed & Productivity")
+                AppleGroupedSurface {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        StatBadge(if (de) "Tempo" else "Speed", if (stats.estimatedWpm > 0) "${stats.estimatedWpm} WPM" else "—")
+                        StatBadge(if (de) "Wörter" else "Words", stats.wordsTyped.toString())
+                        StatBadge(if (de) "Gespart" else "Saved", "${stats.charactersSaved}")
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalValueRow(
+                        if (de) "Getippte Zeichen" else "Characters typed",
+                        stats.charactersTyped.toString()
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalValueRow(
+                        if (de) "Angenommene Vorschläge" else "Suggestions accepted",
+                        stats.suggestionsAccepted.toString()
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalValueRow(
+                        if (de) "Autokorrekturen" else "Autocorrections applied",
+                        stats.autocorrectionsApplied.toString()
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalValueRow(
+                        if (de) "Wisch-Wörter (Glide)" else "Swipe-typed words",
+                        stats.swipesDecoded.toString()
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalValueRow(
+                        if (de) "Spracheingaben" else "Voice dictations",
+                        stats.voiceDictations.toString()
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalValueRow(
+                        if (de) "Textbausteine eingefügt" else "Snippets inserted",
+                        stats.snippetsInserted.toString()
+                    )
+                }
+                AppleSectionFooter(
+                    if (de) "100% lokal auf deinem Gerät gespeichert. Im Inkognito-Modus pausiert die Zählung automatisch."
+                    else "Stored 100% locally on your device. Automatically pauses in Incognito mode."
+                )
+            }
+        }
+
+        item {
+            AppleGroupedSurface {
+                MinimalActionRow(
+                    title = if (de) "Statistik zurücksetzen" else "Reset statistics",
+                    textColor = MaterialTheme.colorScheme.error,
+                    onClick = onReset
+                )
+            }
+        }
     }
 }

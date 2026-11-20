@@ -3,6 +3,9 @@ package com.tapwing.keyboard.ui.keyboard
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.view.HapticFeedbackConstants
+import android.view.View
+import android.view.ViewGroup
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -80,6 +83,7 @@ fun SuggestionStrip(
     proactiveUndo: UndoSnapshot?,
     recentScreenshot: RecentScreenshot?,
     otpChipText: String?,
+    inlineAutofillViews: List<View> = emptyList(),
     voiceState: VoiceUiState,
     isTyping: Boolean,
     onOpenToolsHub: () -> Unit,
@@ -106,11 +110,13 @@ fun SuggestionStrip(
     val showUndo = proactiveUndo != null && prefs.proactiveUndo
     val showOtp = !showUndo && !otpChipText.isNullOrBlank() && !isTyping
     val showShot = !showUndo && !showOtp && recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
-    val showSuggestions = !showUndo && !showOtp && !showShot && suggestions.isNotEmpty() &&
+    val showAutofill = !showUndo && !showOtp && !showShot && inlineAutofillViews.isNotEmpty() && !isTyping
+    val showSuggestions = !showUndo && !showOtp && !showShot && !showAutofill && suggestions.isNotEmpty() &&
         (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
-    // 0 = quick bar, 1 = undo / otp / screenshot chip, 2 = Gboard-style suggestion cells
+    // 0 = quick bar, 1 = undo / otp / screenshot chip, 2 = suggestion cells, 3 = inline autofill (Bitwarden, etc.)
     val middleKind = when {
         showUndo || showOtp || showShot -> 1
+        showAutofill -> 3
         showSuggestions -> 2
         else -> 0
     }
@@ -155,6 +161,26 @@ fun SuggestionStrip(
                     label = "stripMiddle"
                 ) { kind ->
                     when (kind) {
+                        3 -> Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            inlineAutofillViews.forEach { autofillView ->
+                                AndroidView(
+                                    factory = {
+                                        (autofillView.parent as? ViewGroup)?.removeView(autofillView)
+                                        autofillView
+                                    },
+                                    update = { v ->
+                                        v.requestLayout()
+                                    },
+                                    modifier = Modifier.height(40.dp)
+                                )
+                            }
+                        }
                         2 -> SuggestionCells(
                             suggestions = suggestions.take(3),
                             onSelect = onSelectSuggestion

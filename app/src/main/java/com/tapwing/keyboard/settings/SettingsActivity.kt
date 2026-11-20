@@ -15,7 +15,9 @@ import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import com.tapwing.keyboard.data.TapwingPrefs
+import com.tapwing.keyboard.data.TypingStatsStore
 import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
+import com.tapwing.keyboard.dictionary.OfflineDictionaryPackManager
 import com.tapwing.keyboard.ui.theme.TapwingTheme
 import kotlinx.coroutines.launch
 
@@ -29,6 +31,8 @@ class SettingsActivity : ComponentActivity() {
         val secureKeyStorage = SecureKeyStorage(this)
         val dictionaryStore = AdaptiveDictionaryStore.createForContext(this)
         val modelManager = LocalModelManager(this)
+        val packManager = OfflineDictionaryPackManager(this)
+        val statsStore = TypingStatsStore.createForContext(this)
 
         setContent {
             val prefs by prefsRepo.prefsFlow.collectAsState(initial = TapwingPrefs())
@@ -49,6 +53,8 @@ class SettingsActivity : ComponentActivity() {
                         secureKeyStorage = secureKeyStorage,
                         dictionaryStore = dictionaryStore,
                         modelManager = modelManager,
+                        packManager = packManager,
+                        statsStore = statsStore,
                         onUpdatePrefs = { transform ->
                             scope.launch {
                                 prefsRepo.update(transform)

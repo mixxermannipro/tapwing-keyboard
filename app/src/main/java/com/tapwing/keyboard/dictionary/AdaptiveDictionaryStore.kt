@@ -2,6 +2,7 @@ package com.tapwing.keyboard.dictionary
 
 import android.content.Context
 import androidx.core.content.ContextCompat
+import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.data.KeyboardLocales
 import org.json.JSONArray
 import org.json.JSONObject
@@ -12,13 +13,16 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 data class DictionaryStats(
     val customWordCount: Int,
     val shortcutCount: Int,
+    val snippetCount: Int = 0,
     val learnedWordCount: Int,
     val learnedBigramCount: Int,
     val learnedTrigramCount: Int = 0,
+    val perAppProfileCount: Int = 0,
     val rejectedCount: Int
 )
 
@@ -52,12 +56,16 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     private val learnedBigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
     private val learnedTrigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
     private val learnedEmojis = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    private val perAppUnigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    private val perAppTones = linkedMapOf<String, String>()
+    private val snippets = mutableListOf<TextSnippet>()
     private val rejectedCorrections = linkedSetOf<String>()
 
     private var lastLoadedModMs: Long = -1L
 
     init {
         seedDefaultShortcutsIfEmpty()
+        seedDefaultSnippetsIfEmpty()
         loadFromDisk()
     }
 
@@ -164,7 +172,8 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         incognito: Boolean,
         previousTwoWord: String? = null,
         wasSentenceStart: Boolean = false,
-        locale: String = "de"
+        locale: String = "de",
+        appPackage: String? = null
     ) {
         if (!learningEnabled || incognito) return
         val clean = word.trim()
@@ -236,7 +245,85 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                 trimOuterMap(learnedTrigrams, MAX_TRIGRAM_CONTEXTS)
             }
         }
+
+        val cleanPkg = appPackage?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanPkg != null) {
+            val appMap = perAppUnigrams.getOrPut(cleanPkg) { linkedMapOf() }
+            appMap[storedForm] = ((appMap[storedForm] ?: 0) + 1).coerceAtMost(5_000)
+            trimSubMap(appMap, MAX_PER_APP_WORDS)
+            trimOuterMap(perAppUnigrams, MAX_APP_PROFILES)
+        }
         saveToDisk()
+    }
+
+    @Synchronized
+    fun recordAppWritingAction(appPackage: String?, action: WritingAction, learningEnabled: Boolean, incognito: Boolean) {
+        if (!learningEnabled || incognito) return
+        val pkg = appPackage?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        if (action in setOf(WritingAction.PROFESSIONAL, WritingAction.CASUAL, WritingAction.CONCISE, WritingAction.EMOTIVE)) {
+            perAppTones[pkg] = action.name
+            trimOuterMap(perAppTones, MAX_APP_PROFILES)
+            saveToDisk()
+        }
+    }
+
+    @Synchronized
+    fun preferredToneForApp(appPackage: String?): WritingAction? {
+        val pkg = appPackage?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        perAppTones[pkg]?.let { raw ->
+            return runCatching { WritingAction.valueOf(raw) }.getOrNull()
+        }
+        val lowerPkg = pkg.lowercase()
+        return when {
+            lowerPkg.contains("whatsapp") || lowerPkg.contains("telegram") ||
+                lowerPkg.contains("signal") || lowerPkg.contains("discord") ||
+                lowerPkg.contains("instagram") || lowerPkg.contains("messaging") -> WritingAction.CASUAL
+            lowerPkg.contains("gm") || lowerPkg.contains("outlook") ||
+                lowerPkg.contains("office") || lowerPkg.contains("teams") ||
+                lowerPkg.contains("slack") || lowerPkg.contains("linkedin") -> WritingAction.PROFESSIONAL
+            else -> null
+        }
+    }
+
+    @Synchronized
+    fun listSnippets(): List<TextSnippet> = snippets.toList()
+
+    @Synchronized
+    fun addOrUpdateSnippet(trigger: String, title: String, body: String, existingId: String? = null) {
+        val cleanTrigger = trigger.trim().lowercase().let {
+            if (it.startsWith("/")) it else "/$it"
+        }
+        val cleanTitle = title.trim().ifEmpty { cleanTrigger }
+        val cleanBody = body.trim()
+        if (cleanTrigger.length < 2 || cleanBody.isEmpty()) return
+
+        val idx = if (existingId != null) snippets.indexOfFirst { it.id == existingId } else -1
+        val item = TextSnippet(
+            id = existingId ?: UUID.randomUUID().toString(),
+            trigger = cleanTrigger,
+            title = cleanTitle,
+            body = cleanBody
+        )
+        if (idx >= 0) {
+            snippets[idx] = item
+        } else {
+            snippets.removeAll { it.trigger.equals(cleanTrigger, ignoreCase = true) }
+            snippets.add(0, item)
+        }
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun deleteSnippet(id: String) {
+        snippets.removeAll { it.id == id }
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun lookupSnippet(token: String): TextSnippet? {
+        val lower = token.trim().lowercase()
+        if (lower.isEmpty()) return null
+        return snippets.firstOrNull { it.trigger.equals(lower, ignoreCase = true) }
     }
 
     @Synchronized
@@ -360,7 +447,8 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         limit: Int = 5,
         previousWord: String? = null,
         previousTwoWord: String? = null,
-        atSentenceStart: Boolean = false
+        atSentenceStart: Boolean = false,
+        appPackage: String? = null
     ): List<String> {
         val lower = prefix.lowercase()
         if (lower.isEmpty()) return emptyList()
@@ -372,6 +460,7 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         val trigramMap = if (prevLower.isNotEmpty() && prev2Lower.isNotEmpty()) {
             learnedTrigrams["$prev2Lower $prevLower"]
         } else null
+        val appMap = appPackage?.trim()?.takeIf { it.isNotEmpty() }?.let { perAppUnigrams[it] }
 
         fun addScore(word: String, baseScore: Double) {
             val cleanWord = if (!atSentenceStart &&
@@ -387,7 +476,8 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             val recencyBonus = ((wordRecency[cleanWord.lowercase()] ?: 0L).toDouble() / maxOf(1L, recencyClock)) * 180.0
             val biBoost = (bigramMap?.get(cleanWord) ?: bigramMap?.get(cleanWord.lowercase()) ?: 0) * 400.0
             val triBoost = (trigramMap?.get(cleanWord) ?: trigramMap?.get(cleanWord.lowercase()) ?: 0) * 750.0
-            val total = baseScore + recencyBonus + biBoost + triBoost
+            val appBoost = (appMap?.get(cleanWord) ?: appMap?.get(cleanWord.lowercase()) ?: 0) * 260.0
+            val total = baseScore + recencyBonus + biBoost + triBoost + appBoost
             scored[cleanWord] = maxOf(scored[cleanWord] ?: 0.0, total)
         }
 
@@ -396,6 +486,9 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         }
         learnedUnigrams.forEach { (word, count) ->
             addScore(word, 500.0 + count * 15.0)
+        }
+        appMap?.forEach { (word, count) ->
+            addScore(word, 650.0 + count * 30.0)
         }
         bigramMap?.forEach { (word, count) ->
             addScore(word, 700.0 + count * 20.0)
@@ -427,20 +520,24 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     fun predictNextWords(
         previousWord: String,
         limit: Int = 3,
-        previousTwoWord: String? = null
+        previousTwoWord: String? = null,
+        appPackage: String? = null
     ): List<String> {
         val prevLower = previousWord.trim().lowercase()
         if (prevLower.isEmpty()) return emptyList()
         val combined = linkedMapOf<String, Int>()
+        val appMap = appPackage?.trim()?.takeIf { it.isNotEmpty() }?.let { perAppUnigrams[it] }
 
         val prev2Lower = previousTwoWord?.trim()?.lowercase().orEmpty()
         if (prev2Lower.isNotEmpty()) {
             learnedTrigrams["$prev2Lower $prevLower"]?.forEach { (word, count) ->
-                combined[word] = (combined[word] ?: 0) + count * 3
+                val appBoost = (appMap?.get(word) ?: 0) * 2
+                combined[word] = (combined[word] ?: 0) + count * 3 + appBoost
             }
         }
         learnedBigrams[prevLower]?.forEach { (word, count) ->
-            combined[word] = (combined[word] ?: 0) + count
+            val appBoost = (appMap?.get(word) ?: 0) * 2
+            combined[word] = (combined[word] ?: 0) + count + appBoost
         }
 
         return combined.entries
@@ -501,6 +598,8 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         learnedBigrams.clear()
         learnedTrigrams.clear()
         learnedEmojis.clear()
+        perAppUnigrams.clear()
+        perAppTones.clear()
         rejectedCorrections.clear()
         saveToDisk()
     }
@@ -521,9 +620,11 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         return DictionaryStats(
             customWordCount = customWords.size,
             shortcutCount = shortcuts.size,
+            snippetCount = snippets.size,
             learnedWordCount = learnedUnigrams.size,
             learnedBigramCount = bigramPairs,
             learnedTrigramCount = trigramPairs,
+            perAppProfileCount = perAppUnigrams.size,
             rejectedCount = rejectedCorrections.size
         )
     }
@@ -535,6 +636,29 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             shortcuts["vg"] = "Viele Grüße"
             shortcuts["br"] = "Best regards"
             shortcuts["omw"] = "On my way!"
+        }
+    }
+
+    private fun seedDefaultSnippetsIfEmpty() {
+        if (snippets.isEmpty()) {
+            snippets += TextSnippet(
+                id = "default_sig",
+                trigger = "/sig",
+                title = "Signatur",
+                body = "Viele Grüße\n{NAME}\n{EMAIL}"
+            )
+            snippets += TextSnippet(
+                id = "default_termin",
+                trigger = "/termin",
+                title = "Termin-Vorschlag",
+                body = "Hallo,\nwie wäre es am {WOCHENTAG}, {DATUM} um {ZEIT} Uhr?\nViele Grüße\n{NAME}"
+            )
+            snippets += TextSnippet(
+                id = "default_meeting_en",
+                trigger = "/meet",
+                title = "Meeting Reply (EN)",
+                body = "Hi,\nLet's connect on {DATE} ({WEEK}) at {TIME}.\nBest,\n{NAME}"
+            )
         }
     }
 
@@ -646,6 +770,42 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                 }
             }
 
+            perAppUnigrams.clear()
+            root.optJSONObject("perAppUnigrams")?.let { obj ->
+                obj.keys().forEach { pkg ->
+                    val sub = obj.optJSONObject(pkg) ?: return@forEach
+                    val map = linkedMapOf<String, Int>()
+                    sub.keys().forEach { w -> map[w] = sub.optInt(w, 1) }
+                    if (map.isNotEmpty()) perAppUnigrams[pkg] = map
+                }
+            }
+
+            perAppTones.clear()
+            root.optJSONObject("perAppTones")?.let { obj ->
+                obj.keys().forEach { pkg ->
+                    val tone = obj.optString(pkg, "").trim()
+                    if (tone.isNotEmpty()) perAppTones[pkg] = tone
+                }
+            }
+
+            root.optJSONArray("snippets")?.let { arr ->
+                snippets.clear()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val trig = o.optString("trigger", "").trim()
+                    val body = o.optString("body", "")
+                    if (trig.isNotEmpty() && body.isNotEmpty()) {
+                        snippets += TextSnippet(
+                            id = o.optString("id", UUID.randomUUID().toString()),
+                            trigger = trig,
+                            title = o.optString("title", trig),
+                            body = body
+                        )
+                    }
+                }
+                if (snippets.isEmpty()) seedDefaultSnippetsIfEmpty()
+            }
+
             entryLocales.clear()
             root.optJSONObject("entryLocales")?.let { obj ->
                 obj.keys().forEach { k ->
@@ -707,6 +867,24 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                     put(w, JSONObject().apply { sub.forEach { (e, c) -> put(e, c) } })
                 }
             })
+            root.put("perAppUnigrams", JSONObject().apply {
+                perAppUnigrams.forEach { (pkg, sub) ->
+                    put(pkg, JSONObject().apply { sub.forEach { (w, c) -> put(w, c) } })
+                }
+            })
+            root.put("perAppTones", JSONObject().apply {
+                perAppTones.forEach { (pkg, tone) -> put(pkg, tone) }
+            })
+            root.put("snippets", JSONArray().apply {
+                snippets.forEach { s ->
+                    put(JSONObject().apply {
+                        put("id", s.id)
+                        put("trigger", s.trigger)
+                        put("title", s.title)
+                        put("body", s.body)
+                    })
+                }
+            })
             root.put("rejected", JSONArray().apply {
                 rejectedCorrections.forEach { put(it) }
             })
@@ -721,6 +899,8 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         private const val MAX_FOLLOWERS_PER_HEAD = 30
         private const val MAX_TRIGRAM_CONTEXTS = 2_000
         private const val MAX_TRIGRAM_FOLLOWERS = 15
+        private const val MAX_APP_PROFILES = 40
+        private const val MAX_PER_APP_WORDS = 200
 
         fun createForContext(context: Context): AdaptiveDictionaryStore {
             val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)

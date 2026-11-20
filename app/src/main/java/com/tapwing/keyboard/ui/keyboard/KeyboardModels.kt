@@ -25,7 +25,8 @@ enum class KeyboardPanelMode {
     EMOJI,
     RESIZE,
     TEXT_EDIT,
-    QUICK_SEARCH
+    QUICK_SEARCH,
+    SNIPPETS
 }
 
 enum class KeyActionType {

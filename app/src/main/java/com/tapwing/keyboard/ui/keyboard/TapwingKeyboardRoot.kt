@@ -1,6 +1,7 @@
 package com.tapwing.keyboard.ui.keyboard
 
 import android.view.HapticFeedbackConstants
+import android.view.View
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -54,6 +55,7 @@ import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.KeyCenter
 import com.tapwing.keyboard.dictionary.SuggestionChip
 import com.tapwing.keyboard.dictionary.SwipePoint
+import com.tapwing.keyboard.dictionary.TextSnippet
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
 import com.tapwing.keyboard.ui.theme.TapwingTheme
 import com.tapwing.keyboard.undo.UndoSnapshot
@@ -71,6 +73,8 @@ fun TapwingKeyboardRoot(
     proactiveUndo: UndoSnapshot?,
     recentScreenshot: RecentScreenshot?,
     otpChipText: String?,
+    inlineAutofillViews: List<View> = emptyList(),
+    snippets: List<TextSnippet> = emptyList(),
     voiceState: VoiceUiState,
     writingSourceText: String,
     writingOutput: WritingToolsOutput?,
@@ -105,6 +109,8 @@ fun TapwingKeyboardRoot(
     onRunWritingAction: (WritingAction) -> Unit,
     onApplyWritingResult: (String) -> Unit,
     onOpenClipboard: () -> Unit,
+    onOpenSnippets: () -> Unit = {},
+    onInsertSnippet: (TextSnippet, String) -> Unit = { _, _ -> },
     onPasteClip: (ClipboardClip) -> Unit,
     onPasteClipOcr: (ClipboardClip) -> Unit,
     onTogglePinClip: (ClipboardClip) -> Unit,
@@ -236,6 +242,7 @@ fun TapwingKeyboardRoot(
                                     onOpenCustomizeBar = onOpenCustomizeBar,
                                     onOpenWritingTools = onOpenWritingTools,
                                     onOpenClipboard = onOpenClipboard,
+                                    onOpenSnippets = onOpenSnippets,
                                     onOpenResize = onOpenResize,
                                     onOpenTextEdit = onOpenTextEdit,
                                     onOpenScanText = onOpenScanText,
@@ -267,6 +274,16 @@ fun TapwingKeyboardRoot(
                                     onTogglePin = onTogglePinClip,
                                     onDeleteClip = onDeleteClip,
                                     onClearUnpinned = onClearUnpinnedClips
+                                )
+                            }
+                            KeyboardPanelMode.SNIPPETS -> {
+                                val latestClipText = clips.firstOrNull { !it.isImage }?.text.orEmpty()
+                                SnippetsPanel(
+                                    prefs = prefs,
+                                    snippets = snippets,
+                                    latestClipboardText = latestClipText,
+                                    onBack = onCloseSubPanel,
+                                    onInsertSnippet = onInsertSnippet
                                 )
                             }
                             KeyboardPanelMode.EMOJI -> {
@@ -324,6 +341,7 @@ fun TapwingKeyboardRoot(
                                         proactiveUndo = proactiveUndo,
                                         recentScreenshot = recentScreenshot,
                                         otpChipText = otpChipText,
+                                        inlineAutofillViews = inlineAutofillViews,
                                         voiceState = voiceState,
                                         isTyping = isTyping,
                                         onOpenToolsHub = onOpenToolsHub,
