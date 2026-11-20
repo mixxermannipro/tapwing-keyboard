@@ -1,5 +1,7 @@
 package com.tapwing.keyboard.ui.keyboard
 
+import com.tapwing.keyboard.data.KeyboardLocales
+
 enum class KeyboardLayoutPage {
     LETTERS,
     SYMBOLS,
@@ -51,13 +53,6 @@ data class KeySpec(
 
 object KeyboardLayouts {
 
-    /**
-     * 1:1 German QWERTZ layout matching PixelBoard's key arrangement & top-center symbol hints:
-     * Row 1: q(%) w(\) e(|) r(=) t([) z(]) u(<) i(>) o({) p(})
-     * Row 2: a(@) s(#) d(€) f(_) g(&) h(-) j(+) k(() l())
-     * Row 3: ⇧ y(*) x(") c(') v(:) b(;) n(!) m(?) ⌫
-     * Row 4: ?123 , ☺ [Space] . ↵
-     */
     private val germanPixelRows: List<List<KeySpec>> = listOf(
         listOf(
             KeySpec("q", hint = "%", alternates = listOf("%", "1")),
@@ -93,14 +88,7 @@ object KeyboardLayouts {
             KeySpec("m", hint = "?", alternates = listOf("?")),
             KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
         ),
-        listOf(
-            KeySpec("?123", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
-            KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
-            KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
-            KeySpec("Deutsch", output = " ", weight = 3.85f, type = KeyActionType.SPACE),
-            KeySpec(".", weight = 1f, type = KeyActionType.PERIOD, alternates = listOf("?", "!", ",", ":", ";", "-", "'")),
-            KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
-        )
+        bottomRow("Deutsch")
     )
 
     private val germanRowsWithDirectUmlauts: List<List<KeySpec>> = listOf(
@@ -134,29 +122,147 @@ object KeyboardLayouts {
         germanPixelRows[3]
     )
 
-    private val englishRows: List<List<KeySpec>> = listOf(
+    private val swissGermanRows: List<List<KeySpec>> = listOf(
         listOf(
             KeySpec("q", hint = "%", alternates = listOf("%", "1")),
             KeySpec("w", hint = "\\", alternates = listOf("\\", "2")),
-            KeySpec("e", hint = "|", alternates = listOf("|", "é", "è", "3")),
+            KeySpec("e", hint = "|", alternates = listOf("|", "é", "è", "ê", "€", "3")),
             KeySpec("r", hint = "=", alternates = listOf("=", "4")),
             KeySpec("t", hint = "[", alternates = listOf("[", "5")),
-            KeySpec("y", hint = "]", alternates = listOf("]", "6")),
-            KeySpec("u", hint = "<", alternates = listOf("<", "ü", "7")),
-            KeySpec("i", hint = ">", alternates = listOf(">", "8")),
-            KeySpec("o", hint = "{", alternates = listOf("{", "ö", "9")),
+            KeySpec("z", hint = "]", alternates = listOf("]", "6")),
+            KeySpec("u", hint = "<", alternates = listOf("<", "ü", "ù", "ú", "7")),
+            KeySpec("i", hint = ">", alternates = listOf(">", "î", "ï", "8")),
+            KeySpec("o", hint = "{", alternates = listOf("{", "ö", "ô", "ò", "9")),
             KeySpec("p", hint = "}", alternates = listOf("}", "0"))
         ),
         listOf(
-            KeySpec("a", hint = "@", alternates = listOf("@", "ä", "á", "à")),
-            KeySpec("s", hint = "#", alternates = listOf("#", "ß", "$")),
-            KeySpec("d", hint = "$", alternates = listOf("$")),
+            KeySpec("a", hint = "@", alternates = listOf("@", "ä", "à", "â", "á")),
+            KeySpec("s", hint = "#", alternates = listOf("#", "ß", "ś")),
+            KeySpec("d", hint = "$", alternates = listOf("$", "€")),
             KeySpec("f", hint = "_", alternates = listOf("_")),
             KeySpec("g", hint = "&", alternates = listOf("&")),
             KeySpec("h", hint = "-", alternates = listOf("-")),
             KeySpec("j", hint = "+", alternates = listOf("+")),
             KeySpec("k", hint = "(", alternates = listOf("(")),
             KeySpec("l", hint = ")", alternates = listOf(")"))
+        ),
+        germanPixelRows[2],
+        bottomRow("Deutsch (CH)")
+    )
+
+    private fun qwertyRows(
+        spaceLabel: String,
+        currencyHint: String = "$",
+        aAlts: List<String> = listOf("@", "ä", "á", "à", "â", "ã"),
+        eAlts: List<String> = listOf("|", "é", "è", "ê", "ë", "€", "3"),
+        iAlts: List<String> = listOf(">", "í", "ì", "î", "ï", "8"),
+        oAlts: List<String> = listOf("{", "ö", "ó", "ò", "ô", "õ", "9"),
+        uAlts: List<String> = listOf("<", "ü", "ú", "ù", "û", "7"),
+        sAlts: List<String> = listOf("#", "ß", "ś", "ş", "š"),
+        cAlts: List<String> = listOf("'", "ç", "ć"),
+        nAlts: List<String> = listOf("!", "ñ", "ń"),
+        zAlts: List<String> = listOf("*", "ż", "ź"),
+        lAlts: List<String> = listOf(")", "ł"),
+        gAlts: List<String> = listOf("&", "ğ")
+    ): List<List<KeySpec>> = listOf(
+        listOf(
+            KeySpec("q", hint = "%", alternates = listOf("%", "1")),
+            KeySpec("w", hint = "\\", alternates = listOf("\\", "2")),
+            KeySpec("e", hint = "|", alternates = eAlts),
+            KeySpec("r", hint = "=", alternates = listOf("=", "4")),
+            KeySpec("t", hint = "[", alternates = listOf("[", "5")),
+            KeySpec("y", hint = "]", alternates = listOf("]", "6")),
+            KeySpec("u", hint = "<", alternates = uAlts),
+            KeySpec("i", hint = ">", alternates = iAlts),
+            KeySpec("o", hint = "{", alternates = oAlts),
+            KeySpec("p", hint = "}", alternates = listOf("}", "0"))
+        ),
+        listOf(
+            KeySpec("a", hint = "@", alternates = aAlts),
+            KeySpec("s", hint = "#", alternates = sAlts),
+            KeySpec("d", hint = currencyHint, alternates = listOf(currencyHint, "$", "€", "£")),
+            KeySpec("f", hint = "_", alternates = listOf("_")),
+            KeySpec("g", hint = "&", alternates = gAlts),
+            KeySpec("h", hint = "-", alternates = listOf("-")),
+            KeySpec("j", hint = "+", alternates = listOf("+")),
+            KeySpec("k", hint = "(", alternates = listOf("(")),
+            KeySpec("l", hint = ")", alternates = lAlts)
+        ),
+        listOf(
+            KeySpec("⇧", weight = 1.45f, type = KeyActionType.SHIFT),
+            KeySpec("z", hint = "*", alternates = zAlts),
+            KeySpec("x", hint = "\"", alternates = listOf("\"")),
+            KeySpec("c", hint = "'", alternates = cAlts),
+            KeySpec("v", hint = ":", alternates = listOf(":")),
+            KeySpec("b", hint = ";", alternates = listOf(";")),
+            KeySpec("n", hint = "!", alternates = nAlts),
+            KeySpec("m", hint = "?", alternates = listOf("?")),
+            KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
+        ),
+        bottomRow(spaceLabel)
+    )
+
+    private val frenchAzertyRows: List<List<KeySpec>> = listOf(
+        listOf(
+            KeySpec("a", hint = "%", alternates = listOf("%", "à", "â", "á", "1")),
+            KeySpec("z", hint = "\\", alternates = listOf("\\", "2")),
+            KeySpec("e", hint = "|", alternates = listOf("|", "é", "è", "ê", "ë", "€", "3")),
+            KeySpec("r", hint = "=", alternates = listOf("=", "4")),
+            KeySpec("t", hint = "[", alternates = listOf("[", "5")),
+            KeySpec("y", hint = "]", alternates = listOf("]", "ÿ", "6")),
+            KeySpec("u", hint = "<", alternates = listOf("<", "ù", "û", "ü", "7")),
+            KeySpec("i", hint = ">", alternates = listOf(">", "î", "ï", "8")),
+            KeySpec("o", hint = "{", alternates = listOf("{", "ô", "œ", "ö", "9")),
+            KeySpec("p", hint = "}", alternates = listOf("}", "0"))
+        ),
+        listOf(
+            KeySpec("q", hint = "@", alternates = listOf("@")),
+            KeySpec("s", hint = "#", alternates = listOf("#")),
+            KeySpec("d", hint = "€", alternates = listOf("€")),
+            KeySpec("f", hint = "_", alternates = listOf("_")),
+            KeySpec("g", hint = "&", alternates = listOf("&")),
+            KeySpec("h", hint = "-", alternates = listOf("-")),
+            KeySpec("j", hint = "+", alternates = listOf("+")),
+            KeySpec("k", hint = "(", alternates = listOf("(")),
+            KeySpec("l", hint = ")", alternates = listOf(")")),
+            KeySpec("m", hint = "?", alternates = listOf("?"))
+        ),
+        listOf(
+            KeySpec("⇧", weight = 1.45f, type = KeyActionType.SHIFT),
+            KeySpec("w", hint = "*", alternates = listOf("*")),
+            KeySpec("x", hint = "\"", alternates = listOf("\"")),
+            KeySpec("c", hint = "'", alternates = listOf("'", "ç")),
+            KeySpec("v", hint = ":", alternates = listOf(":")),
+            KeySpec("b", hint = ";", alternates = listOf(";")),
+            KeySpec("n", hint = "!", alternates = listOf("!", "ñ")),
+            KeySpec("'", hint = "«", alternates = listOf("«", "»")),
+            KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
+        ),
+        bottomRow("Français")
+    )
+
+    private val spanishRows: List<List<KeySpec>> = listOf(
+        qwertyRows(
+            spaceLabel = "Español",
+            currencyHint = "€",
+            aAlts = listOf("@", "á", "à", "ä"),
+            eAlts = listOf("|", "é", "è", "€", "3"),
+            iAlts = listOf(">", "í", "ï", "8"),
+            oAlts = listOf("{", "ó", "ö", "9"),
+            uAlts = listOf("<", "ú", "ü", "7"),
+            nAlts = listOf("!", "ñ")
+        )[0],
+        listOf(
+            KeySpec("a", hint = "@", alternates = listOf("@", "á", "à")),
+            KeySpec("s", hint = "#", alternates = listOf("#")),
+            KeySpec("d", hint = "€", alternates = listOf("€", "$")),
+            KeySpec("f", hint = "_", alternates = listOf("_")),
+            KeySpec("g", hint = "&", alternates = listOf("&")),
+            KeySpec("h", hint = "-", alternates = listOf("-")),
+            KeySpec("j", hint = "+", alternates = listOf("+")),
+            KeySpec("k", hint = "(", alternates = listOf("(")),
+            KeySpec("l", hint = ")", alternates = listOf(")")),
+            KeySpec("ñ", alternates = listOf("n", "~"))
         ),
         listOf(
             KeySpec("⇧", weight = 1.45f, type = KeyActionType.SHIFT),
@@ -165,18 +271,33 @@ object KeyboardLayouts {
             KeySpec("c", hint = "'", alternates = listOf("'", "ç")),
             KeySpec("v", hint = ":", alternates = listOf(":")),
             KeySpec("b", hint = ";", alternates = listOf(";")),
-            KeySpec("n", hint = "!", alternates = listOf("!", "ñ")),
-            KeySpec("m", hint = "?", alternates = listOf("?")),
+            KeySpec("n", hint = "!", alternates = listOf("!", "¡", "ñ")),
+            KeySpec("m", hint = "?", alternates = listOf("?", "¿")),
             KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
         ),
-        listOf(
-            KeySpec("?123", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
-            KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
-            KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
-            KeySpec("English", output = " ", weight = 3.85f, type = KeyActionType.SPACE),
-            KeySpec(".", weight = 1f, type = KeyActionType.PERIOD, alternates = listOf("?", "!", ",", ":", ";", "-", "'")),
-            KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
-        )
+        bottomRow("Español")
+    )
+
+    private val turkishRows: List<List<KeySpec>> = qwertyRows(
+        spaceLabel = "Türkçe",
+        currencyHint = "₺",
+        aAlts = listOf("@", "â"),
+        eAlts = listOf("|", "€", "3"),
+        iAlts = listOf(">", "ı", "İ", "î", "8"),
+        oAlts = listOf("{", "ö", "ô", "9"),
+        uAlts = listOf("<", "ü", "û", "7"),
+        sAlts = listOf("#", "ş", "ß"),
+        cAlts = listOf("'", "ç"),
+        gAlts = listOf("&", "ğ")
+    )
+
+    private fun bottomRow(spaceLabel: String): List<KeySpec> = listOf(
+        KeySpec("?123", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
+        KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
+        KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
+        KeySpec(spaceLabel, output = " ", weight = 3.85f, type = KeyActionType.SPACE),
+        KeySpec(".", weight = 1f, type = KeyActionType.PERIOD, alternates = listOf("?", "!", ",", ":", ";", "-", "'")),
+        KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
     )
 
     val numberRow: List<KeySpec> = (1..9).map { KeySpec(it.toString()) } + KeySpec("0")
@@ -237,10 +358,57 @@ object KeyboardLayouts {
     ): List<List<KeySpec>> {
         return when (page) {
             KeyboardLayoutPage.LETTERS -> {
-                val base = when {
-                    locale.startsWith("de") && showGermanUmlauts -> germanRowsWithDirectUmlauts
-                    locale.startsWith("de") -> germanPixelRows
-                    else -> englishRows
+                val base = when (locale) {
+                    "de_CH" -> swissGermanRows
+                    "en_GB" -> qwertyRows(spaceLabel = "English (UK)", currencyHint = "£")
+                    "fr" -> frenchAzertyRows
+                    "es" -> spanishRows
+                    "it" -> qwertyRows(
+                        spaceLabel = "Italiano",
+                        currencyHint = "€",
+                        aAlts = listOf("@", "à", "á"),
+                        eAlts = listOf("|", "è", "é", "€", "3"),
+                        iAlts = listOf(">", "ì", "í", "8"),
+                        oAlts = listOf("{", "ò", "ó", "9"),
+                        uAlts = listOf("<", "ù", "ú", "7")
+                    )
+                    "pt" -> qwertyRows(
+                        spaceLabel = "Português",
+                        currencyHint = "€",
+                        aAlts = listOf("@", "á", "à", "â", "ã"),
+                        eAlts = listOf("|", "é", "ê", "€", "3"),
+                        oAlts = listOf("{", "ó", "ô", "õ", "9"),
+                        cAlts = listOf("'", "ç")
+                    )
+                    "nl" -> qwertyRows(
+                        spaceLabel = "Nederlands",
+                        currencyHint = "€",
+                        eAlts = listOf("|", "é", "ë", "è", "ê", "€", "3"),
+                        iAlts = listOf(">", "ï", "í", "8"),
+                        oAlts = listOf("{", "ö", "ó", "9"),
+                        uAlts = listOf("<", "ü", "ú", "7")
+                    )
+                    "pl" -> qwertyRows(
+                        spaceLabel = "Polski",
+                        currencyHint = "zł",
+                        aAlts = listOf("@", "ą", "á"),
+                        eAlts = listOf("|", "ę", "é", "€", "3"),
+                        oAlts = listOf("{", "ó", "9"),
+                        sAlts = listOf("#", "ś"),
+                        cAlts = listOf("'", "ć"),
+                        nAlts = listOf("!", "ń"),
+                        zAlts = listOf("*", "ż", "ź"),
+                        lAlts = listOf(")", "ł")
+                    )
+                    "tr" -> turkishRows
+                    else -> {
+                        val baseLang = KeyboardLocales.baseLang(locale)
+                        when {
+                            baseLang == "de" && showGermanUmlauts -> germanRowsWithDirectUmlauts
+                            baseLang == "de" -> germanPixelRows
+                            else -> qwertyRows(spaceLabel = "English", currencyHint = "$")
+                        }
+                    }
                 }
                 if (showNumberRow) listOf(numberRow) + base else base
             }

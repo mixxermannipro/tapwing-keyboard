@@ -1,5 +1,7 @@
 package com.tapwing.keyboard.ai
 
+import com.tapwing.keyboard.data.AiProviderType
+import com.tapwing.keyboard.data.KeyboardLocales
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -10,6 +12,7 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 
 sealed interface CloudAiResult {
     data class Success(val text: String, val providerLabel: String) : CloudAiResult
@@ -28,45 +31,77 @@ object CloudAiClient {
         text: String,
         action: WritingAction,
         locale: String,
-        provider: com.tapwing.keyboard.data.AiProviderType,
+        provider: AiProviderType,
         apiKey: String,
         model: String,
-        customEndpoint: String
+        customEndpoint: String,
+        customCleanupPrompt: String = "",
+        useSystemLanguageForCleanup: Boolean = true
     ): CloudAiResult = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) {
-            return@withContext CloudAiResult.Failure("Kein API-Schlüssel konfiguriert")
+        if (provider == AiProviderType.LOCAL_RULES || provider == AiProviderType.LOCAL_LLM) {
+            return@withContext CloudAiResult.Success(
+                LocalWritingAssistant.transform(text, action, locale),
+                "On-Device"
+            )
         }
-        val prompt = buildPrompt(text, action, locale)
+        if (apiKey.isBlank()) {
+            return@withContext CloudAiResult.Failure("No API key configured")
+        }
+        val prompt = buildPrompt(
+            text = text,
+            action = action,
+            locale = locale,
+            customCleanupPrompt = customCleanupPrompt,
+            useSystemLanguageForCleanup = useSystemLanguageForCleanup
+        )
         return@withContext when (provider) {
-            com.tapwing.keyboard.data.AiProviderType.GEMINI_API -> callGemini(apiKey, model, prompt)
-            com.tapwing.keyboard.data.AiProviderType.OPENAI_COMPATIBLE -> callOpenAi(apiKey, model, customEndpoint, prompt)
-            com.tapwing.keyboard.data.AiProviderType.LOCAL_RULES ->
-                CloudAiResult.Success(LocalWritingAssistant.transform(text, action, locale), "On-Device")
+            AiProviderType.GEMINI_API -> callGemini(apiKey, model, prompt)
+            AiProviderType.OPENAI_COMPATIBLE -> callOpenAi(apiKey, model, customEndpoint, prompt)
+            else -> CloudAiResult.Success(LocalWritingAssistant.transform(text, action, locale), "On-Device")
         }
     }
 
     suspend fun testConnection(
-        provider: com.tapwing.keyboard.data.AiProviderType,
+        provider: AiProviderType,
         apiKey: String,
         model: String,
         customEndpoint: String,
         locale: String
     ): CloudAiResult {
-        val sample = if (locale == "de") "Hallo Welt" else "Hello world"
+        val sample = if (KeyboardLocales.baseLang(locale) == "de") "Hallo Welt" else "Hello world"
         return rewrite(sample, WritingAction.PROOFREAD, locale, provider, apiKey, model, customEndpoint)
     }
 
-    private fun buildPrompt(text: String, action: WritingAction, locale: String): String {
-        val lang = if (locale.startsWith("de")) "German" else "English"
+    fun buildPrompt(
+        text: String,
+        action: WritingAction,
+        locale: String,
+        customCleanupPrompt: String = "",
+        useSystemLanguageForCleanup: Boolean = true
+    ): String {
+        if (action == WritingAction.VOICE_CLEANUP) {
+            val sys = CleanupPromptBuilder.resolveSystemPrompt(
+                customPrompt = customCleanupPrompt,
+                useSystemLanguage = useSystemLanguageForCleanup,
+                activeKeyboardLocale = locale
+            )
+            return "$sys\n\nTranscript:\n$text"
+        }
+        val spec = KeyboardLocales.specFor(locale)
+        val langDisplay = Locale.forLanguageTag(spec.bcp47Tag).getDisplayLanguage(Locale.ENGLISH).ifBlank { "English" }
+        val sysLang = KeyboardLocales.systemLanguageDisplayName()
         val instruction = when (action) {
-            WritingAction.PROOFREAD -> "Fix spelling, punctuation, and grammar while keeping original meaning."
+            WritingAction.PROOFREAD -> "Fix spelling, punctuation, and grammar while keeping original meaning and language."
             WritingAction.PROFESSIONAL -> "Rewrite in a polite, clear, professional tone."
             WritingAction.CASUAL -> "Rewrite in a friendly, natural, casual tone."
             WritingAction.CONCISE -> "Make the text shorter and more direct while preserving all facts."
             WritingAction.EMOTIVE -> "Make the text warmer, more expressive, and engaging."
             WritingAction.REPHRASE -> "Rephrase cleanly with fresh wording while keeping the exact intent."
+            WritingAction.SUMMARIZE -> "Summarize the key points clearly and concisely as short bullet points."
+            WritingAction.TRANSLATE -> "Translate naturally into $langDisplay (or into $sysLang if already in $langDisplay)."
+            WritingAction.VOICE_CLEANUP -> ""
         }
-        return "Language: $lang. Task: $instruction Return ONLY the rewritten text with no quotes or explanation.\n\nText:\n$text"
+        return "Language: $langDisplay (${spec.bcp47Tag}). Task: $instruction Return ONLY the rewritten text with no quotes or explanation.\n\nText:\n$text"
     }
 
     private fun callGemini(apiKey: String, model: String, prompt: String): CloudAiResult {
@@ -84,7 +119,7 @@ object CloudAiClient {
             )
             put(
                 "generationConfig",
-                JSONObject().put("temperature", 0.3)
+                JSONObject().put("temperature", 0.25)
             )
         }.toString()
 
@@ -113,7 +148,7 @@ object CloudAiClient {
             if (out.isEmpty()) {
                 CloudAiResult.Failure("Empty Gemini response")
             } else {
-                CloudAiResult.Success(out, "Gemini ($cleanModel)")
+                CloudAiResult.Success(CleanupPromptBuilder.sanitizeModelOutput(out), "Gemini ($cleanModel)")
             }
         }.getOrElse { ex ->
             CloudAiResult.Failure(ex.localizedMessage ?: "Network error")
@@ -130,7 +165,7 @@ object CloudAiClient {
         val base = customEndpoint.trim().ifEmpty { "https://api.openai.com/v1/chat/completions" }
         val body = JSONObject().apply {
             put("model", cleanModel)
-            put("temperature", 0.3)
+            put("temperature", 0.25)
             put(
                 "messages",
                 JSONArray().put(
@@ -164,7 +199,7 @@ object CloudAiClient {
             if (out.isEmpty()) {
                 CloudAiResult.Failure("Empty API response")
             } else {
-                CloudAiResult.Success(out, "API ($cleanModel)")
+                CloudAiResult.Success(CleanupPromptBuilder.sanitizeModelOutput(out), "API ($cleanModel)")
             }
         }.getOrElse { ex ->
             CloudAiResult.Failure(ex.localizedMessage ?: "Network error")

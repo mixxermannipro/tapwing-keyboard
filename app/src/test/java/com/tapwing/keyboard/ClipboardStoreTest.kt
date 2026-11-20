@@ -42,4 +42,18 @@ class ClipboardStoreTest {
         assertEquals(1, items.size)
         assertEquals("fresh-clip", items.first().text)
     }
+
+    @Test
+    fun storesImageClipsAndUpdatesOcrMetadata() {
+        val store = ClipboardStore(storageFile = null, clockMs = { 50_000L })
+        val clip = store.addImageClip(
+            imagePath = "/tmp/fake_shot.png",
+            mimeType = "image/png",
+            displayLabel = "Screenshot_1.png"
+        )
+        assertTrue(clip != null && clip.isImage)
+        store.updateClipOcrText(clip!!.id, "Rechnung 42 EUR", ClipboardRetention.DAYS_7, 100)
+        val stored = store.items.value.first()
+        assertEquals("Rechnung 42 EUR", stored.ocrText)
+    }
 }

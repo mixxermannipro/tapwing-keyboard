@@ -49,8 +49,15 @@ enum class VoiceDictationMode {
     STANDARD
 }
 
+enum class VoiceEngineMode {
+    AUTO_LOCAL_FIRST,
+    LOCAL_WHISPER,
+    SYSTEM_SPEECH
+}
+
 enum class AiProviderType {
     LOCAL_RULES,
+    LOCAL_LLM,
     GEMINI_API,
     OPENAI_COMPATIBLE
 }
@@ -65,6 +72,9 @@ enum class ClipboardRetention(val durationMs: Long) {
 
 data class TapwingPrefs(
     val activeLocale: String = "de",
+    val enabledLocales: List<String> = listOf("de", "en"),
+    val appUiLocale: String = "system",
+    val multilingualPredictions: Boolean = true,
     val showNumberRow: Boolean = true,
     val showGermanUmlautKeys: Boolean = false,
     val showSpacebarLanguageLabel: Boolean = false,
@@ -85,6 +95,8 @@ data class TapwingPrefs(
     val autoCorrect: Boolean = true,
     val spellGrammarChips: Boolean = true,
     val proactiveUndo: Boolean = true,
+    val smartBackspaceUndo: Boolean = true,
+    val glideTypingEnabled: Boolean = true,
     val doubleSpacePeriod: Boolean = true,
     val learningEnabled: Boolean = true,
     val incognitoMode: Boolean = false,
@@ -96,12 +108,17 @@ data class TapwingPrefs(
     val quickBarActions: List<QuickBarAction> = QuickBarAction.DEFAULT_ACTIONS,
 
     val voiceMode: VoiceDictationMode = VoiceDictationMode.NATURAL_CLEANUP,
+    val voiceEngine: VoiceEngineMode = VoiceEngineMode.AUTO_LOCAL_FIRST,
+    val selectedWhisperModelId: String = "whisper-small-q5_1",
+    val selectedLocalLlmId: String = "qwen3-1.7b-q4_k_m",
+    val voiceCleanupPrompt: String = "",
+    val voiceCleanupUseSystemLanguage: Boolean = true,
     val voiceRemoveFillers: Boolean = true,
     val voiceAutoPunctuate: Boolean = true,
     val voiceStrictLanguageLock: Boolean = true,
     val voiceMinimizeButton: Boolean = true,
     val voiceRotationGraceMs: Long = 1500L,
-    val voiceAiPolish: Boolean = false,
+    val voiceAiPolish: Boolean = true,
     val voiceOnboardingSeen: Boolean = false,
 
     val aiWritingToolsEnabled: Boolean = true,
@@ -115,6 +132,7 @@ data class TapwingPrefs(
     val clipboardRetention: ClipboardRetention = ClipboardRetention.DAYS_7,
     val clipboardMaxItems: Int = 100,
     val screenshotSuggestionChip: Boolean = true,
+    val autoCopyScreenshots: Boolean = true,
 
     val emojiScale: Int = 26,
     val candidateEmojiSuggestions: Boolean = true
@@ -133,6 +151,9 @@ class TapwingPreferencesRepository(context: Context) {
 
     private object Keys {
         val ACTIVE_LOCALE = stringPreferencesKey("active_locale")
+        val ENABLED_LOCALES = stringPreferencesKey("enabled_locales")
+        val APP_UI_LOCALE = stringPreferencesKey("app_ui_locale")
+        val MULTILINGUAL_PREDICTIONS = booleanPreferencesKey("multilingual_predictions")
         val SHOW_NUMBER_ROW = booleanPreferencesKey("show_number_row")
         val SHOW_GERMAN_UMLAUTS = booleanPreferencesKey("show_german_umlauts")
         val SHOW_SPACEBAR_LABEL = booleanPreferencesKey("show_spacebar_label")
@@ -153,6 +174,8 @@ class TapwingPreferencesRepository(context: Context) {
         val AUTO_CORRECT = booleanPreferencesKey("auto_correct")
         val SPELL_GRAMMAR_CHIPS = booleanPreferencesKey("spell_grammar_chips")
         val PROACTIVE_UNDO = booleanPreferencesKey("proactive_undo")
+        val SMART_BACKSPACE_UNDO = booleanPreferencesKey("smart_backspace_undo")
+        val GLIDE_TYPING_ENABLED = booleanPreferencesKey("glide_typing_enabled")
         val DOUBLE_SPACE_PERIOD = booleanPreferencesKey("double_space_period")
         val LEARNING_ENABLED = booleanPreferencesKey("learning_enabled")
         val INCOGNITO_MODE = booleanPreferencesKey("incognito_mode")
@@ -164,6 +187,11 @@ class TapwingPreferencesRepository(context: Context) {
         val QUICK_BAR_ACTIONS = stringPreferencesKey("quick_bar_actions")
 
         val VOICE_MODE = stringPreferencesKey("voice_mode")
+        val VOICE_ENGINE = stringPreferencesKey("voice_engine")
+        val SELECTED_WHISPER_MODEL_ID = stringPreferencesKey("selected_whisper_model_id")
+        val SELECTED_LOCAL_LLM_ID = stringPreferencesKey("selected_local_llm_id")
+        val VOICE_CLEANUP_PROMPT = stringPreferencesKey("voice_cleanup_prompt")
+        val VOICE_CLEANUP_USE_SYSTEM_LANG = booleanPreferencesKey("voice_cleanup_use_system_lang")
         val VOICE_REMOVE_FILLERS = booleanPreferencesKey("voice_remove_fillers")
         val VOICE_AUTO_PUNCTUATE = booleanPreferencesKey("voice_auto_punctuate")
         val VOICE_STRICT_LANGUAGE_LOCK = booleanPreferencesKey("voice_strict_language_lock")
@@ -183,6 +211,7 @@ class TapwingPreferencesRepository(context: Context) {
         val CLIPBOARD_RETENTION = stringPreferencesKey("clipboard_retention")
         val CLIPBOARD_MAX_ITEMS = intPreferencesKey("clipboard_max_items")
         val SCREENSHOT_SUGGESTION_CHIP = booleanPreferencesKey("screenshot_suggestion_chip")
+        val AUTO_COPY_SCREENSHOTS = booleanPreferencesKey("auto_copy_screenshots")
 
         val EMOJI_SCALE = intPreferencesKey("emoji_scale")
         val CANDIDATE_EMOJI_SUGGESTIONS = booleanPreferencesKey("candidate_emoji_suggestions")
@@ -216,9 +245,16 @@ class TapwingPreferencesRepository(context: Context) {
                 showClipboard = showClipboardLegacy,
                 showScanText = showScanLegacy
             )
+        val enabledLocales = KeyboardLocales.parseEnabledLocales(p[Keys.ENABLED_LOCALES])
+        val activeLocale = (p[Keys.ACTIVE_LOCALE] ?: enabledLocales.first()).let { loc ->
+            if (loc in enabledLocales) loc else enabledLocales.first()
+        }
 
         return TapwingPrefs(
-            activeLocale = p[Keys.ACTIVE_LOCALE] ?: "de",
+            activeLocale = activeLocale,
+            enabledLocales = enabledLocales,
+            appUiLocale = p[Keys.APP_UI_LOCALE] ?: "system",
+            multilingualPredictions = p[Keys.MULTILINGUAL_PREDICTIONS] ?: true,
             showNumberRow = p[Keys.SHOW_NUMBER_ROW] ?: true,
             showGermanUmlautKeys = p[Keys.SHOW_GERMAN_UMLAUTS] ?: false,
             showSpacebarLanguageLabel = p[Keys.SHOW_SPACEBAR_LABEL] ?: false,
@@ -239,6 +275,8 @@ class TapwingPreferencesRepository(context: Context) {
             autoCorrect = p[Keys.AUTO_CORRECT] ?: true,
             spellGrammarChips = p[Keys.SPELL_GRAMMAR_CHIPS] ?: true,
             proactiveUndo = p[Keys.PROACTIVE_UNDO] ?: true,
+            smartBackspaceUndo = p[Keys.SMART_BACKSPACE_UNDO] ?: true,
+            glideTypingEnabled = p[Keys.GLIDE_TYPING_ENABLED] ?: true,
             doubleSpacePeriod = p[Keys.DOUBLE_SPACE_PERIOD] ?: true,
             learningEnabled = p[Keys.LEARNING_ENABLED] ?: true,
             incognitoMode = p[Keys.INCOGNITO_MODE] ?: false,
@@ -250,12 +288,17 @@ class TapwingPreferencesRepository(context: Context) {
             quickBarActions = resolvedQuickBar,
 
             voiceMode = parseEnum(p[Keys.VOICE_MODE], VoiceDictationMode.NATURAL_CLEANUP),
+            voiceEngine = parseEnum(p[Keys.VOICE_ENGINE], VoiceEngineMode.AUTO_LOCAL_FIRST),
+            selectedWhisperModelId = p[Keys.SELECTED_WHISPER_MODEL_ID] ?: "whisper-small-q5_1",
+            selectedLocalLlmId = p[Keys.SELECTED_LOCAL_LLM_ID] ?: "qwen3-1.7b-q4_k_m",
+            voiceCleanupPrompt = p[Keys.VOICE_CLEANUP_PROMPT] ?: "",
+            voiceCleanupUseSystemLanguage = p[Keys.VOICE_CLEANUP_USE_SYSTEM_LANG] ?: true,
             voiceRemoveFillers = p[Keys.VOICE_REMOVE_FILLERS] ?: true,
             voiceAutoPunctuate = p[Keys.VOICE_AUTO_PUNCTUATE] ?: true,
             voiceStrictLanguageLock = p[Keys.VOICE_STRICT_LANGUAGE_LOCK] ?: true,
             voiceMinimizeButton = p[Keys.VOICE_MINIMIZE_BUTTON] ?: true,
             voiceRotationGraceMs = (p[Keys.VOICE_ROTATION_GRACE_MS] ?: 1500L).coerceIn(500L, 4000L),
-            voiceAiPolish = p[Keys.VOICE_AI_POLISH] ?: false,
+            voiceAiPolish = p[Keys.VOICE_AI_POLISH] ?: true,
             voiceOnboardingSeen = p[Keys.VOICE_ONBOARDING_SEEN] ?: false,
 
             aiWritingToolsEnabled = p[Keys.AI_WRITING_TOOLS_ENABLED] ?: true,
@@ -269,6 +312,7 @@ class TapwingPreferencesRepository(context: Context) {
             clipboardRetention = parseEnum(p[Keys.CLIPBOARD_RETENTION], ClipboardRetention.DAYS_7),
             clipboardMaxItems = (p[Keys.CLIPBOARD_MAX_ITEMS] ?: 100).coerceIn(20, 200),
             screenshotSuggestionChip = p[Keys.SCREENSHOT_SUGGESTION_CHIP] ?: true,
+            autoCopyScreenshots = p[Keys.AUTO_COPY_SCREENSHOTS] ?: true,
 
             emojiScale = (p[Keys.EMOJI_SCALE] ?: 26).coerceIn(20, 34),
             candidateEmojiSuggestions = p[Keys.CANDIDATE_EMOJI_SUGGESTIONS] ?: true
@@ -276,7 +320,14 @@ class TapwingPreferencesRepository(context: Context) {
     }
 
     private fun writePreferences(mutable: MutablePreferences, next: TapwingPrefs) {
-        mutable[Keys.ACTIVE_LOCALE] = next.activeLocale
+        val cleanEnabled = KeyboardLocales.serializeEnabledLocales(next.enabledLocales)
+        val enabledList = KeyboardLocales.parseEnabledLocales(cleanEnabled)
+        val cleanActive = if (next.activeLocale in enabledList) next.activeLocale else enabledList.first()
+
+        mutable[Keys.ACTIVE_LOCALE] = cleanActive
+        mutable[Keys.ENABLED_LOCALES] = cleanEnabled
+        mutable[Keys.APP_UI_LOCALE] = next.appUiLocale
+        mutable[Keys.MULTILINGUAL_PREDICTIONS] = next.multilingualPredictions
         mutable[Keys.SHOW_NUMBER_ROW] = next.showNumberRow
         mutable[Keys.SHOW_GERMAN_UMLAUTS] = next.showGermanUmlautKeys
         mutable[Keys.SHOW_SPACEBAR_LABEL] = next.showSpacebarLanguageLabel
@@ -295,6 +346,8 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.AUTO_CORRECT] = next.autoCorrect
         mutable[Keys.SPELL_GRAMMAR_CHIPS] = next.spellGrammarChips
         mutable[Keys.PROACTIVE_UNDO] = next.proactiveUndo
+        mutable[Keys.SMART_BACKSPACE_UNDO] = next.smartBackspaceUndo
+        mutable[Keys.GLIDE_TYPING_ENABLED] = next.glideTypingEnabled
         mutable[Keys.DOUBLE_SPACE_PERIOD] = next.doubleSpacePeriod
         mutable[Keys.LEARNING_ENABLED] = next.learningEnabled
         mutable[Keys.INCOGNITO_MODE] = next.incognitoMode
@@ -305,6 +358,11 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.SHOW_CLIPBOARD_ICON] = QuickBarAction.CLIPBOARD in next.quickBarActions
         mutable[Keys.SHOW_SCAN_TEXT_ICON] = QuickBarAction.SCAN_TEXT in next.quickBarActions
         mutable[Keys.VOICE_MODE] = next.voiceMode.name
+        mutable[Keys.VOICE_ENGINE] = next.voiceEngine.name
+        mutable[Keys.SELECTED_WHISPER_MODEL_ID] = next.selectedWhisperModelId
+        mutable[Keys.SELECTED_LOCAL_LLM_ID] = next.selectedLocalLlmId
+        mutable[Keys.VOICE_CLEANUP_PROMPT] = next.voiceCleanupPrompt
+        mutable[Keys.VOICE_CLEANUP_USE_SYSTEM_LANG] = next.voiceCleanupUseSystemLanguage
         mutable[Keys.VOICE_REMOVE_FILLERS] = next.voiceRemoveFillers
         mutable[Keys.VOICE_AUTO_PUNCTUATE] = next.voiceAutoPunctuate
         mutable[Keys.VOICE_STRICT_LANGUAGE_LOCK] = next.voiceStrictLanguageLock
@@ -322,6 +380,7 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.CLIPBOARD_RETENTION] = next.clipboardRetention.name
         mutable[Keys.CLIPBOARD_MAX_ITEMS] = next.clipboardMaxItems.coerceIn(20, 200)
         mutable[Keys.SCREENSHOT_SUGGESTION_CHIP] = next.screenshotSuggestionChip
+        mutable[Keys.AUTO_COPY_SCREENSHOTS] = next.autoCopyScreenshots
         mutable[Keys.EMOJI_SCALE] = next.emojiScale.coerceIn(20, 34)
         mutable[Keys.CANDIDATE_EMOJI_SUGGESTIONS] = next.candidateEmojiSuggestions
     }

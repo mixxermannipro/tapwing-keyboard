@@ -1,5 +1,6 @@
 package com.tapwing.keyboard.dictionary
 
+import com.tapwing.keyboard.data.KeyboardLocales
 import kotlin.math.min
 
 data class SuggestionChip(
@@ -9,6 +10,7 @@ data class SuggestionChip(
     val isEmoji: Boolean = false,
     val isShortcut: Boolean = false,
     val isMath: Boolean = false,
+    val isOtp: Boolean = false,
     val replaceCharCount: Int = 0
 )
 
@@ -20,232 +22,21 @@ data class GrammarHint(
 
 object SuggestionEngine {
 
-    private val germanTypoMap = mapOf(
-        "udn" to "und",
-        "nciht" to "nicht",
-        "niht" to "nicht",
-        "ihc" to "ich",
-        "siht" to "sieht",
-        "vieleicht" to "vielleicht",
-        "vilicht" to "vielleicht",
-        "warumm" to "warum",
-        "morgn" to "morgen",
-        "heut" to "heute",
-        "wiedre" to "wieder",
-        "weider" to "wieder",
-        "danek" to "danke",
-        "bitet" to "bitte",
-        "halol" to "hallo",
-        "gutenmorgen" to "guten Morgen",
-        "schon" to "schön",
-        "konnen" to "können",
-        "konnte" to "könnte",
-        "mochte" to "möchte",
-        "moechte" to "möchte",
-        "fuer" to "für",
-        "ueber" to "über",
-        "groesse" to "Größe",
-        "strasse" to "Straße",
-        "bisschen" to "bisschen",
-        "eigentlich" to "eigentlich",
-        "eignentlich" to "eigentlich",
-        "natuerlich" to "natürlich",
-        "naechste" to "nächste",
-        "spater" to "später",
-        "spaeter" to "später",
-        "frueher" to "früher",
-        "glucklich" to "glücklich",
-        "gluecklich" to "glücklich",
-        "wuensche" to "wünsche",
-        "gruesse" to "Grüße",
-        "geschaeft" to "Geschäft",
-        "ubrigens" to "übrigens",
-        "uebrigens" to "übrigens",
-        "standard" to "Standard",
-        "standart" to "Standard",
-        "seid" to "seid"
-    )
-
-    private val englishTypoMap = mapOf(
-        "teh" to "the",
-        "hte" to "the",
-        "adn" to "and",
-        "nad" to "and",
-        "recieve" to "receive",
-        "beleive" to "believe",
-        "seperate" to "separate",
-        "definately" to "definitely",
-        "definatly" to "definitely",
-        "untill" to "until",
-        "becuase" to "because",
-        "beacuse" to "because",
-        "thier" to "their",
-        "wehn" to "when",
-        "wiht" to "with",
-        "wont" to "won't",
-        "dont" to "don't",
-        "cant" to "can't",
-        "im" to "I'm",
-        "ive" to "I've",
-        "youre" to "you're",
-        "didnt" to "didn't",
-        "isnt" to "isn't",
-        "accomodate" to "accommodate",
-        "occured" to "occurred",
-        "tommorow" to "tomorrow",
-        "tomorow" to "tomorrow",
-        "thx" to "thanks",
-        "plz" to "please"
-    )
-
-    private val germanCapitalNouns = setOf(
-        "zeit", "tag", "jahr", "woche", "monat", "stunde", "minute", "uhr", "termin",
-        "nachricht", "text", "bild", "foto", "handy", "telefon", "antwort", "frage",
-        "problem", "lösung", "projekt", "arbeit", "büro", "haus", "auto", "weg",
-        "freund", "familie", "kollege", "kunde", "meeting", "kaffee", "wasser",
-        "idee", "grund", "beispiel", "dokument", "tastatur", "sprache", "einstellung"
-    )
-
-    private val germanWords = listOf(
-        "aber", "alle", "alles", "also", "am", "an", "andere", "auch", "auf", "aus",
-        "bei", "beide", "beim", "bin", "bis", "bitte", "bleiben", "brauchen", "bringen",
-        "da", "dabei", "dafür", "damit", "danach", "danke", "dann", "darüber", "das",
-        "dass", "dein", "deine", "dem", "den", "denn", "der", "des", "deshalb", "dich",
-        "die", "diese", "dieser", "dieses", "dir", "doch", "dort", "du", "durch",
-        "eben", "eigentlich", "ein", "eine", "einem", "einen", "einer", "einfach",
-        "einige", "einmal", "endlich", "entweder", "er", "erst", "es", "etwas", "euch",
-        "falls", "fast", "fertig", "finden", "frage", "frei", "freundlich", "für",
-        "ganz", "gar", "geben", "gegen", "gehen", "gemacht", "genau", "gerade", "gern",
-        "gerne", "gestern", "gibt", "gleich", "groß", "grüße", "gut", "gute", "guten",
-        "habe", "haben", "hallo", "halt", "hast", "hat", "hatte", "hätte", "heute",
-        "hier", "hilfe", "hin", "hinter", "hoffentlich",
-        "ich", "ihm", "ihn", "ihnen", "ihr", "ihre", "im", "immer", "in", "info",
-        "ist", "ja", "jahr", "jede", "jeder", "jedes", "jemand", "jetzt",
-        "kann", "kannst", "kein", "keine", "keinen", "klar", "klein", "kommen", "kommt",
-        "können", "könnte", "kurz",
-        "lange", "lassen", "leider", "lesen", "letzte", "leute", "lieb", "liebe", "los",
-        "machen", "macht", "mal", "man", "mehr", "mein", "meine", "meinen", "mich",
-        "mir", "mit", "möchte", "möglich", "morgen", "muss", "müssen",
-        "nach", "nachricht", "nächste", "natürlich", "nein", "neu", "neue", "nicht",
-        "nichts", "nie", "noch", "normal", "nun", "nur",
-        "ob", "oder", "ohne", "okay", "perfekt", "platz", "problem", "projekt",
-        "recht", "richtig", "ruhig",
-        "sagen", "sagt", "schade", "schauen", "schicken", "schnell", "schon", "schön",
-        "schreiben", "sehr", "sein", "seine", "seit", "selbst", "sicher", "sie",
-        "sind", "so", "sofort", "sogar", "soll", "sollen", "sollte", "sondern",
-        "sonst", "später", "sprechen", "stadt", "stark", "stehen", "stellen", "stimmt",
-        "super", "tag", "tastatur", "teil", "telefon", "termin", "text", "trotzdem",
-        "tun", "über", "überhaupt", "übrigens", "uhr", "um", "und", "uns", "unser",
-        "unter", "viel", "viele", "vielleicht", "von", "vor", "vorbei",
-        "wahr", "während", "wann", "war", "wäre", "warum", "was", "wasser", "weg",
-        "wegen", "weil", "weiter", "welche", "welt", "wenig", "wenn", "wer", "werden",
-        "wichtig", "wie", "wieder", "will", "wir", "wird", "wirklich", "wissen", "wo",
-        "woche", "wohl", "wollen", "wollte", "wünschen", "würde",
-        "zeit", "zu", "zuerst", "zufrieden", "zum", "zur", "zurück", "zusammen", "zwei",
-        "Hallo", "Danke", "Bitte", "Guten", "Morgen", "Abend", "Grüße", "Termin",
-        "Nachricht", "Projekt", "Woche", "Uhr", "Arbeit", "Hilfe", "Antwort", "Frage"
-    )
-
-    private val englishWords = listOf(
-        "about", "above", "actually", "after", "again", "against", "all", "almost",
-        "already", "also", "always", "among", "and", "another", "answer", "any",
-        "anyone", "anything", "around", "ask", "available", "away",
-        "back", "because", "been", "before", "being", "believe", "best", "better",
-        "between", "both", "bring", "build", "but", "called", "can", "change",
-        "check", "clear", "close", "come", "comment", "complete", "confirm", "could",
-        "day", "definitely", "details", "did", "different", "done", "don't", "down",
-        "during", "each", "early", "easy", "email", "enough", "even", "every",
-        "everyone", "everything", "example", "family", "feel", "few", "find", "fine",
-        "first", "follow", "for", "forward", "friend", "from", "full", "funny",
-        "get", "give", "going", "good", "great", "group", "guess",
-        "had", "hand", "happy", "hard", "has", "have", "hello", "help", "here",
-        "hey", "high", "home", "hope", "hour", "how", "however",
-        "idea", "important", "improve", "information", "instead", "into", "issue",
-        "just", "keep", "keyboard", "kind", "know", "last", "later", "learn", "leave",
-        "less", "let", "letter", "life", "like", "line", "list", "little", "long",
-        "look", "love", "made", "make", "many", "maybe", "mean", "meeting", "message",
-        "might", "minute", "moment", "money", "month", "more", "morning", "most",
-        "much", "must", "name", "near", "need", "never", "new", "next", "nice",
-        "night", "nothing", "notice", "now", "number",
-        "often", "okay", "once", "only", "open", "option", "order", "other", "our",
-        "out", "over", "own", "part", "people", "perfect", "person", "phone", "place",
-        "plan", "please", "point", "possible", "problem", "project", "put",
-        "question", "quick", "quickly", "quite", "ready", "really", "reason",
-        "receive", "remember", "reply", "report", "review", "right", "room",
-        "said", "same", "save", "say", "schedule", "school", "search", "see", "seem",
-        "send", "sent", "separate", "service", "share", "should", "show", "since",
-        "small", "some", "someone", "something", "soon", "sorry", "sound", "speak",
-        "start", "state", "still", "stop", "story", "sure", "system",
-        "take", "talk", "team", "tell", "text", "thank", "thanks", "that", "their",
-        "them", "then", "there", "these", "they", "thing", "think", "this", "those",
-        "though", "thought", "through", "time", "today", "together", "tomorrow", "too",
-        "true", "try", "turn", "under", "understand", "until", "update", "used",
-        "useful", "usually", "very", "voice", "wait", "want", "water", "way", "week",
-        "welcome", "well", "went", "were", "what", "when", "where", "whether",
-        "which", "while", "who", "why", "will", "with", "without", "word", "work",
-        "working", "world", "would", "write", "writing", "wrong", "year", "yes",
-        "yesterday", "you", "your", "you're", "Hello", "Thanks", "Please", "Today"
-    )
-
-    private val emojiTriggers = mapOf(
-        "danke" to "🙏",
-        "thanks" to "🙏",
-        "thank" to "🙏",
-        "herz" to "❤️",
-        "liebe" to "❤️",
-        "love" to "❤️",
-        "lachen" to "😂",
-        "haha" to "😂",
-        "lustig" to "😂",
-        "funny" to "😂",
-        "feuer" to "🔥",
-        "fire" to "🔥",
-        "krass" to "🔥",
-        "ok" to "👍",
-        "okay" to "👍",
-        "top" to "👍",
-        "super" to "✨",
-        "perfekt" to "✨",
-        "perfect" to "✨",
-        "stern" to "⭐",
-        "star" to "⭐",
-        "kaffee" to "☕",
-        "coffee" to "☕",
-        "sonne" to "☀️",
-        "sun" to "☀️",
-        "party" to "🎉",
-        "glückwunsch" to "🎉",
-        "congrats" to "🎉",
-        "musik" to "🎵",
-        "music" to "🎵",
-        "idee" to "💡",
-        "idea" to "💡",
-        "zeit" to "⏰",
-        "time" to "⏰",
-        "uhr" to "⏰",
-        "geld" to "💶",
-        "money" to "💵",
-        "hallo" to "👋",
-        "hello" to "👋",
-        "hey" to "👋",
-        "traurig" to "😢",
-        "sad" to "😢",
-        "check" to "✅",
-        "erledigt" to "✅",
-        "done" to "✅"
-    )
-
     fun suggestionsFor(
         textBeforeCursor: String,
         locale: String,
         includeEmoji: Boolean = true,
         includeGrammarChips: Boolean = true,
         includeMath: Boolean = true,
-        dictionaryStore: AdaptiveDictionaryStore? = null
+        dictionaryStore: AdaptiveDictionaryStore? = null,
+        secondaryLocales: List<String> = emptyList(),
+        isEmailField: Boolean = false,
+        isUrlField: Boolean = false
     ): List<SuggestionChip> {
         val results = mutableListOf<SuggestionChip>()
+        val baseLocale = KeyboardLocales.baseLang(locale)
 
-        // 1. Text shortcuts (e.g. "mfg", "/datum", "/zeit", or imported shortcuts)
+        // 1. Text shortcuts (e.g. "mfg", "/datum", "/zeit", "/woche", or imported shortcuts)
         val trailingToken = extractTrailingToken(textBeforeCursor)
         if (trailingToken.isNotEmpty() && dictionaryStore != null) {
             val expansion = dictionaryStore.lookupShortcut(trailingToken, locale)
@@ -258,7 +49,7 @@ object SuggestionEngine {
             }
         }
 
-        // 2. Inline Math Evaluator (e.g. "24*7=" -> "168")
+        // 2. Inline Math Evaluator (e.g. "24*7=" -> "168", "150+19%=" -> "178,5")
         if (includeMath) {
             val math = InlineMathEvaluator.evaluateTrailingExpression(textBeforeCursor, locale)
             if (math != null) {
@@ -283,19 +74,45 @@ object SuggestionEngine {
             }
         }
 
+        // Context chips for Email/URL fields when typing domain suffixes
+        if (isEmailField && trailingToken.contains('@') && !trailingToken.substringAfter('@').contains('.')) {
+            val domainPrefix = trailingToken.substringAfter('@').lowercase()
+            val domains = listOf("gmail.com", "outlook.com", "icloud.com", "gmx.de", "web.de", "yahoo.com")
+            domains.filter { it.startsWith(domainPrefix) }.take(3).forEach { dom ->
+                if (results.size < 3) {
+                    results += SuggestionChip(
+                        text = dom,
+                        replaceCharCount = domainPrefix.length
+                    )
+                }
+            }
+            if (results.isNotEmpty()) return results.take(3)
+        } else if (isUrlField && trailingToken.isEmpty() && textBeforeCursor.isBlank()) {
+            results += SuggestionChip(text = "https://", replaceCharCount = 0)
+            results += SuggestionChip(text = "www.", replaceCharCount = 0)
+        }
+
         val currentWord = extractTrailingWord(textBeforeCursor)
+        val atSentenceStart = isAtSentenceStart(textBeforeCursor, currentWord)
+        val (prevWord, prevTwoWord) = extractPreviousTwoWords(
+            if (currentWord.isEmpty()) textBeforeCursor else textBeforeCursor.dropLast(currentWord.length)
+        )
+
         if (currentWord.isBlank()) {
-            // Bigram next-word predictions from adaptive learning
-            val prevWord = extractPreviousWord(textBeforeCursor)
+            // Context-aware Trigram + Bigram next-word predictions from adaptive learning
             if (prevWord.isNotEmpty() && dictionaryStore != null) {
-                dictionaryStore.predictNextWords(prevWord, limit = 3).forEach { predicted ->
-                    if (results.size < 3 && results.none { it.text == predicted }) {
-                        results += SuggestionChip(text = predicted, replaceCharCount = 0)
+                dictionaryStore.predictNextWords(
+                    previousWord = prevWord,
+                    limit = 3,
+                    previousTwoWord = prevTwoWord.takeIf { it.isNotEmpty() }
+                ).forEach { predicted ->
+                    val safeCased = enforceMidSentenceCasingRule(predicted, locale, atSentenceStart, dictionaryStore)
+                    if (results.size < 3 && results.none { it.text == safeCased }) {
+                        results += SuggestionChip(text = safeCased, replaceCharCount = 0)
                     }
                 }
             }
-            val defaults = if (locale == "de") listOf("Hallo", "Danke", "Okay") else listOf("Hello", "Thanks", "Okay")
-            defaults.forEach { word ->
+            LanguageVocabularies.defaultEmptyChipsFor(locale).forEach { word ->
                 if (results.size < 3 && results.none { it.text == word }) {
                     results += SuggestionChip(text = word, replaceCharCount = 0)
                 }
@@ -305,7 +122,7 @@ object SuggestionEngine {
 
         val lower = currentWord.lowercase()
         val knownByUser = dictionaryStore?.isKnownWord(currentWord) == true
-        val typoMap = if (locale == "de") germanTypoMap else englishTypoMap
+        val typoMap = LanguageVocabularies.typoMapFor(locale)
         val exactTypo = if (knownByUser) null else typoMap[lower]
         if (exactTypo != null && exactTypo != currentWord) {
             val cased = preserveLeadingCase(currentWord, exactTypo)
@@ -316,7 +133,11 @@ object SuggestionEngine {
             )
         }
 
-        if (!knownByUser && locale == "de" && lower in germanCapitalNouns && currentWord.first().isLowerCase()) {
+        if (!knownByUser && baseLocale == "de" &&
+            lower in LanguageVocabularies.germanCapitalNouns &&
+            currentWord.first().isLowerCase() &&
+            !LanguageVocabularies.isNeverAutoCapitalizeMidSentence(lower, locale)
+        ) {
             val capitalized = currentWord.replaceFirstChar { it.uppercaseChar() }
             if (results.none { it.text == capitalized }) {
                 results += SuggestionChip(
@@ -328,7 +149,8 @@ object SuggestionEngine {
         }
 
         if (includeEmoji) {
-            val emoji = emojiTriggers[lower]
+            val learnedEmoji = dictionaryStore?.preferredEmojiFor(lower)
+            val emoji = learnedEmoji ?: LanguageVocabularies.emojiTriggers[lower]
             if (emoji != null && results.size < 3) {
                 results += SuggestionChip(
                     text = emoji,
@@ -338,12 +160,19 @@ object SuggestionEngine {
             }
         }
 
-        // Prioritize imported custom dictionary & learned user vocabulary before stock list
+        // Prioritize context-aware learned vocabulary & custom dictionary
         if (dictionaryStore != null) {
-            dictionaryStore.rankedPrefixCandidates(currentWord, limit = 3).forEach { match ->
-                if (results.size < 3 && results.none { it.text == match }) {
+            dictionaryStore.rankedPrefixCandidates(
+                prefix = currentWord,
+                limit = 4,
+                previousWord = prevWord.takeIf { it.isNotEmpty() },
+                previousTwoWord = prevTwoWord.takeIf { it.isNotEmpty() },
+                atSentenceStart = atSentenceStart
+            ).forEach { match ->
+                val adjusted = adjustCandidateCase(currentWord, match, locale, atSentenceStart, dictionaryStore)
+                if (results.size < 3 && adjusted != currentWord && results.none { it.text == adjusted }) {
                     results += SuggestionChip(
-                        text = match,
+                        text = adjusted,
                         isCorrection = false,
                         replaceCharCount = currentWord.length
                     )
@@ -351,22 +180,18 @@ object SuggestionEngine {
             }
         }
 
-        val vocab = if (locale == "de") germanWords else englishWords
+        // Active language stock vocabulary (already frequency-ordered)
+        val vocab = LanguageVocabularies.vocabularyFor(locale)
         val prefixMatches = vocab
             .asSequence()
             .filter { it.lowercase().startsWith(lower) && it != currentWord }
-            .sortedBy { it.length }
-            .take(4)
+            .take(5)
             .toList()
 
         for (match in prefixMatches) {
             if (results.size >= 3) break
-            val adjusted = if (currentWord.first().isUpperCase()) {
-                match.replaceFirstChar { it.uppercaseChar() }
-            } else {
-                match
-            }
-            if (results.none { it.text == adjusted }) {
+            val adjusted = adjustCandidateCase(currentWord, match, locale, atSentenceStart, dictionaryStore)
+            if (adjusted != currentWord && results.none { it.text == adjusted }) {
                 results += SuggestionChip(
                     text = adjusted,
                     isCorrection = false,
@@ -375,21 +200,63 @@ object SuggestionEngine {
             }
         }
 
+        // Secondary enabled languages for bilingual typing without switching
+        if (results.size < 3 && secondaryLocales.isNotEmpty()) {
+            for (sec in secondaryLocales) {
+                if (KeyboardLocales.baseLang(sec) == baseLocale) continue
+                val secTypo = if (knownByUser) null else LanguageVocabularies.typoMapFor(sec)[lower]
+                if (secTypo != null && secTypo != currentWord && results.size < 3) {
+                    val adjusted = preserveLeadingCase(currentWord, secTypo)
+                    if (results.none { it.text == adjusted }) {
+                        results += SuggestionChip(
+                            text = adjusted,
+                            isCorrection = true,
+                            replaceCharCount = currentWord.length
+                        )
+                    }
+                }
+                val secVocab = LanguageVocabularies.vocabularyFor(sec)
+                for (match in secVocab) {
+                    if (results.size >= 3) break
+                    if (match.lowercase().startsWith(lower) && match != currentWord) {
+                        val adjusted = adjustCandidateCase(currentWord, match, sec, atSentenceStart, dictionaryStore)
+                        if (results.none { it.text == adjusted }) {
+                            results += SuggestionChip(
+                                text = adjusted,
+                                isCorrection = false,
+                                replaceCharCount = currentWord.length
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fuzzy Damerau-Levenshtein matching (handles transpositions like "udn"->"und" with dist 1)
         if (results.size < 3 && lower.length >= 3 && !knownByUser) {
             val customFuzzyPool = dictionaryStore?.allKnownVocabularyWords().orEmpty()
-            val combinedPool = (customFuzzyPool + vocab).distinct()
+            val secondaryPool = secondaryLocales
+                .filter { KeyboardLocales.baseLang(it) != baseLocale }
+                .flatMap { LanguageVocabularies.vocabularyFor(it) }
+            val combinedPool = (customFuzzyPool + vocab + secondaryPool).distinct()
+
             val fuzzy = combinedPool
                 .asSequence()
                 .filter { kotlin.math.abs(it.length - lower.length) <= 2 }
-                .map { word -> word to levenshtein(lower, word.lowercase()) }
-                .filter { (word, dist) -> dist in 1..2 && word != currentWord }
-                .sortedBy { it.second }
-                .take(3)
+                .map { word ->
+                    val dist = damerauLevenshtein(lower, word.lowercase())
+                    val personalBoost = dictionaryStore?.wordScore(word) ?: 0
+                    Triple(word, dist, personalBoost)
+                }
+                .filter { (word, dist, _) -> dist in 1..2 && word != currentWord }
+                .sortedWith(compareBy<Triple<String, Int, Int>> { it.second }.thenByDescending { it.third })
+                .take(4)
                 .toList()
-            for ((word, _) in fuzzy) {
+
+            for ((word, _, _) in fuzzy) {
                 if (results.size >= 3) break
-                val adjusted = preserveLeadingCase(currentWord, word)
-                if (results.none { it.text == adjusted }) {
+                val adjusted = adjustCandidateCase(currentWord, word, locale, atSentenceStart, dictionaryStore)
+                if (adjusted != currentWord && results.none { it.text == adjusted }) {
                     results += SuggestionChip(
                         text = adjusted,
                         isCorrection = true,
@@ -405,30 +272,71 @@ object SuggestionEngine {
     fun autoCorrectionFor(
         word: String,
         locale: String,
-        dictionaryStore: AdaptiveDictionaryStore? = null
+        dictionaryStore: AdaptiveDictionaryStore? = null,
+        atSentenceStart: Boolean = false,
+        secondaryLocales: List<String> = emptyList()
     ): String? {
         if (word.length < 2) return null
-        if (dictionaryStore?.isKnownWord(word) == true) return null
+        if (dictionaryStore?.isKnownWord(word) == true) {
+            // Even if known, NEVER auto-capitalize mid-sentence function words
+            return null
+        }
         val lower = word.lowercase()
+        val baseLocale = KeyboardLocales.baseLang(locale)
 
-        // Match exact lowercase custom/learned word casing (e.g. "tapwing" -> "Tapwing")
-        val customExact = dictionaryStore?.allKnownVocabularyWords()
-            ?.firstOrNull { it.equals(word, ignoreCase = true) && it != word }
-        if (customExact != null) return customExact
+        // Respect explicit custom words or consistently mid-sentence capitalized terms,
+        // while NEVER letting sentence-start capitalization ("Und") leak into mid-sentence ("und").
+        val canonical = dictionaryStore?.canonicalMidSentenceCasingFor(word, locale)
+        if (canonical != null && canonical != word) {
+            return canonical
+        }
 
-        val typoMap = if (locale == "de") germanTypoMap else englishTypoMap
+        val typoMap = LanguageVocabularies.typoMapFor(locale)
         val mapped = typoMap[lower]
         if (mapped != null) {
             return preserveLeadingCase(word, mapped)
         }
-        if (locale == "de" && lower in germanCapitalNouns && word.first().isLowerCase()) {
+
+        if (baseLocale == "de" &&
+            lower in LanguageVocabularies.germanCapitalNouns &&
+            !LanguageVocabularies.isNeverAutoCapitalizeMidSentence(lower, locale) &&
+            word.first().isLowerCase()
+        ) {
             return word.replaceFirstChar { it.uppercaseChar() }
         }
+
+        // Check secondary languages for clear typos (e.g., typing English "teh" while on DE keyboard)
+        for (sec in secondaryLocales) {
+            if (KeyboardLocales.baseLang(sec) == baseLocale) continue
+            val secExact = LanguageVocabularies.vocabularyFor(sec).any { it.equals(word, ignoreCase = true) }
+            if (secExact) return null // Valid word in secondary language -> don't break it!
+            val secMapped = LanguageVocabularies.typoMapFor(sec)[lower]
+            if (secMapped != null) return preserveLeadingCase(word, secMapped)
+        }
+
+        // If the word is already a valid lowercase word in the active vocab, don't force fuzzy change
+        if (LanguageVocabularies.vocabularyFor(locale).any { it.equals(word, ignoreCase = false) }) {
+            return null
+        }
+
+        // Check high-confidence single-edit transposition/typo in user's learned words (>= 3 uses)
+        if (word.length >= 4 && dictionaryStore != null && !atSentenceStart) {
+            val learnedMatch = dictionaryStore.allKnownVocabularyWords()
+                .asSequence()
+                .filter { kotlin.math.abs(it.length - word.length) <= 1 && dictionaryStore.wordScore(it) >= 15 }
+                .filter { damerauLevenshtein(lower, it.lowercase()) == 1 }
+                .maxByOrNull { dictionaryStore.wordScore(it) }
+            if (learnedMatch != null && !learnedMatch.equals(word, ignoreCase = true)) {
+                return adjustCandidateCase(word, learnedMatch, locale, atSentenceStart, dictionaryStore)
+            }
+        }
+
         return null
     }
 
     fun detectGrammarHint(textBeforeCursor: String, locale: String): GrammarHint? {
         if (textBeforeCursor.length < 3) return null
+        val base = KeyboardLocales.baseLang(locale)
 
         // Duplicate adjacent word e.g. "der der" or "the the"
         val dupRegex = Regex("""\b(\p{L}{2,})\s+\1$""", RegexOption.IGNORE_CASE)
@@ -436,7 +344,7 @@ object SuggestionEngine {
         if (dupMatch != null) {
             val word = dupMatch.groupValues[1]
             return GrammarHint(
-                description = if (locale == "de") "Doppeltes Wort entfernen" else "Remove duplicate word",
+                description = if (base == "de") "Doppeltes Wort entfernen" else "Remove duplicate word",
                 replaceCharCount = dupMatch.value.length,
                 replacement = word
             )
@@ -451,7 +359,7 @@ object SuggestionEngine {
             if (word.length >= 2) {
                 val fixed = word.replaceFirstChar { it.uppercaseChar() }
                 return GrammarHint(
-                    description = if (locale == "de") "Satzanfang groß" else "Capitalize sentence start",
+                    description = if (base == "de") "Satzanfang groß" else "Capitalize sentence start",
                     replaceCharCount = capMatch.value.length,
                     replacement = "$sep$fixed"
                 )
@@ -465,13 +373,33 @@ object SuggestionEngine {
             val word = spacePunctMatch.groupValues[1]
             val punct = spacePunctMatch.groupValues[2]
             return GrammarHint(
-                description = if (locale == "de") "Leerzeichen vor Satzzeichen" else "Fix spacing",
+                description = if (base == "de") "Leerzeichen vor Satzzeichen" else "Fix spacing",
                 replaceCharCount = spacePunctMatch.value.length,
                 replacement = "$word$punct"
             )
         }
 
         return null
+    }
+
+    /** Extracts a 4–8 digit 2FA / OTP verification code from a recent clipboard message. */
+    fun extractOtpFromClipboard(clipText: String): String? {
+        val clean = clipText.trim()
+        if (clean.length > 260 || clean.isEmpty()) return null
+        if (clean.matches(Regex("""^\d{4,8}$"""))) return clean
+        val keywordHint = Regex(
+            """(?i)(code|otp|pin|passcode|bestätigung|verifizierung|sicherheit|tan|token|verification|confirm)"""
+        )
+        if (!keywordHint.containsMatchIn(clean)) return null
+        val match = Regex("""(?<!\d)(\d{4,8})(?!\d)""").find(clean) ?: return null
+        return match.groupValues[1]
+    }
+
+    fun isAtSentenceStart(textBeforeCursor: String, currentWord: String = extractTrailingWord(textBeforeCursor)): Boolean {
+        val prefix = if (currentWord.isEmpty()) textBeforeCursor else textBeforeCursor.dropLast(currentWord.length)
+        if (prefix.isBlank()) return true
+        if (prefix.endsWith("\n")) return true
+        return Regex("""[.!?]\s+$""").containsMatchIn(prefix)
     }
 
     fun extractTrailingWord(textBeforeCursor: String): String {
@@ -489,8 +417,53 @@ object SuggestionEngine {
     fun extractPreviousWord(textBeforeCursor: String): String {
         val trimmed = textBeforeCursor.trimEnd()
         if (trimmed.isEmpty()) return ""
-        val lastWord = extractTrailingWord(trimmed)
-        return lastWord
+        return extractTrailingWord(trimmed)
+    }
+
+    fun extractPreviousTwoWords(textBeforeCurrentWord: String): Pair<String, String> {
+        val w1 = extractPreviousWord(textBeforeCurrentWord)
+        if (w1.isEmpty()) return "" to ""
+        val trimmed = textBeforeCurrentWord.trimEnd()
+        val beforeW1 = trimmed.dropLast(w1.length)
+        val w2 = extractPreviousWord(beforeW1)
+        return w1 to w2
+    }
+
+    private fun enforceMidSentenceCasingRule(
+        candidate: String,
+        locale: String,
+        atSentenceStart: Boolean,
+        dictionaryStore: AdaptiveDictionaryStore?
+    ): String {
+        if (atSentenceStart) {
+            return candidate.replaceFirstChar { it.uppercaseChar() }
+        }
+        if (LanguageVocabularies.isNeverAutoCapitalizeMidSentence(candidate, locale) &&
+            dictionaryStore?.canonicalMidSentenceCasingFor(candidate, locale) == null
+        ) {
+            return candidate.lowercase()
+        }
+        return candidate
+    }
+
+    private fun adjustCandidateCase(
+        typedWord: String,
+        candidate: String,
+        locale: String,
+        atSentenceStart: Boolean,
+        dictionaryStore: AdaptiveDictionaryStore?
+    ): String {
+        if (typedWord.isEmpty() || candidate.isEmpty()) return candidate
+        if (typedWord.first().isUpperCase()) {
+            return candidate.replaceFirstChar { it.uppercaseChar() }
+        }
+        if (!atSentenceStart &&
+            LanguageVocabularies.isNeverAutoCapitalizeMidSentence(candidate, locale) &&
+            dictionaryStore?.canonicalMidSentenceCasingFor(candidate, locale) == null
+        ) {
+            return candidate.lowercase()
+        }
+        return candidate
     }
 
     private fun preserveLeadingCase(source: String, target: String): String {
@@ -502,20 +475,31 @@ object SuggestionEngine {
         }
     }
 
-    private fun levenshtein(a: String, b: String): Int {
+    /**
+     * Optimal String Alignment / Damerau-Levenshtein distance so adjacent character
+     * transpositions (e.g. "udn" -> "und", "nciht" -> "nicht", "teh" -> "the") count as distance 1.
+     */
+    fun damerauLevenshtein(a: String, b: String): Int {
         if (a == b) return 0
-        if (kotlin.math.abs(a.length - b.length) > 2) return 99
-        val dp = IntArray(b.length + 1) { it }
-        for (i in 1..a.length) {
-            var prev = dp[0]
-            dp[0] = i
-            for (j in 1..b.length) {
-                val temp = dp[j]
+        val n = a.length
+        val m = b.length
+        if (kotlin.math.abs(n - m) > 2) return 99
+        val d = Array(n + 1) { IntArray(m + 1) }
+        for (i in 0..n) d[i][0] = i
+        for (j in 0..m) d[0][j] = j
+        for (i in 1..n) {
+            for (j in 1..m) {
                 val cost = if (a[i - 1] == b[j - 1]) 0 else 1
-                dp[j] = min(min(dp[j] + 1, dp[j - 1] + 1), prev + cost)
-                prev = temp
+                var best = min(
+                    min(d[i - 1][j] + 1, d[i][j - 1] + 1),
+                    d[i - 1][j - 1] + cost
+                )
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                    best = min(best, d[i - 2][j - 2] + cost)
+                }
+                d[i][j] = best
             }
         }
-        return dp[b.length]
+        return d[n][m]
     }
 }

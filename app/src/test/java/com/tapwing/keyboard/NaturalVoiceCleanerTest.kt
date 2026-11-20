@@ -47,4 +47,13 @@ class NaturalVoiceCleanerTest {
             NaturalVoiceCleaner.parseCommandOrClean("lösche das letzte Wort", "de")
         )
     }
+
+    @Test
+    fun cleansFrenchAndSpanishDictation() {
+        val fr = NaturalVoiceCleaner.clean("euh bonjour virgule comment ça va point d'interrogation", locale = "fr")
+        assertEquals("Bonjour, comment ça va?", fr)
+
+        val es = NaturalVoiceCleaner.clean("eh hola coma qué tal", locale = "es")
+        assertEquals("Hola, qué tal.", es)
+    }
 }

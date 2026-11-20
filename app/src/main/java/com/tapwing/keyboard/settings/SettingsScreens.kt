@@ -113,18 +113,33 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tapwing.keyboard.BuildConfig
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
+import com.tapwing.keyboard.R
+import com.tapwing.keyboard.ai.CleanupPromptBuilder
 import com.tapwing.keyboard.ai.CloudAiClient
 import com.tapwing.keyboard.ai.CloudAiResult
+import com.tapwing.keyboard.ai.LocalModelCatalog
+import com.tapwing.keyboard.ai.LocalModelManager
+import com.tapwing.keyboard.ai.LocalModelSpec
+import com.tapwing.keyboard.ai.ModelInstallState
 import com.tapwing.keyboard.clipboard.ScreenshotMonitor
 import com.tapwing.keyboard.data.AiProviderType
 import com.tapwing.keyboard.data.ClipboardRetention
 import com.tapwing.keyboard.data.DarkModePreference
+import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.data.ThemeMode
 import com.tapwing.keyboard.data.VoiceDictationMode
+import com.tapwing.keyboard.data.VoiceEngineMode
 import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 import com.tapwing.keyboard.ocr.ScanTextActivity
 import com.tapwing.keyboard.ui.keyboard.icon
@@ -155,6 +170,7 @@ fun TapwingSettingsApp(
     prefs: TapwingPrefs,
     secureKeyStorage: SecureKeyStorage,
     dictionaryStore: AdaptiveDictionaryStore,
+    modelManager: LocalModelManager,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
@@ -215,7 +231,12 @@ fun TapwingSettingsApp(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val de = prefs.activeLocale == "de"
+    val effectiveLang = if (prefs.appUiLocale == "system") {
+        KeyboardLocales.baseLang(java.util.Locale.getDefault().language)
+    } else {
+        KeyboardLocales.baseLang(prefs.appUiLocale)
+    }
+    val de = effectiveLang == "de"
 
     Scaffold(
         modifier = Modifier
@@ -226,16 +247,16 @@ fun TapwingSettingsApp(
             if (route != SettingsRoute.HOME) {
                 val title = when (route) {
                     SettingsRoute.HOME -> ""
-                    SettingsRoute.APPEARANCE -> if (de) "Design & Größe" else "Theme & Size"
-                    SettingsRoute.QUICK_BAR -> if (de) "Schnellleiste" else "Quick Bar"
-                    SettingsRoute.LANGUAGES -> if (de) "Sprachen & Layout" else "Languages"
-                    SettingsRoute.DICTIONARY -> if (de) "Wörterbuch & Lernen" else "Dictionary"
-                    SettingsRoute.CORRECTIONS -> if (de) "Korrekturen" else "Corrections"
-                    SettingsRoute.VOICE -> if (de) "Spracheingabe" else "Voice"
-                    SettingsRoute.WRITING_TOOLS -> if (de) "KI-Schreibhilfe" else "Writing Tools"
-                    SettingsRoute.CLIPBOARD -> if (de) "Zwischenablage" else "Clipboard & OCR"
-                    SettingsRoute.EMOJI -> "Emoji"
-                    SettingsRoute.ABOUT -> if (de) "Über Tapwing" else "About"
+                    SettingsRoute.APPEARANCE -> stringResource(R.string.nav_appearance)
+                    SettingsRoute.QUICK_BAR -> stringResource(R.string.nav_quick_bar)
+                    SettingsRoute.LANGUAGES -> stringResource(R.string.nav_languages)
+                    SettingsRoute.DICTIONARY -> stringResource(R.string.nav_dictionary)
+                    SettingsRoute.CORRECTIONS -> stringResource(R.string.nav_corrections)
+                    SettingsRoute.VOICE -> stringResource(R.string.nav_voice)
+                    SettingsRoute.WRITING_TOOLS -> stringResource(R.string.nav_writing_tools)
+                    SettingsRoute.CLIPBOARD -> stringResource(R.string.nav_clipboard)
+                    SettingsRoute.EMOJI -> stringResource(R.string.nav_emoji)
+                    SettingsRoute.ABOUT -> stringResource(R.string.nav_about)
                 }
                 CenterAlignedTopAppBar(
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -348,8 +369,8 @@ fun TapwingSettingsApp(
                         onOpenQuickBar = { navigateTo(SettingsRoute.QUICK_BAR) },
                         onUpdatePrefs = onUpdatePrefs
                     )
-                    SettingsRoute.VOICE -> VoiceSettingsScreen(prefs, de, onUpdatePrefs)
-                    SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(prefs, de, secureKeyStorage, onUpdatePrefs)
+                    SettingsRoute.VOICE -> VoiceSettingsScreen(prefs, de, modelManager, onUpdatePrefs)
+                    SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(prefs, de, secureKeyStorage, modelManager, onUpdatePrefs)
                     SettingsRoute.CLIPBOARD -> ClipboardSettingsScreen(prefs, de, onUpdatePrefs)
                     SettingsRoute.EMOJI -> EmojiSettingsScreen(prefs, de, onUpdatePrefs)
                     SettingsRoute.ABOUT -> AboutSettingsScreen(
@@ -415,7 +436,8 @@ private fun HomeSettingsScreen(
         ClipboardRetention.NEVER -> if (de) "Nie" else "Never"
     }
     val aiValue = when (prefs.aiProvider) {
-        AiProviderType.LOCAL_RULES -> if (de) "Lokal" else "Local"
+        AiProviderType.LOCAL_RULES -> if (de) "Regeln" else "Rules"
+        AiProviderType.LOCAL_LLM -> "Local LLM"
         AiProviderType.GEMINI_API -> "Gemini"
         AiProviderType.OPENAI_COMPATIBLE -> "API"
     }
@@ -431,7 +453,7 @@ private fun HomeSettingsScreen(
         ),
         HomeNavItem(
             route = SettingsRoute.APPEARANCE,
-            title = if (de) "Design & Größe" else "Theme & Size",
+            title = stringResource(R.string.nav_appearance),
             value = "${prefs.keyboardScalePercent}%",
             icon = Icons.Rounded.Palette,
             badgeColor = Color(0xFFAF52DE),
@@ -439,7 +461,7 @@ private fun HomeSettingsScreen(
         ),
         HomeNavItem(
             route = SettingsRoute.QUICK_BAR,
-            title = if (de) "Schnellleiste" else "Quick Bar",
+            title = stringResource(R.string.nav_quick_bar),
             value = "${prefs.quickBarActions.size}",
             icon = Icons.Rounded.Tune,
             badgeColor = Color(0xFF5AC8FA),
@@ -447,18 +469,18 @@ private fun HomeSettingsScreen(
         ),
         HomeNavItem(
             route = SettingsRoute.LANGUAGES,
-            title = if (de) "Sprachen & Layout" else "Languages",
-            value = if (prefs.activeLocale == "de") "Deutsch" else "English",
+            title = stringResource(R.string.nav_languages),
+            value = KeyboardLocales.specFor(prefs.activeLocale).nativeLabel,
             icon = Icons.Rounded.Language,
             badgeColor = Color(0xFF007AFF),
-            keywords = "sprache qwertz qwerty zahlenreihe umlaute leertaste"
+            keywords = "sprache qwertz qwerty azerty zahlenreihe umlaute leertaste land"
         )
     )
 
     val intelligenceItems: List<HomeRowItem> = listOf(
         HomeNavItem(
             route = SettingsRoute.DICTIONARY,
-            title = if (de) "Wörterbuch & Lernen" else "Dictionary",
+            title = stringResource(R.string.nav_dictionary),
             value = "$dictWordCount",
             icon = Icons.Rounded.Book,
             badgeColor = Color(0xFF34C759),
@@ -466,34 +488,34 @@ private fun HomeSettingsScreen(
         ),
         HomeNavItem(
             route = SettingsRoute.CORRECTIONS,
-            title = if (de) "Korrekturen" else "Corrections",
+            title = stringResource(R.string.nav_corrections),
             value = if (prefs.autoCorrect) (if (de) "An" else "On") else (if (de) "Aus" else "Off"),
             icon = Icons.Rounded.Spellcheck,
             badgeColor = Color(0xFF30B0C7),
-            keywords = "autokorrektur rechner math inkognito undo grammatik"
+            keywords = "autokorrektur rechner math inkognito undo grammatik swipe wischen"
         ),
         HomeNavItem(
             route = SettingsRoute.VOICE,
-            title = if (de) "Spracheingabe" else "Voice typing",
-            value = if (prefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP) "Rambler" else "Standard",
+            title = stringResource(R.string.nav_voice),
+            value = if (prefs.voiceEngine == VoiceEngineMode.SYSTEM_SPEECH) "System" else "Whisper",
             icon = Icons.Rounded.Mic,
             badgeColor = Color(0xFFFF9500),
-            keywords = "sprache diktat rambler füllwörter mikrofon"
+            keywords = "sprache diktat rambler whisper modell lokal mikrofon prompt"
         ),
         HomeNavItem(
             route = SettingsRoute.WRITING_TOOLS,
-            title = if (de) "KI-Schreibhilfe" else "Writing Tools",
+            title = stringResource(R.string.nav_writing_tools),
             value = aiValue,
             icon = Icons.Rounded.AutoAwesome,
             badgeColor = Color(0xFF5856D6),
-            keywords = "ki ai gemini openai key schreibhilfe"
+            keywords = "ki ai gemini openai qwen gemma llama gguf modell prompt"
         )
     )
 
     val toolsItems: List<HomeRowItem> = listOf(
         HomeNavItem(
             route = SettingsRoute.CLIPBOARD,
-            title = if (de) "Zwischenablage & OCR" else "Clipboard & OCR",
+            title = stringResource(R.string.nav_clipboard),
             value = retentionValue,
             icon = Icons.Rounded.ContentPaste,
             badgeColor = Color(0xFF32ADE6),
@@ -501,7 +523,7 @@ private fun HomeSettingsScreen(
         ),
         HomeNavItem(
             route = SettingsRoute.EMOJI,
-            title = "Emoji",
+            title = stringResource(R.string.nav_emoji),
             value = "${prefs.emojiScale}",
             icon = Icons.Rounded.EmojiEmotions,
             badgeColor = Color(0xFFFF9F0A),
@@ -509,7 +531,7 @@ private fun HomeSettingsScreen(
         ),
         HomeNavItem(
             route = SettingsRoute.ABOUT,
-            title = if (de) "Über Tapwing" else "About Tapwing",
+            title = stringResource(R.string.nav_about),
             value = "v${BuildConfig.VERSION_NAME}",
             icon = Icons.Rounded.Info,
             badgeColor = Color(0xFF8E8E93),
@@ -518,9 +540,9 @@ private fun HomeSettingsScreen(
     )
 
     val sections = listOf(
-        (if (de) "Darstellung & Tastatur" else "Appearance & Keyboard") to appearanceItems,
-        (if (de) "Tippen & Intelligenz" else "Typing & Intelligence") to intelligenceItems,
-        (if (de) "Werkzeuge & Info" else "Tools & Info") to toolsItems
+        stringResource(R.string.section_keyboard) to appearanceItems,
+        stringResource(R.string.section_smart_ai) to intelligenceItems,
+        stringResource(R.string.section_privacy) to toolsItems
     )
 
     val q = searchQuery.trim().lowercase()
@@ -544,7 +566,7 @@ private fun HomeSettingsScreen(
                 AppleSearchPill(
                     query = searchQuery,
                     onQueryChange = onSearchQueryChange,
-                    placeholder = if (de) "Suchen" else "Search"
+                    placeholder = stringResource(R.string.settings_search_placeholder)
                 )
             }
         }
@@ -569,9 +591,9 @@ private fun HomeSettingsScreen(
                             )
                             Text(
                                 text = if (!imeEnabled) {
-                                    if (de) "Tapwing in Android aktivieren" else "Enable Tapwing in Android"
+                                    stringResource(R.string.setup_enable_tapwing)
                                 } else {
-                                    if (de) "Tapwing als Tastatur auswählen" else "Select Tapwing as keyboard"
+                                    stringResource(R.string.setup_select_tapwing)
                                 },
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 15.sp
@@ -603,7 +625,7 @@ private fun HomeSettingsScreen(
                     AppleInlineField(
                         value = testInputText,
                         onValueChange = onTestInputChange,
-                        placeholder = if (de) "Tastatur hier testen…" else "Test keyboard here…",
+                        placeholder = stringResource(R.string.settings_test_placeholder),
                         leadingIcon = Icons.Rounded.Keyboard,
                         containerAlpha = 0f,
                         fieldHeight = 46.dp
@@ -803,6 +825,11 @@ private fun AppearanceScreen(
                         title = if (de) "Haptisches Feedback" else "Haptic feedback",
                         checked = prefs.hapticFeedback
                     ) { v -> onUpdatePrefs { it.copy(hapticFeedback = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Tastenklick-Ton" else "Sound on keypress",
+                        checked = prefs.soundOnKeypress
+                    ) { v -> onUpdatePrefs { it.copy(soundOnKeypress = v) } }
                     AppleHairlineDivider(startIndent = 16.dp)
                     OneHandedMode.entries.forEachIndexed { idx, mode ->
                         val label = when (mode) {
@@ -1164,14 +1191,18 @@ private fun LanguagesScreen(
     ) {
         item {
             Column {
-                AppleSectionHeader(if (de) "Aktive Sprache" else "Active language")
+                AppleSectionHeader(if (de) "Aktive Tastatur-Sprache" else "Active keyboard language")
                 AppleGroupedSurface {
-                    MinimalCheckRow("Deutsch (QWERTZ)", selected = prefs.activeLocale == "de") {
-                        onUpdatePrefs { it.copy(activeLocale = "de") }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalCheckRow("English (QWERTY)", selected = prefs.activeLocale == "en") {
-                        onUpdatePrefs { it.copy(activeLocale = "en") }
+                    val activeCandidates = KeyboardLocales.allTypingLocales.filter { it.code in prefs.enabledLocales }
+                        .ifEmpty { listOf(KeyboardLocales.allTypingLocales.first()) }
+                    activeCandidates.forEachIndexed { idx, spec ->
+                        MinimalCheckRow(
+                            title = "${spec.nativeLabel} (${spec.layoutLabel})",
+                            selected = prefs.activeLocale == spec.code
+                        ) {
+                            onUpdatePrefs { it.copy(activeLocale = spec.code) }
+                        }
+                        if (idx < activeCandidates.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
                     }
                 }
             }
@@ -1179,8 +1210,67 @@ private fun LanguagesScreen(
 
         item {
             Column {
-                AppleSectionHeader(if (de) "Tastenbelegung" else "Layout")
+                AppleSectionHeader(if (de) "Aktivierte Sprachen & Länder" else "Enabled languages & countries")
                 AppleGroupedSurface {
+                    KeyboardLocales.allTypingLocales.forEachIndexed { idx, spec ->
+                        val enabled = spec.code in prefs.enabledLocales
+                        MinimalToggleRow(
+                            title = "${spec.nativeLabel} · ${spec.layoutLabel}",
+                            checked = enabled
+                        ) { checked ->
+                            onUpdatePrefs { current ->
+                                val next = if (checked) {
+                                    (current.enabledLocales + spec.code).distinct()
+                                } else {
+                                    val filtered = current.enabledLocales.filterNot { it == spec.code }
+                                    if (filtered.isEmpty()) current.enabledLocales else filtered
+                                }
+                                val nextActive = if (current.activeLocale in next) current.activeLocale else next.first()
+                                current.copy(enabledLocales = next, activeLocale = nextActive)
+                            }
+                        }
+                        if (idx < KeyboardLocales.allTypingLocales.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                    }
+                }
+                AppleSectionFooter(
+                    if (de) "Die Globus-Taste und Leertaste (gedrückt halten) wechseln zwischen deinen aktivierten Sprachen."
+                    else "The globe key and spacebar long-press cycle through your enabled languages."
+                )
+            }
+        }
+
+        item {
+            Column {
+                AppleSectionHeader(if (de) "App-Sprache (Menü)" else "App UI language")
+                AppleGroupedSurface {
+                    KeyboardLocales.appUiLanguages.forEachIndexed { idx, lang ->
+                        val label = if (lang.code == "system") {
+                            if (de) "Systemsprache (${KeyboardLocales.systemLanguageDisplayName()})"
+                            else "System (${KeyboardLocales.systemLanguageDisplayName()})"
+                        } else {
+                            lang.nativeLabel
+                        }
+                        MinimalCheckRow(
+                            title = label,
+                            selected = prefs.appUiLocale == lang.code
+                        ) {
+                            onUpdatePrefs { it.copy(appUiLocale = lang.code) }
+                        }
+                        if (idx < KeyboardLocales.appUiLanguages.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                    }
+                }
+            }
+        }
+
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Tastenbelegung & Mehrsprachigkeit" else "Layout & Multilingual")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        title = if (de) "Mehrsprachige Vorschläge" else "Multilingual predictions",
+                        checked = prefs.multilingualPredictions
+                    ) { v -> onUpdatePrefs { it.copy(multilingualPredictions = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
                     MinimalToggleRow(
                         title = if (de) "Zahlenreihe anzeigen" else "Number row",
                         checked = prefs.showNumberRow
@@ -1197,8 +1287,8 @@ private fun LanguagesScreen(
                     ) { v -> onUpdatePrefs { it.copy(showSpacebarLanguageLabel = v) } }
                 }
                 AppleSectionFooter(
-                    if (de) "Ohne direkte Umlaut-Tasten bleibt die 1:1 PixelBoard 10er-Reihe aktiv (Umlaute per Gedrückthalten)."
-                    else "Keep direct umlauts off for the compact 10-column PixelBoard row."
+                    if (de) "Mehrsprachige Vorschläge erkennen Wörter aus deinen anderen aktivierten Sprachen ohne manuelles Umschalten."
+                    else "Multilingual predictions recognize words from your other enabled languages without manual switching."
                 )
             }
         }
@@ -1242,6 +1332,8 @@ private fun DictionaryLearningScreen(
 
     val stats = remember(revision) { dictionaryStore.stats() }
     val customWords = remember(revision) { dictionaryStore.listCustomWords().take(25) }
+    val learnedWords = remember(revision) { dictionaryStore.listTopLearnedWords(12) }
+    val rejectedWords = remember(revision) { dictionaryStore.listRejectedCorrections().take(12) }
     val shortcuts = remember(revision) { dictionaryStore.listShortcuts().take(20) }
 
     val importLauncher = rememberLauncherForActivityResult(
@@ -1354,6 +1446,7 @@ private fun DictionaryLearningScreen(
                         StatBadge(if (de) "Kürzel" else "Shortcuts", stats.shortcutCount.toString())
                         StatBadge(if (de) "Gelernt" else "Learned", stats.learnedWordCount.toString())
                         StatBadge(if (de) "Paare" else "Bigrams", stats.learnedBigramCount.toString())
+                        StatBadge(if (de) "3-Gramm" else "Trigrams", stats.learnedTrigramCount.toString())
                     }
                 }
                 AppleSectionFooter(
@@ -1560,7 +1653,64 @@ private fun DictionaryLearningScreen(
                         }
                     }
                 }
-                AppleSectionFooter(if (de) "Dynamisch eingebaut: /datum und /zeit" else "Built-in dynamic triggers: /date and /time")
+                AppleSectionFooter(if (de) "Dynamisch eingebaut: /datum, /zeit, /woche, /monat, /jahr" else "Built-in triggers: /date, /time, /week, /month, /year")
+            }
+        }
+
+        if (learnedWords.isNotEmpty() || rejectedWords.isNotEmpty()) {
+            item {
+                Column {
+                    AppleSectionHeader(if (de) "Häufig gelernte Wörter" else "Top learned words")
+                    AppleGroupedSurface {
+                        learnedWords.forEachIndexed { idx, (word, count) ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(42.dp)
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("$word ($count×)", modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                IconButton(
+                                    onClick = {
+                                        dictionaryStore.removeLearnedWord(word)
+                                        revision++
+                                        onDictionaryChanged()
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(17.dp))
+                                }
+                            }
+                            if (idx < learnedWords.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                        }
+                    }
+                    if (rejectedWords.isNotEmpty()) {
+                        Spacer(Modifier.height(14.dp))
+                        AppleSectionHeader(if (de) "Ignorierte Autokorrekturen" else "Ignored autocorrections")
+                        AppleGroupedSurface {
+                            rejectedWords.forEachIndexed { idx, word ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(42.dp)
+                                        .padding(horizontal = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(word, modifier = Modifier.weight(1f), fontSize = 14.sp)
+                                    TextButton(onClick = {
+                                        dictionaryStore.unrejectCorrection(word)
+                                        revision++
+                                        onDictionaryChanged()
+                                    }) {
+                                        Text(if (de) "Freigeben" else "Allow", fontSize = 12.sp)
+                                    }
+                                }
+                                if (idx < rejectedWords.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1608,6 +1758,14 @@ private fun CorrectionsScreen(
                 AppleGroupedSurface {
                     MinimalToggleRow(if (de) "Autokorrektur" else "Auto-correction", prefs.autoCorrect) { v ->
                         onUpdatePrefs { it.copy(autoCorrect = v) }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(if (de) "Wisch-Tippen (Glide Typing)" else "Glide / Swipe typing", prefs.glideTypingEnabled) { v ->
+                        onUpdatePrefs { it.copy(glideTypingEnabled = v) }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(if (de) "Rückgängig mit Löschtaste (⌫)" else "Backspace undoes autocorrect", prefs.smartBackspaceUndo) { v ->
+                        onUpdatePrefs { it.copy(smartBackspaceUndo = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
                     MinimalToggleRow(if (de) "Adaptives Lernen" else "Adaptive learning", prefs.learningEnabled) { v ->
@@ -1666,9 +1824,14 @@ private fun CorrectionsScreen(
 private fun VoiceSettingsScreen(
     prefs: TapwingPrefs,
     de: Boolean,
+    modelManager: LocalModelManager,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val modelStates by modelManager.states.collectAsState()
+    var pendingImportSpec by remember { mutableStateOf<LocalModelSpec?>(null) }
+
     var micGranted by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -1678,6 +1841,28 @@ private fun VoiceSettingsScreen(
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         micGranted = it
     }
+    val importModelLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val targetSpec = pendingImportSpec
+        pendingImportSpec = null
+        if (uri != null && targetSpec != null) {
+            scope.launch {
+                val ok = modelManager.importModelFromUri(targetSpec, uri)
+                if (ok) {
+                    onUpdatePrefs { it.copy(selectedWhisperModelId = targetSpec.id) }
+                }
+            }
+        }
+    }
+
+    val defaultPromptPreview = remember(prefs.voiceCleanupUseSystemLanguage, prefs.activeLocale) {
+        CleanupPromptBuilder.buildDefaultPrompt(
+            activeKeyboardLocale = prefs.activeLocale,
+            useSystemLanguage = prefs.voiceCleanupUseSystemLanguage
+        )
+    }
+    var promptDraft by remember(prefs.voiceCleanupPrompt) {
+        mutableStateOf(prefs.voiceCleanupPrompt)
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -1686,7 +1871,122 @@ private fun VoiceSettingsScreen(
     ) {
         item {
             Column {
-                AppleSectionHeader(if (de) "Diktat-Modus" else "Dictation mode")
+                AppleSectionHeader(if (de) "Aufnahme-Engine (1× Tippen Start/Stopp)" else "Voice Engine (Tap to Start/Stop)")
+                AppleGroupedSurface {
+                    val engines = listOf(
+                        VoiceEngineMode.AUTO_LOCAL_FIRST to (if (de) "Lokal zuerst (Whisper → Fallback System)" else "Local first (Whisper → System fallback)"),
+                        VoiceEngineMode.LOCAL_WHISPER to (if (de) "Nur Lokal (Whisper + AudioRecord 16 kHz)" else "Local only (Whisper + 16 kHz AudioRecord)"),
+                        VoiceEngineMode.SYSTEM_SPEECH to (if (de) "Android System-Spracherkennung" else "Android System Speech")
+                    )
+                    engines.forEachIndexed { idx, (mode, label) ->
+                        MinimalCheckRow(label, selected = prefs.voiceEngine == mode) {
+                            onUpdatePrefs { it.copy(voiceEngine = mode) }
+                        }
+                        if (idx < engines.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                    }
+                }
+                AppleSectionFooter(
+                    if (de) "Mit lokalem Whisper nimmt Tapwing unbegrenzt lange in 16 kHz Studio-PCM mit Rauschunterdrückung auf. Einmal tippen startet, nochmal tippen stoppt."
+                    else "With local Whisper, Tapwing records unlimited duration in 16 kHz PCM with hardware noise suppression. Tap once to start, tap again to stop."
+                )
+            }
+        }
+
+        item {
+            LocalModelCatalogSection(
+                title = if (de) "Lokale Transkriptions-Modelle (Whisper)" else "Local Transcription Models (Whisper)",
+                recommendationNote = if (de) {
+                    "Empfehlung: Whisper Small (Q5_1, 190 MB) — beste Genauigkeit für Deutsch, Englisch & 99 Sprachen bei hoher Handy-Geschwindigkeit."
+                } else {
+                    "Recommendation: Whisper Small (Q5_1, 190 MB) — best accuracy/speed balance for English, German & 99 languages."
+                },
+                models = LocalModelCatalog.whisperModels,
+                selectedModelId = prefs.selectedWhisperModelId,
+                states = modelStates,
+                de = de,
+                onSelectModel = { spec -> onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) } },
+                onDownloadModel = { spec -> modelManager.startDownload(spec) },
+                onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
+                onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
+                onImportModel = { spec ->
+                    pendingImportSpec = spec
+                    importModelLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                },
+                onOpenUrl = { url ->
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                }
+            )
+        }
+
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Bereinigungs-Prompt (Rambler-Niveau)" else "Cleanup System Prompt (Rambler-grade)")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        if (de) "KI-Bereinigung nach Diktat" else "AI cleanup after dictation",
+                        prefs.voiceAiPolish
+                    ) { v -> onUpdatePrefs { it.copy(voiceAiPolish = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        if (de) "Sprache = Systemsprache (${KeyboardLocales.systemLanguageDisplayName()})"
+                        else "Language = System (${KeyboardLocales.systemLanguageDisplayName()})",
+                        prefs.voiceCleanupUseSystemLanguage
+                    ) { v -> onUpdatePrefs { it.copy(voiceCleanupUseSystemLanguage = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = promptDraft,
+                            onValueChange = { promptDraft = it },
+                            label = {
+                                Text(
+                                    if (de) "Eigener System-Prompt (leer = Rambler-Standard)"
+                                    else "Custom system prompt (empty = Rambler default)",
+                                    fontSize = 12.sp
+                                )
+                            },
+                            placeholder = {
+                                Text(defaultPromptPreview.take(160) + "…", fontSize = 12.sp)
+                            },
+                            minLines = 4,
+                            maxLines = 8,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    onUpdatePrefs { it.copy(voiceCleanupPrompt = promptDraft.trim()) }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (de) "Prompt speichern" else "Save prompt", fontSize = 13.sp)
+                            }
+                            FilledTonalButton(
+                                onClick = {
+                                    promptDraft = defaultPromptPreview
+                                    onUpdatePrefs { it.copy(voiceCleanupPrompt = "") }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (de) "Standard einfügen" else "Load default", fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+                AppleSectionFooter(
+                    if (de) "Entfernt Füllwörter, Stottern, korrigiert Satzabbrüche (\"nein warte...\"), setzt Satzzeichen & Listen. Funktioniert mehrsprachig."
+                    else "Strips fillers & stutters, resolves self-corrections, punctuates & formats lists cleanly across languages."
+                )
+            }
+        }
+
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Diktat-Modus & Optionen" else "Dictation Mode & Options")
                 AppleGroupedSurface {
                     MinimalCheckRow(
                         title = if (de) "Natürliche Bereinigung (Rambler)" else "Natural Cleanup (Rambler)",
@@ -1694,17 +1994,10 @@ private fun VoiceSettingsScreen(
                     ) { onUpdatePrefs { it.copy(voiceMode = VoiceDictationMode.NATURAL_CLEANUP) } }
                     AppleHairlineDivider(startIndent = 16.dp)
                     MinimalCheckRow(
-                        title = "Standard",
+                        title = "Standard (Verbatim)",
                         selected = prefs.voiceMode == VoiceDictationMode.STANDARD
                     ) { onUpdatePrefs { it.copy(voiceMode = VoiceDictationMode.STANDARD) } }
-                }
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Optionen" else "Options")
-                AppleGroupedSurface {
+                    AppleHairlineDivider(startIndent = 16.dp)
                     MinimalToggleRow(if (de) "Füllwörter entfernen" else "Remove filler words", prefs.voiceRemoveFillers) { v ->
                         onUpdatePrefs { it.copy(voiceRemoveFillers = v) }
                     }
@@ -1769,13 +2062,33 @@ private fun WritingToolsSettingsScreen(
     prefs: TapwingPrefs,
     de: Boolean,
     secureKeyStorage: SecureKeyStorage,
+    modelManager: LocalModelManager,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val modelStates by modelManager.states.collectAsState()
+    var pendingImportSpec by remember { mutableStateOf<LocalModelSpec?>(null) }
+
     var apiKeyInput by remember { mutableStateOf("") }
     var maskedKey by remember { mutableStateOf(secureKeyStorage.maskedPreview()) }
     var testStatus by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
+
+    val importLlmLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val targetSpec = pendingImportSpec
+        pendingImportSpec = null
+        if (uri != null && targetSpec != null) {
+            scope.launch {
+                val ok = modelManager.importModelFromUri(targetSpec, uri)
+                if (ok) {
+                    onUpdatePrefs {
+                        it.copy(selectedLocalLlmId = targetSpec.id, aiProvider = AiProviderType.LOCAL_LLM)
+                    }
+                }
+            }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -1799,7 +2112,8 @@ private fun WritingToolsSettingsScreen(
                 AppleSectionHeader(if (de) "KI-Backend" else "Backend")
                 AppleGroupedSurface {
                     val providers = listOf(
-                        AiProviderType.LOCAL_RULES to (if (de) "On-Device Regeln (Offline)" else "On-Device Rules (Offline)"),
+                        AiProviderType.LOCAL_LLM to (if (de) "Lokales KI-Modell (Offline GGUF)" else "Local On-Device LLM (Offline GGUF)"),
+                        AiProviderType.LOCAL_RULES to (if (de) "On-Device Regeln (Sofort & ohne Download)" else "On-Device Rules (Instant, zero download)"),
                         AiProviderType.GEMINI_API to "Google Gemini API",
                         AiProviderType.OPENAI_COMPATIBLE to (if (de) "OpenAI-kompatibler Endpunkt" else "OpenAI-compatible")
                     )
@@ -1814,8 +2128,36 @@ private fun WritingToolsSettingsScreen(
         }
 
         item {
+            LocalModelCatalogSection(
+                title = if (de) "Lokale KI-Modelle für Bereinigung & Schreiben" else "Local AI Models for Cleanup & Writing",
+                recommendationNote = if (de) {
+                    "Empfehlung: Qwen3 1.7B (Q4_K_M, 1,1 GB) — bestes lokales Modell für Sprachbereinigung (Rambler-Qualität) & Mehrsprachigkeit. Für Handys mit 4 GB RAM: Qwen3 0.6B (397 MB)."
+                } else {
+                    "Recommendation: Qwen3 1.7B (Q4_K_M, 1.1 GB) — strongest local model for voice cleanup & multilingual grammar. For 4 GB RAM devices: Qwen3 0.6B (397 MB)."
+                },
+                models = LocalModelCatalog.llmModels,
+                selectedModelId = prefs.selectedLocalLlmId,
+                states = modelStates,
+                de = de,
+                onSelectModel = { spec ->
+                    onUpdatePrefs { it.copy(selectedLocalLlmId = spec.id, aiProvider = AiProviderType.LOCAL_LLM) }
+                },
+                onDownloadModel = { spec -> modelManager.startDownload(spec) },
+                onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
+                onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
+                onImportModel = { spec ->
+                    pendingImportSpec = spec
+                    importLlmLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                },
+                onOpenUrl = { url ->
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                }
+            )
+        }
+
+        item {
             Column {
-                AppleSectionHeader(if (de) "Modell & API-Key" else "Model & API Key")
+                AppleSectionHeader(if (de) "Cloud-Modell & API-Key (Optional)" else "Cloud Model & API Key (Optional)")
                 AppleGroupedSurface {
                     Column(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1916,11 +2258,197 @@ private fun WritingToolsSettingsScreen(
                 }
                 AppleSectionFooter(
                     if (maskedKey.isNotEmpty()) {
-                        if (de) "Android Keystore: $maskedKey" else "Android Keystore: $maskedKey"
+                        "Android Keystore: $maskedKey"
                     } else {
-                        if (de) "Kein API-Key nötig im On-Device-Modus." else "No API key needed for local rules."
+                        if (de) "Kein API-Key nötig für lokale Modelle oder Offline-Regeln." else "No API key needed for local models or offline rules."
                     }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalModelCatalogSection(
+    title: String,
+    recommendationNote: String,
+    models: List<LocalModelSpec>,
+    selectedModelId: String,
+    states: Map<String, ModelInstallState>,
+    de: Boolean,
+    onSelectModel: (LocalModelSpec) -> Unit,
+    onDownloadModel: (LocalModelSpec) -> Unit,
+    onCancelDownload: (LocalModelSpec) -> Unit,
+    onDeleteModel: (LocalModelSpec) -> Unit,
+    onImportModel: (LocalModelSpec) -> Unit,
+    onOpenUrl: (String) -> Unit
+) {
+    Column {
+        AppleSectionHeader(title)
+        AppleGroupedSurface {
+            Text(
+                text = recommendationNote,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            )
+            models.forEach { spec ->
+                AppleHairlineDivider(startIndent = 16.dp)
+                val state = states[spec.id] ?: ModelInstallState.NotInstalled
+                val isSelected = selectedModelId == spec.id
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = state is ModelInstallState.Installed) { onSelectModel(spec) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = spec.displayName,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (spec.isRecommended) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                    ) {
+                                        Text(
+                                            text = if (de) "Empfohlen" else "Recommended",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = "${spec.approxSizeMb} MB · ${spec.minRamGb}+ GB RAM",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (isSelected && state is ModelInstallState.Installed) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = if (de) spec.summaryDe else spec.summaryEn,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    when (state) {
+                        is ModelInstallState.Downloading -> {
+                            val pct = (state.progress * 100f).roundToInt()
+                            val dlMb = state.downloadedBytes / 1_000_000L
+                            val totMb = (state.totalBytes / 1_000_000L).coerceAtLeast(1L)
+                            LinearProgressIndicator(
+                                progress = { state.progress },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("$pct% ($dlMb / $totMb MB)", fontSize = 12.sp)
+                                TextButton(onClick = { onCancelDownload(spec) }) {
+                                    Text(if (de) "Abbrechen" else "Cancel", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                        is ModelInstallState.Installed -> {
+                            val mb = state.sizeBytes / 1_000_000L
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FilledTonalButton(
+                                    onClick = { onSelectModel(spec) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = if (isSelected) (if (de) "Aktiv ✓" else "Active ✓")
+                                        else (if (de) "Auswählen ($mb MB)" else "Use ($mb MB)"),
+                                        fontSize = 12.sp
+                                    )
+                                }
+                                IconButton(onClick = { onDeleteModel(spec) }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.DeleteOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                        is ModelInstallState.Error -> {
+                            Text(
+                                text = state.message,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { onDownloadModel(spec) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(if (de) "Erneut laden" else "Retry", fontSize = 12.sp)
+                                }
+                                TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
+                                    Text("HuggingFace", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                        ModelInstallState.NotInstalled -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { onDownloadModel(spec) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(if (de) "Laden" else "Download", fontSize = 12.sp)
+                                }
+                                FilledTonalButton(
+                                    onClick = { onImportModel(spec) },
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text(if (de) "Datei" else "File", fontSize = 12.sp)
+                                }
+                                TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
+                                    Text("Link", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1935,6 +2463,14 @@ private fun ClipboardSettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var ocrResultNotice by remember { mutableStateOf<String?>(null) }
+    var mediaPermGranted by remember {
+        mutableStateOf(ScreenshotMonitor.hasMediaPermission(context))
+    }
+    val mediaPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        mediaPermGranted = granted
+    }
 
     val photoOcrLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -1967,7 +2503,36 @@ private fun ClipboardSettingsScreen(
                 MinimalToggleRow(if (de) "Erweiterte Zwischenablage" else "Extended clipboard", prefs.clipboardEnabled) { v ->
                     onUpdatePrefs { it.copy(clipboardEnabled = v) }
                 }
+                AppleHairlineDivider(startIndent = 16.dp)
+                MinimalToggleRow(if (de) "Screenshots automatisch kopieren" else "Auto-copy screenshots", prefs.autoCopyScreenshots) { v ->
+                    onUpdatePrefs { it.copy(autoCopyScreenshots = v) }
+                    if (v && !mediaPermGranted) {
+                        mediaPermLauncher.launch(ScreenshotMonitor.requiredMediaPermission())
+                    }
+                }
+                AppleHairlineDivider(startIndent = 16.dp)
+                MinimalToggleRow(if (de) "Screenshot-Vorschau in Leiste" else "Screenshot preview chip", prefs.screenshotSuggestionChip) { v ->
+                    onUpdatePrefs { it.copy(screenshotSuggestionChip = v) }
+                    if (v && !mediaPermGranted) {
+                        mediaPermLauncher.launch(ScreenshotMonitor.requiredMediaPermission())
+                    }
+                }
+                AppleHairlineDivider(startIndent = 16.dp)
+                MinimalActionRow(
+                    title = if (mediaPermGranted) {
+                        if (de) "Screenshot-Zugriff erteilt ✓" else "Screenshot access granted ✓"
+                    } else {
+                        if (de) "Screenshot-Zugriff erlauben" else "Allow screenshot access"
+                    },
+                    textColor = if (mediaPermGranted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                ) {
+                    mediaPermLauncher.launch(ScreenshotMonitor.requiredMediaPermission())
+                }
             }
+            AppleSectionFooter(
+                if (de) "Neue Screenshots werden automatisch in die Zwischenablage kopiert und mit Vorschau + OCR direkt in der Tastaturleiste angezeigt."
+                else "New screenshots are automatically copied to the clipboard and shown with thumbnail & OCR in the keyboard bar."
+            )
         }
 
         item {

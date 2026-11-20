@@ -15,12 +15,17 @@ data class ClipboardClip(
     val id: String,
     val text: String,
     val timestampMs: Long,
-    val pinned: Boolean = false
-)
+    val pinned: Boolean = false,
+    val imagePath: String? = null,
+    val mimeType: String? = null,
+    val ocrText: String? = null
+) {
+    val isImage: Boolean get() = !imagePath.isNullOrBlank()
+}
 
 /**
- * Pure Kotlin / JSON-backed clipboard store supporting pinned items,
- * configurable retention (1h, 24h, 7d, 30d, Never), and up to 100 recent unpinned clips.
+ * Pure Kotlin / JSON-backed clipboard store supporting text clips, image/screenshot clips,
+ * OCR metadata, pinned items, configurable retention, and up to 200 recent unpinned clips.
  */
 class ClipboardStore(
     private val storageFile: File?,
@@ -42,7 +47,7 @@ class ClipboardStore(
         if (text.isEmpty()) return
 
         val now = clockMs()
-        val existingPinned = _items.value.firstOrNull { it.text == text && it.pinned }
+        val existingPinned = _items.value.firstOrNull { !it.isImage && it.text == text && it.pinned }
         if (existingPinned != null) {
             val updated = _items.value.map {
                 if (it.id == existingPinned.id) it.copy(timestampMs = now) else it
@@ -51,7 +56,7 @@ class ClipboardStore(
             return
         }
 
-        val withoutDup = _items.value.filterNot { it.text == text }
+        val withoutDup = _items.value.filterNot { !it.isImage && it.text == text }
         val newClip = ClipboardClip(
             id = UUID.randomUUID().toString(),
             text = text,
@@ -59,6 +64,46 @@ class ClipboardStore(
             pinned = false
         )
         applyAndSave(listOf(newClip) + withoutDup, retention, maxUnpinnedItems, now)
+    }
+
+    fun addImageClip(
+        imagePath: String,
+        mimeType: String = "image/png",
+        displayLabel: String = "Screenshot",
+        ocrText: String? = null,
+        retention: ClipboardRetention = ClipboardRetention.DAYS_7,
+        maxUnpinnedItems: Int = 100
+    ): ClipboardClip? {
+        if (imagePath.isBlank()) return null
+        val now = clockMs()
+        val existing = _items.value.firstOrNull { it.imagePath == imagePath }
+        if (existing != null) return existing
+
+        val newClip = ClipboardClip(
+            id = UUID.randomUUID().toString(),
+            text = displayLabel,
+            timestampMs = now,
+            pinned = false,
+            imagePath = imagePath,
+            mimeType = mimeType,
+            ocrText = ocrText?.trim()?.takeIf { it.isNotEmpty() }
+        )
+        applyAndSave(listOf(newClip) + _items.value, retention, maxUnpinnedItems, now)
+        return newClip
+    }
+
+    fun updateClipOcrText(
+        id: String,
+        ocrText: String,
+        retention: ClipboardRetention,
+        maxUnpinnedItems: Int
+    ) {
+        val clean = ocrText.trim()
+        if (clean.isEmpty()) return
+        val updated = _items.value.map { clip ->
+            if (clip.id == id) clip.copy(ocrText = clean) else clip
+        }
+        applyAndSave(updated, retention, maxUnpinnedItems, clockMs())
     }
 
     fun togglePin(id: String, retention: ClipboardRetention, maxUnpinnedItems: Int) {
@@ -71,14 +116,25 @@ class ClipboardStore(
 
     fun deleteClip(id: String, retention: ClipboardRetention, maxUnpinnedItems: Int) {
         val now = clockMs()
+        val target = _items.value.firstOrNull { it.id == id }
         val updated = _items.value.filterNot { it.id == id }
         applyAndSave(updated, retention, maxUnpinnedItems, now)
+        target?.imagePath?.let { path ->
+            if (updated.none { it.imagePath == path }) {
+                runCatching { File(path).delete() }
+            }
+        }
     }
 
     fun clearUnpinned(retention: ClipboardRetention, maxUnpinnedItems: Int) {
         val now = clockMs()
-        val updated = _items.value.filter { it.pinned }
-        applyAndSave(updated, retention, maxUnpinnedItems, now)
+        val kept = _items.value.filter { it.pinned }
+        val removed = _items.value.filter { !it.pinned }
+        applyAndSave(kept, retention, maxUnpinnedItems, now)
+        val keptPaths = kept.mapNotNull { it.imagePath }.toSet()
+        removed.mapNotNull { it.imagePath }.filter { it !in keptPaths }.forEach { path ->
+            runCatching { File(path).delete() }
+        }
     }
 
     fun prune(retention: ClipboardRetention, maxUnpinnedItems: Int) {
@@ -106,6 +162,11 @@ class ClipboardStore(
             .take(limit)
 
         val merged = pinned + unpinned
+        val keptPaths = merged.mapNotNull { it.imagePath }.toSet()
+        rawList.mapNotNull { it.imagePath }.filter { it !in keptPaths }.forEach { path ->
+            runCatching { File(path).delete() }
+        }
+
         _items.value = merged
         saveToDisk(merged)
     }
@@ -118,11 +179,16 @@ class ClipboardStore(
             val list = ArrayList<ClipboardClip>(arr.length())
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
+                val imgPath = obj.optString("imagePath", "").takeIf { it.isNotBlank() }
+                if (imgPath != null && !File(imgPath).isFile) continue
                 list += ClipboardClip(
                     id = obj.getString("id"),
                     text = obj.getString("text"),
                     timestampMs = obj.getLong("ts"),
-                    pinned = obj.optBoolean("pinned", false)
+                    pinned = obj.optBoolean("pinned", false),
+                    imagePath = imgPath,
+                    mimeType = obj.optString("mimeType", "").takeIf { it.isNotBlank() },
+                    ocrText = obj.optString("ocrText", "").takeIf { it.isNotBlank() }
                 )
             }
             _items.value = list
@@ -141,6 +207,9 @@ class ClipboardStore(
                         put("text", clip.text)
                         put("ts", clip.timestampMs)
                         put("pinned", clip.pinned)
+                        clip.imagePath?.let { put("imagePath", it) }
+                        clip.mimeType?.let { put("mimeType", it) }
+                        clip.ocrText?.let { put("ocrText", it) }
                     }
                 )
             }
