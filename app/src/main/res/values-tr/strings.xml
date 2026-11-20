@@ -76,8 +76,8 @@
     <string name="nav_languages">Diller ve ülkeler</string>
     <string name="nav_dictionary">Sözlük ve öğrenme</string>
     <string name="nav_corrections">Yazma ve otomatik düzeltme</string>
-    <string name="nav_voice">Ses ve yerel STT</string>
-    <string name="nav_writing_tools">Yerel AI ve istemler</string>
+    <string name="nav_voice">Dikte</string>
+    <string name="nav_writing_tools">Yazma araçları</string>
     <string name="nav_clipboard">Pano ve ekran görüntüleri</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Tapwing Hakkında</string>
@@ -88,4 +88,9 @@
     <string name="setup_enable_tapwing">Tapwing’i Etkinleştir</string>
     <string name="setup_select_tapwing">Tapwing’i Seç</string>
     <string name="setup_ready">Tapwing etkin ✓</string>
+    <string name="clipboard_paste_suggestion">Kopyalanan metni yapıştır</string>
+    <string name="clipboard_dismiss_suggestion">Yapıştırma önerisini gizle</string>
+    <string name="settings_expand">Genişlet</string>
+    <string name="settings_collapse">Daralt</string>
+    <string name="clipboard_verification_code">Kod %1$s</string>
 </resources>

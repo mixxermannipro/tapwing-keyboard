@@ -72,7 +72,12 @@ fun TapwingKeyboardRoot(
     isTyping: Boolean,
     proactiveUndo: UndoSnapshot?,
     recentScreenshot: RecentScreenshot?,
-    otpChipText: String?,
+
+    clipboardPreview: String?,
+    clipboardTimestamp: Long?,
+    clipboardVerificationCode: Boolean,
+    onPasteClipboard: (Long) -> Unit,
+    onDismissClipboard: (Long) -> Unit,
     inlineAutofillViews: List<View> = emptyList(),
     snippets: List<TextSnippet> = emptyList(),
     voiceState: VoiceUiState,
@@ -96,8 +101,8 @@ fun TapwingKeyboardRoot(
     onTapScreenshotChip: (RecentScreenshot) -> Unit,
     onTapScreenshotOcr: (RecentScreenshot) -> Unit,
     onDismissScreenshotChip: () -> Unit,
-    onTapOtpChip: (String) -> Unit,
-    onDismissOtpChip: () -> Unit,
+
+
     onOpenToolsHub: () -> Unit,
     onOpenCustomizeBar: () -> Unit,
     onQuickAction: (QuickBarAction) -> Unit,
@@ -341,7 +346,12 @@ fun TapwingKeyboardRoot(
                                         suggestions = suggestions,
                                         proactiveUndo = proactiveUndo,
                                         recentScreenshot = recentScreenshot,
-                                        otpChipText = otpChipText,
+
+                                        clipboardPreview = clipboardPreview,
+                                        clipboardTimestamp = clipboardTimestamp,
+                                        clipboardVerificationCode = clipboardVerificationCode,
+                                        onPasteClipboard = onPasteClipboard,
+                                        onDismissClipboard = onDismissClipboard,
                                         inlineAutofillViews = inlineAutofillViews,
                                         voiceState = voiceState,
                                         isTyping = isTyping,
@@ -354,8 +364,8 @@ fun TapwingKeyboardRoot(
                                         onTapScreenshotChip = onTapScreenshotChip,
                                         onTapScreenshotOcr = onTapScreenshotOcr,
                                         onDismissScreenshotChip = onDismissScreenshotChip,
-                                        onTapOtpChip = onTapOtpChip,
-                                        onDismissOtpChip = onDismissOtpChip,
+
+
                                         onStartVoice = onStartVoice,
                                         onFinishVoice = onFinishVoice,
                                         onCancelVoice = onCancelVoice,

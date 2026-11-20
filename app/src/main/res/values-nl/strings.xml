@@ -76,8 +76,8 @@
     <string name="nav_languages">Talen &amp; landen</string>
     <string name="nav_dictionary">Woordenboek &amp; leren</string>
     <string name="nav_corrections">Typen &amp; autocorrectie</string>
-    <string name="nav_voice">Spraak &amp; lokale STT</string>
-    <string name="nav_writing_tools">Lokale AI &amp; prompts</string>
+    <string name="nav_voice">Dicteren</string>
+    <string name="nav_writing_tools">Schrijfhulp</string>
     <string name="nav_clipboard">Klembord &amp; screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Over Tapwing</string>
@@ -88,4 +88,9 @@
     <string name="setup_enable_tapwing">Tapwing inschakelen</string>
     <string name="setup_select_tapwing">Tapwing kiezen</string>
     <string name="setup_ready">Tapwing actief ✓</string>
+    <string name="clipboard_paste_suggestion">Gekopieerde tekst plakken</string>
+    <string name="clipboard_dismiss_suggestion">Plaksuggestie verbergen</string>
+    <string name="settings_expand">Uitvouwen</string>
+    <string name="settings_collapse">Invouwen</string>
+    <string name="clipboard_verification_code">Code %1$s</string>
 </resources>

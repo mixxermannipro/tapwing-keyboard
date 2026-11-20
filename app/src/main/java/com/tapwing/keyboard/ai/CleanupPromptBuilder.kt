@@ -4,14 +4,12 @@ import com.tapwing.keyboard.data.KeyboardLocales
 import java.util.Locale
 
 /**
- * Builds the multilingual, device-system-language-aware cleanup prompt modeled to match and
- * surpass Google Rambler, while allowing complete user customization.
+ * Builds the multilingual dictation cleanup prompt and applies optional user instructions.
  */
 object CleanupPromptBuilder {
 
     /**
-     * Builds the default Rambler-grade system prompt targeting the device's system language
-     * (or active keyboard language if preferred) while preserving multilingual code-switching.
+     * Uses the device or keyboard language as a hint while preserving the languages spoken.
      */
     fun buildDefaultPrompt(
         systemLocale: Locale = Locale.getDefault(),
@@ -27,11 +25,11 @@ object CleanupPromptBuilder {
         val langTag = targetLocale.toLanguageTag().ifBlank { "de-DE" }
 
         return """
-You are Tapwing Voice Cleanup — an ultra-accurate, privacy-first dictation editor running locally on the user's phone.
+You are the Tapwing dictation editor.
 Primary device language: $langEnglish ($langTag).
 
 Transform the raw speech transcript into clean, ready-to-send written text by following these rules:
-1. Language fidelity: Write in $langEnglish ($langTag) by default, OR preserve the exact spoken language(s) if mixed. Never translate unless explicitly instructed inside the transcript.
+1. Language fidelity: Preserve the spoken language or languages. Use $langEnglish ($langTag) only to resolve ambiguous spellings. Do not translate.
 2. Remove speech disfluencies: Strip hesitation fillers ("äh", "ähm", "öhm", "um", "uh", "erm", "like", "sozusagen"), false starts, and accidental word repetitions.
 3. Resolve self-corrections locally: ALWAYS keep the full surrounding sentence intact; replace ONLY the corrected phrase itself (e.g. "Ich fahre nach Berlin, nein warte, Hamburg" -> "Ich fahre nach Hamburg.").
 4. Grammar, casing & punctuation: Apply natural grammar, capitalization (nouns/names), commas, periods/question marks, and paragraph breaks where appropriate.

@@ -24,6 +24,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,8 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -90,6 +93,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -121,6 +125,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.CleanupPromptBuilder
 import com.tapwing.keyboard.ai.CloudAiClient
@@ -132,6 +137,9 @@ import com.tapwing.keyboard.ai.LocalModelManager
 import com.tapwing.keyboard.ai.LocalModelSpec
 import com.tapwing.keyboard.ai.ModelInstallState
 import com.tapwing.keyboard.voice.VoiceSelfTest
+import com.tapwing.keyboard.voice.CloudDictation
+import com.tapwing.keyboard.voice.CloudSpeechProvider
+import com.tapwing.keyboard.voice.TapwingVoiceController
 import com.tapwing.keyboard.voice.WavAudioRecorder
 import com.tapwing.keyboard.clipboard.ScreenshotMonitor
 import com.tapwing.keyboard.data.AiProviderType
@@ -345,8 +353,8 @@ fun TapwingSettingsApp(
                         de = de,
                         imeEnabled = imeEnabled,
                         imeSelected = imeSelected,
-                        dictWordCount = remember(dictRevision) { dictionaryStore.stats().customWordCount },
-                        wordsTypedCount = liveStats.wordsTyped,
+
+
                         searchQuery = searchQuery,
                         onSearchQueryChange = { searchQuery = it },
                         testInputText = testInputText,
@@ -391,7 +399,11 @@ fun TapwingSettingsApp(
                         onOpenQuickBar = { navigateTo(SettingsRoute.QUICK_BAR) },
                         onUpdatePrefs = onUpdatePrefs
                     )
-                    SettingsRoute.VOICE -> VoiceSettingsScreen(prefs, de, modelManager, onUpdatePrefs)
+                    SettingsRoute.VOICE -> VoiceSettingsScreen(
+                        prefs, de, modelManager, secureKeyStorage,
+                        onOpenWritingTools = { navigateTo(SettingsRoute.WRITING_TOOLS) },
+                        onUpdatePrefs = onUpdatePrefs
+                    )
                     SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(prefs, de, secureKeyStorage, modelManager, onUpdatePrefs)
                     SettingsRoute.CLIPBOARD -> ClipboardSettingsScreen(prefs, de, onUpdatePrefs)
                     SettingsRoute.EMOJI -> EmojiSettingsScreen(prefs, de, onUpdatePrefs)
@@ -424,7 +436,6 @@ private sealed interface HomeRowItem {
 private data class HomeNavItem(
     val route: SettingsRoute,
     override val title: String,
-    val value: String,
     val icon: ImageVector,
     val badgeColor: Color,
     override val keywords: String
@@ -445,8 +456,6 @@ private fun HomeSettingsScreen(
     de: Boolean,
     imeEnabled: Boolean,
     imeSelected: Boolean,
-    dictWordCount: Int,
-    wordsTypedCount: Long,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     testInputText: String,
@@ -456,23 +465,9 @@ private fun HomeSettingsScreen(
     onToggleAppleMode: (Boolean) -> Unit,
     onNavigate: (SettingsRoute) -> Unit
 ) {
-    val retentionValue = when (prefs.clipboardRetention) {
-        ClipboardRetention.HOUR_1 -> if (de) "1 Std." else "1 hr"
-        ClipboardRetention.HOURS_24 -> if (de) "24 Std." else "24 hr"
-        ClipboardRetention.DAYS_7 -> if (de) "7 Tage" else "7 days"
-        ClipboardRetention.DAYS_30 -> if (de) "30 Tage" else "30 days"
-        ClipboardRetention.NEVER -> if (de) "Nie" else "Never"
-    }
-    val aiValue = when (prefs.aiProvider) {
-        AiProviderType.LOCAL_RULES -> if (de) "Regeln" else "Rules"
-        AiProviderType.LOCAL_LLM -> "Local LLM"
-        AiProviderType.GEMINI_API -> "Gemini"
-        AiProviderType.OPENAI_COMPATIBLE -> "API"
-    }
-
     val appearanceItems: List<HomeRowItem> = listOf(
         HomeToggleItem(
-            title = if (de) "Apple Modus (Liquid Glass)" else "Apple Mode (Liquid Glass)",
+            title = if (de) "Apple-Stil" else "Apple style",
             checked = prefs.appleModeEnabled,
             icon = Icons.Rounded.Smartphone,
             badgeColor = Color(0xFF5E5CE6),
@@ -482,7 +477,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.APPEARANCE,
             title = stringResource(R.string.nav_appearance),
-            value = "${prefs.keyboardScalePercent}%",
             icon = Icons.Rounded.Palette,
             badgeColor = Color(0xFFAF52DE),
             keywords = "theme design farbe größe höhe abstand einhand"
@@ -490,7 +484,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.QUICK_BAR,
             title = stringResource(R.string.nav_quick_bar),
-            value = "${prefs.quickBarActions.size}",
             icon = Icons.Rounded.Tune,
             badgeColor = Color(0xFF5AC8FA),
             keywords = "leiste schnellleiste toolbar symbole icons reihenfolge"
@@ -498,7 +491,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.LANGUAGES,
             title = stringResource(R.string.nav_languages),
-            value = KeyboardLocales.specFor(prefs.activeLocale).nativeLabel,
             icon = Icons.Rounded.Language,
             badgeColor = Color(0xFF007AFF),
             keywords = "sprache qwertz qwerty azerty zahlenreihe umlaute leertaste land"
@@ -509,7 +501,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.DICTIONARY,
             title = stringResource(R.string.nav_dictionary),
-            value = "$dictWordCount",
             icon = Icons.Rounded.Book,
             badgeColor = Color(0xFF34C759),
             keywords = "wörterbuch lernen zip gboard pixelboard kürzel import export"
@@ -517,7 +508,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.CORRECTIONS,
             title = stringResource(R.string.nav_corrections),
-            value = if (prefs.autoCorrect) (if (de) "An" else "On") else (if (de) "Aus" else "Off"),
             icon = Icons.Rounded.Spellcheck,
             badgeColor = Color(0xFF30B0C7),
             keywords = "autokorrektur rechner math inkognito undo grammatik swipe wischen"
@@ -525,7 +515,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.VOICE,
             title = stringResource(R.string.nav_voice),
-            value = if (prefs.voiceEngine == VoiceEngineMode.SYSTEM_SPEECH) "System" else "Whisper",
             icon = Icons.Rounded.Mic,
             badgeColor = Color(0xFFFF9500),
             keywords = "sprache diktat rambler whisper modell lokal mikrofon prompt"
@@ -533,7 +522,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.WRITING_TOOLS,
             title = stringResource(R.string.nav_writing_tools),
-            value = aiValue,
             icon = Icons.Rounded.AutoAwesome,
             badgeColor = Color(0xFF5856D6),
             keywords = "ki ai gemini openai qwen gemma llama gguf modell prompt"
@@ -544,7 +532,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.CLIPBOARD,
             title = stringResource(R.string.nav_clipboard),
-            value = retentionValue,
             icon = Icons.Rounded.ContentPaste,
             badgeColor = Color(0xFF32ADE6),
             keywords = "zwischenablage clipboard ocr kamera scan screenshot"
@@ -552,7 +539,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.EMOJI,
             title = stringResource(R.string.nav_emoji),
-            value = "${prefs.emojiScale}",
             icon = Icons.Rounded.EmojiEmotions,
             badgeColor = Color(0xFFFF9F0A),
             keywords = "emoji größe vorschläge"
@@ -560,7 +546,6 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.STATS,
             title = if (de) "Tastatur-Statistik" else "Typing Statistics",
-            value = "$wordsTypedCount",
             icon = Icons.Rounded.BarChart,
             badgeColor = Color(0xFF34C759),
             keywords = "statistik wpm geschwindigkeit wörter gespart zeichen swipe"
@@ -568,20 +553,21 @@ private fun HomeSettingsScreen(
         HomeNavItem(
             route = SettingsRoute.ABOUT,
             title = stringResource(R.string.nav_about),
-            value = "v${BuildConfig.VERSION_NAME}",
             icon = Icons.Rounded.Info,
             badgeColor = Color(0xFF8E8E93),
             keywords = "über info version datenschutz lizenz system"
         )
     )
 
-    val sections = listOf(
-        stringResource(R.string.section_keyboard) to appearanceItems,
-        stringResource(R.string.section_smart_ai) to intelligenceItems,
-        stringResource(R.string.section_privacy) to toolsItems
+    val rows = intelligenceItems + toolsItems + appearanceItems
+    val primaryRoutes = listOf(
+        SettingsRoute.VOICE, SettingsRoute.WRITING_TOOLS, SettingsRoute.CLIPBOARD,
+        SettingsRoute.APPEARANCE, SettingsRoute.LANGUAGES, SettingsRoute.CORRECTIONS
     )
-
+    val primary = primaryRoutes.map { route -> rows.filterIsInstance<HomeNavItem>().first { it.route == route } }
+    val extra = rows.filterNot { it in primary }
     val q = searchQuery.trim().lowercase()
+    var more by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -670,39 +656,36 @@ private fun HomeSettingsScreen(
             }
         }
 
-        sections.forEach { (header, rows) ->
-            val filtered = rows.filter { item ->
-                q.isEmpty() || item.title.lowercase().contains(q) || item.keywords.contains(q)
+        val visibleRows = if (q.isEmpty()) primary else rows.filter {
+            it.title.lowercase().contains(q) || it.keywords.contains(q)
+        }
+        if (visibleRows.isNotEmpty()) {
+            item { HomeSettingsRows(visibleRows, onNavigate) }
+        } else {
+            item {
+                AppleSectionFooter(if (de) "Keine passenden Einstellungen gefunden." else "No matching settings.")
             }
-            if (filtered.isNotEmpty()) {
-                item(key = header) {
-                    Column {
-                        AppleSectionHeader(header)
-                        AppleGroupedSurface {
-                            filtered.forEachIndexed { idx, item ->
-                                when (item) {
-                                    is HomeToggleItem -> MinimalToggleRow(
-                                        title = item.title,
-                                        checked = item.checked,
-                                        icon = item.icon,
-                                        badgeColor = item.badgeColor,
-                                        onCheckedChange = item.onCheckedChange
-                                    )
-                                    is HomeNavItem -> MinimalNavRow(
-                                        icon = item.icon,
-                                        badgeColor = item.badgeColor,
-                                        title = item.title,
-                                        value = item.value,
-                                        onClick = { onNavigate(item.route) }
-                                    )
-                                }
-                                if (idx < filtered.lastIndex) {
-                                    AppleHairlineDivider(startIndent = 58.dp)
-                                }
-                            }
-                        }
-                    }
+        }
+
+        if (q.isEmpty()) {
+            item {
+                AppleGroupedSurface {
+                    SettingsDisclosure(if (de) "Weitere Optionen" else "More options", more) { more = !more }
                 }
+            }
+            if (more) item { HomeSettingsRows(extra, onNavigate) }
+        }
+    }
+}
+
+@Composable
+private fun HomeSettingsRows(rows: List<HomeRowItem>, onNavigate: (SettingsRoute) -> Unit) {
+    AppleGroupedSurface {
+        rows.forEachIndexed { index, item ->
+            if (index > 0) AppleHairlineDivider(startIndent = 58.dp)
+            when (item) {
+                is HomeToggleItem -> MinimalToggleRow(item.title, item.checked, item.icon, item.badgeColor, item.onCheckedChange)
+                is HomeNavItem -> MinimalNavRow(item.icon, item.badgeColor, item.title, "") { onNavigate(item.route) }
             }
         }
     }
@@ -2036,10 +2019,6 @@ private fun CorrectionsScreen(
                         onUpdatePrefs { it.copy(perAppLearningEnabled = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Passwort-Autofill in Leiste (Bitwarden & Co.)" else "Inline password autofill (Bitwarden, etc.)", prefs.inlineAutofillEnabled) { v ->
-                        onUpdatePrefs { it.copy(inlineAutofillEnabled = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
                     MinimalToggleRow(if (de) "Inline-Taschenrechner" else "Inline math", prefs.inlineMathEnabled) { v ->
                         onUpdatePrefs { it.copy(inlineMathEnabled = v) }
                     }
@@ -2069,6 +2048,22 @@ private fun CorrectionsScreen(
 
         item {
             Column {
+                AppleSectionHeader(if (de) "Passwörter und Codes" else "Passwords and codes")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        if (de) "Autofill-Vorschläge anzeigen" else "Show autofill suggestions",
+                        prefs.inlineAutofillEnabled
+                    ) { enabled -> onUpdatePrefs { it.copy(inlineAutofillEnabled = enabled) } }
+                }
+                AppleSectionFooter(
+                    if (de) "Wähle Bitwarden in den Android-Einstellungen als Autofill-Dienst. Stelle in Bitwarden die Anzeige auf „In der Tastatur“. Tapwing zeigt Vorschläge des Dienstes und erkennt kopierte Bestätigungscodes."
+                    else "Choose Bitwarden as your Android autofill service and set its display to Inline. Tapwing shows suggestions from that service and recognises copied verification codes."
+                )
+            }
+        }
+
+        item {
+            Column {
                 AppleSectionHeader(if (de) "Leiste" else "Toolbar")
                 AppleGroupedSurface {
                     MinimalNavRow(
@@ -2093,6 +2088,8 @@ private fun VoiceSettingsScreen(
     prefs: TapwingPrefs,
     de: Boolean,
     modelManager: LocalModelManager,
+    secureKeyStorage: SecureKeyStorage,
+    onOpenWritingTools: () -> Unit,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
@@ -2122,6 +2119,18 @@ private fun VoiceSettingsScreen(
         }
     }
 
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    var modelDetails by rememberSaveable { mutableStateOf(false) }
+    val dictationProvider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
+    val keySaved = remember(dictationProvider) {
+        dictationProvider != null && secureKeyStorage.readDictationKey(dictationProvider.name).isNotBlank()
+    }
+    val localAndroidAvailable = remember(context) { TapwingVoiceController.isOnDeviceSpeechAvailable(context) }
+    val installedWhisper = remember(modelStates, prefs.selectedWhisperModelId) {
+        modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, prefs.selectedWhisperModelId)
+    }
+    val visibleModel = installedWhisper?.first ?: requireNotNull(LocalModelCatalog.findById("whisper-base-q5_1"))
+
     val defaultPromptPreview = remember(prefs.voiceCleanupUseSystemLanguage, prefs.activeLocale) {
         CleanupPromptBuilder.buildDefaultPrompt(
             activeKeyboardLocale = prefs.activeLocale,
@@ -2139,56 +2148,159 @@ private fun VoiceSettingsScreen(
     ) {
         item {
             Column {
-                AppleSectionHeader(if (de) "Aufnahme-Engine (1× Tippen Start/Stopp)" else "Voice Engine (Tap to Start/Stop)")
                 AppleGroupedSurface {
-                    val engines = listOf(
-                        VoiceEngineMode.AUTO_LOCAL_FIRST to (if (de) "Lokal zuerst (Whisper → Fallback System)" else "Local first (Whisper → System fallback)"),
-                        VoiceEngineMode.LOCAL_WHISPER to (if (de) "Nur Lokal (Whisper + AudioRecord 16 kHz)" else "Local only (Whisper + 16 kHz AudioRecord)"),
-                        VoiceEngineMode.SYSTEM_SPEECH to (if (de) "Android System-Spracherkennung" else "Android System Speech")
-                    )
-                    engines.forEachIndexed { idx, (mode, label) ->
-                        MinimalCheckRow(label, selected = prefs.voiceEngine == mode) {
-                            onUpdatePrefs { it.copy(voiceEngine = mode) }
-                        }
-                        if (idx < engines.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        if (de) "Diktat glätten" else "Clean up dictation",
+                        prefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP
+                    ) { enabled ->
+                        val mode = if (enabled) VoiceDictationMode.NATURAL_CLEANUP else VoiceDictationMode.STANDARD
+                        onUpdatePrefs { it.copy(voiceMode = mode) }
+                    }
+                    if (!micGranted) {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalActionRow(
+                            if (de) "Mikrofon erlauben" else "Allow microphone",
+                            MaterialTheme.colorScheme.primary
+                        ) { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
                     }
                 }
                 AppleSectionFooter(
-                    if (de) "Mit lokalem Whisper nimmt Tapwing unbegrenzt lange in 16 kHz Studio-PCM mit Rauschunterdrückung auf. Einmal tippen startet, nochmal tippen stoppt."
-                    else "With local Whisper, Tapwing records unlimited duration in 16 kHz PCM with hardware noise suppression. Tap once to start, tap again to stop."
+                    if (de) "Tippe zum Starten und Beenden auf das Mikrofon. Tapwing kann Zögern entfernen und Satzzeichen ergänzen."
+                    else "Tap the microphone to start and stop. Tapwing can remove hesitations and add punctuation."
                 )
             }
         }
 
         item {
-            LocalModelCatalogSection(
-                title = if (de) "Lokale Transkriptions-Modelle (Whisper)" else "Local Transcription Models (Whisper)",
-                recommendationNote = if (de) {
-                    "Empfehlung: Whisper Small (Q5_1, 190 MB) — beste Genauigkeit für Deutsch, Englisch & 99 Sprachen bei hoher Handy-Geschwindigkeit."
-                } else {
-                    "Recommendation: Whisper Small (Q5_1, 190 MB) — best accuracy/speed balance for English, German & 99 languages."
-                },
-                models = LocalModelCatalog.whisperModels,
-                selectedModelId = prefs.selectedWhisperModelId,
-                states = modelStates,
-                de = de,
-                onSelectModel = { spec -> onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) } },
-                onDownloadModel = { spec -> modelManager.startDownload(spec) },
-                onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
-                onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
-                onImportModel = { spec ->
-                    pendingImportSpec = spec
-                    importModelLauncher.launch(arrayOf("application/octet-stream", "*/*"))
-                },
-                onOpenUrl = { url ->
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            Column {
+                AppleSectionHeader(if (de) "Spracherkennung" else "Speech recognition")
+                AppleGroupedSurface {
+                    val options = buildList {
+                        add(VoiceEngineMode.AUTO_LOCAL_FIRST)
+                        if (localAndroidAvailable || prefs.voiceEngine == VoiceEngineMode.ON_DEVICE_SPEECH) {
+                            add(VoiceEngineMode.ON_DEVICE_SPEECH)
+                        }
+                        add(VoiceEngineMode.LOCAL_WHISPER)
+                        add(VoiceEngineMode.CLOUD)
+                        if (advanced || prefs.voiceEngine == VoiceEngineMode.SYSTEM_SPEECH) {
+                            add(VoiceEngineMode.SYSTEM_SPEECH)
+                        }
+                    }
+                    options.forEachIndexed { index, mode ->
+                        if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
+                        val (title, description) = when (mode) {
+                            VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) {
+                                "Automatisch" to "Nutzt ein geladenes Whisper-Modell oder den Android-Sprachdienst."
+                            } else "Automatic" to "Uses a downloaded Whisper model or the Android speech service."
+                            VoiceEngineMode.ON_DEVICE_SPEECH -> if (de) {
+                                "Android offline · Live-Text" to "Text erscheint beim Sprechen. Benötigt ein Android-Sprachpaket."
+                            } else "Android offline · Live text" to "Shows text as you speak. Requires an Android language pack."
+                            VoiceEngineMode.LOCAL_WHISPER -> if (de) {
+                                "Whisper offline" to "Audio bleibt auf dem Gerät. Text erscheint nach dem Stopp."
+                            } else "Whisper offline" to "Audio stays on your device. Text appears when you stop."
+                            VoiceEngineMode.CLOUD -> if (de) {
+                                "Cloud mit eigenem Schlüssel" to "Sendet Audio nach dem Stopp an Gemini oder OpenAI. Kosten sind möglich."
+                            } else "Cloud with your own key" to "Sends audio to Gemini or OpenAI when you stop. Charges may apply."
+                            VoiceEngineMode.SYSTEM_SPEECH -> if (de) {
+                                "Android-Sprachdienst" to "Zeigt Live-Text. Der Dienst kann je nach Gerät das Internet nutzen."
+                            } else "Android speech service" to "Shows live text. The service may use the internet on some devices."
+                        }
+                        VoiceChoice(title, description, selected = prefs.voiceEngine == mode) {
+                            onUpdatePrefs { it.copy(voiceEngine = mode) }
+                        }
+                    }
                 }
-            )
+            }
+        }
+
+        if (prefs.voiceEngine == VoiceEngineMode.CLOUD) {
+            item {
+                Column {
+                    AppleSectionHeader(if (de) "Cloud einrichten" else "Cloud setup")
+                    AppleGroupedSurface {
+                        MinimalValueRow(
+                            if (de) "Modell für Audio" else "Speech model",
+                            when (dictationProvider) {
+                                CloudSpeechProvider.GEMINI -> "Gemini 3.5 Flash-Lite"
+                                CloudSpeechProvider.OPENAI -> CloudDictation.OPENAI_MODEL
+                                null -> if (de) "Anbieter wählen" else "Choose provider"
+                            }
+                        )
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalActionRow(
+                            if (de) "Anbieter und Schlüssel" else "Provider and key",
+                            MaterialTheme.colorScheme.primary,
+                            onClick = onOpenWritingTools
+                        )
+                    }
+                    AppleSectionFooter(
+                        if (de) "Empfehlung für natürliche Nachrichten: Gemini. Es transkribiert und glättet in einem Schritt. OpenAI ist eine Alternative, wenn du dort bereits einen Schlüssel hast."
+                        else "For natural messages, try Gemini. It transcribes and cleans up in one step. OpenAI is an option if you already have an OpenAI key."
+                    )
+                    if (prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE && dictationProvider == null) {
+                        AppleSectionFooter(
+                            if (de) "Cloud-Diktat mit OpenAI benötigt den offiziellen OpenAI-Endpunkt."
+                            else "OpenAI dictation requires the official OpenAI endpoint."
+                        )
+                    } else if (!keySaved) {
+                        AppleSectionFooter(
+                            if (de) "Speichere den Schlüssel für diesen Anbieter. Gib einen älteren Schlüssel einmal neu ein."
+                            else "Save the key for this provider. Re-enter an existing key once to enable cloud dictation."
+                        )
+                    }
+                }
+            }
+        }
+
+        if (prefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER || prefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LocalModelCatalogSection(
+                        title = if (de) "Offline-Sprachmodell" else "Offline speech model",
+                        recommendationNote = if (de) {
+                            "Starte mit Whisper Base (60 MB). Probiere Small (190 MB), wenn Namen oder Fachwörter oft fehlen."
+                        } else {
+                            "Start with Whisper Base (60 MB). Try Small (190 MB) if names or technical terms are often missed."
+                        },
+                        models = if (modelDetails) LocalModelCatalog.whisperModels else listOf(visibleModel),
+                        selectedModelId = installedWhisper?.first?.id.orEmpty(),
+                        states = modelStates,
+                        de = de,
+                        onSelectModel = { spec -> onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) } },
+                        onDownloadModel = { spec ->
+                            if (installedWhisper == null) onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) }
+                            modelManager.startDownload(spec)
+                        },
+                        onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
+                        onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
+                        onImportModel = { spec ->
+                            pendingImportSpec = spec
+                            importModelLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                        },
+                        onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                        showTechnicalDetails = modelDetails
+                    )
+                    AppleGroupedSurface {
+                        SettingsDisclosure(if (de) "Alle Offline-Modelle" else "All offline models", modelDetails) {
+                            modelDetails = !modelDetails
+                        }
+                    }
+                }
+            }
         }
 
         item {
+            AppleGroupedSurface {
+                SettingsDisclosure(if (de) "Weitere Diktatoptionen" else "More dictation options", advanced) {
+                    advanced = !advanced
+                }
+            }
+        }
+        if (!advanced) return@LazyColumn
+
+        item {
             Column {
-                AppleSectionHeader(if (de) "Bereinigungs-Prompt (Rambler-Niveau)" else "Cleanup System Prompt (Rambler-grade)")
+                AppleSectionHeader(if (de) "Zusätzliche Text-KI" else "Additional text AI")
                 AppleGroupedSurface {
                     MinimalToggleRow(
                         if (de) "KI-Bereinigung nach Diktat" else "AI cleanup after dictation",
@@ -2210,8 +2322,8 @@ private fun VoiceSettingsScreen(
                             onValueChange = { promptDraft = it },
                             label = {
                                 Text(
-                                    if (de) "Eigener System-Prompt (leer = Rambler-Standard)"
-                                    else "Custom system prompt (empty = Rambler default)",
+                                    if (de) "Eigene Anweisung (optional)"
+                                    else "Custom instructions (optional)",
                                     fontSize = 12.sp
                                 )
                             },
@@ -2246,8 +2358,8 @@ private fun VoiceSettingsScreen(
                     }
                 }
                 AppleSectionFooter(
-                    if (de) "Entfernt Füllwörter, Stottern, korrigiert Satzabbrüche (\"nein warte...\"), setzt Satzzeichen & Listen. Funktioniert mehrsprachig."
-                    else "Strips fillers & stutters, resolves self-corrections, punctuates & formats lists cleanly across languages."
+                    if (de) "Optionaler zweiter Schritt mit dem Anbieter aus der Schreibhilfe. In den Offline-Modi bleibt der Text lokal."
+                    else "Optional second step using your Writing Tools provider. In offline modes, text stays on the device."
                 )
             }
         }
@@ -2256,16 +2368,6 @@ private fun VoiceSettingsScreen(
             Column {
                 AppleSectionHeader(if (de) "Diktat-Modus & Optionen" else "Dictation Mode & Options")
                 AppleGroupedSurface {
-                    MinimalCheckRow(
-                        title = if (de) "Natürliche Bereinigung (Rambler)" else "Natural Cleanup (Rambler)",
-                        selected = prefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP
-                    ) { onUpdatePrefs { it.copy(voiceMode = VoiceDictationMode.NATURAL_CLEANUP) } }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalCheckRow(
-                        title = "Standard (Verbatim)",
-                        selected = prefs.voiceMode == VoiceDictationMode.STANDARD
-                    ) { onUpdatePrefs { it.copy(voiceMode = VoiceDictationMode.STANDARD) } }
-                    AppleHairlineDivider(startIndent = 16.dp)
                     MinimalToggleRow(if (de) "Füllwörter entfernen" else "Remove filler words", prefs.voiceRemoveFillers) { v ->
                         onUpdatePrefs { it.copy(voiceRemoveFillers = v) }
                     }
@@ -2274,7 +2376,7 @@ private fun VoiceSettingsScreen(
                         onUpdatePrefs { it.copy(voiceAutoPunctuate = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Strikte Sprachsperre" else "Strict language lock", prefs.voiceStrictLanguageLock) { v ->
+                    MinimalToggleRow(if (de) "Tastatursprache bevorzugen" else "Prefer keyboard language", prefs.voiceStrictLanguageLock) { v ->
                         onUpdatePrefs { it.copy(voiceStrictLanguageLock = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
@@ -2297,7 +2399,7 @@ private fun VoiceSettingsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(if (de) "Drehungs-Schonfrist" else "Rotation grace", fontSize = 15.sp)
+                            Text(if (de) "Diktat nach Drehung fortsetzen" else "Resume dictation after rotation", fontSize = 15.sp)
                             Text("${prefs.voiceRotationGraceMs} ms", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
                         }
                         Slider(
@@ -2326,14 +2428,11 @@ private fun VoiceSettingsScreen(
         item {
             var diagRunning by remember { mutableStateOf(false) }
             var diagReport by remember { mutableStateOf<String?>(null) }
-            val installedWhisper = remember(modelStates, prefs.selectedWhisperModelId) {
-                modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, prefs.selectedWhisperModelId)
-            }
             val installedLlm = remember(modelStates, prefs.selectedLocalLlmId) {
                 modelManager.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
             }
             Column {
-                AppleSectionHeader(if (de) "On-Device Diagnose & Test" else "On-Device Diagnostics")
+                AppleSectionHeader(if (de) "Offline-Diktat testen" else "Test offline dictation")
                 AppleGroupedSurface {
                     MinimalValueRow(
                         if (de) "Aktives Whisper-Modell" else "Active Whisper model",
@@ -2531,6 +2630,12 @@ private fun WritingToolsSettingsScreen(
     var maskedKey by remember { mutableStateOf(secureKeyStorage.maskedPreview()) }
     var testStatus by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    val recommendedModel = when (prefs.aiProvider) {
+        AiProviderType.GEMINI_API -> CloudDictation.GEMINI_MODEL
+        AiProviderType.OPENAI_COMPATIBLE -> "gpt-4o-mini"
+        else -> ""
+    }
 
     val importLlmLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val targetSpec = pendingImportSpec
@@ -2557,49 +2662,61 @@ private fun WritingToolsSettingsScreen(
                 MinimalToggleRow(if (de) "KI-Schreibhilfe" else "AI Writing Tools", prefs.aiWritingToolsEnabled) { v ->
                     onUpdatePrefs { it.copy(aiWritingToolsEnabled = v) }
                 }
-                AppleHairlineDivider(startIndent = 16.dp)
-                MinimalToggleRow(if (de) "Alle Tastaturen unterstützen" else "Support all keyboards", prefs.aiSupportAllKeyboards) { v ->
-                    onUpdatePrefs { it.copy(aiSupportAllKeyboards = v) }
-                }
+
             }
         }
 
         item {
             Column {
-                AppleSectionHeader(if (de) "KI-Backend" else "Backend")
+                AppleSectionHeader(if (de) "Text verarbeiten" else "Text processing")
                 AppleGroupedSurface {
-                    val providers = listOf(
-                        AiProviderType.LOCAL_LLM to (if (de) "Lokales KI-Modell (Offline GGUF)" else "Local On-Device LLM (Offline GGUF)"),
-                        AiProviderType.LOCAL_RULES to (if (de) "On-Device Regeln (Sofort & ohne Download)" else "On-Device Rules (Instant, zero download)"),
-                        AiProviderType.GEMINI_API to "Google Gemini API",
-                        AiProviderType.OPENAI_COMPATIBLE to (if (de) "OpenAI-kompatibler Endpunkt" else "OpenAI-compatible")
-                    )
-                    providers.forEachIndexed { idx, (type, label) ->
-                        MinimalCheckRow(label, selected = prefs.aiProvider == type) {
-                            onUpdatePrefs { it.copy(aiProvider = type) }
+                    AiProviderType.entries.forEachIndexed { index, provider ->
+                        if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
+                        val (title, description) = when (provider) {
+                            AiProviderType.LOCAL_RULES -> if (de) {
+                                "Schnell und offline" to "Einfache Korrekturen ohne Download. Empfohlen für den Start."
+                            } else "Fast and offline" to "Basic cleanup without a download. Recommended to start."
+                            AiProviderType.LOCAL_LLM -> if (de) {
+                                "KI auf dem Gerät" to "Schreibt Texte um. Einmaliger Modelldownload nötig."
+                            } else "On-device AI" to "Rewrites text. Requires a one-time model download."
+                            AiProviderType.GEMINI_API -> if (de) {
+                                "Google Gemini" to "Schreibhilfe und optionales Cloud-Diktat mit eigenem Schlüssel."
+                            } else "Google Gemini" to "Writing tools and optional cloud dictation with your own key."
+                            AiProviderType.OPENAI_COMPATIBLE -> if (de) {
+                                "OpenAI" to "Schreibhilfe und optionales Cloud-Diktat mit eigenem Schlüssel."
+                            } else "OpenAI" to "Writing tools and optional cloud dictation with your own key."
                         }
-                        if (idx < providers.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                        VoiceChoice(title, description, selected = prefs.aiProvider == provider) {
+                            onUpdatePrefs { it.copy(aiProvider = provider) }
+                        }
                     }
                 }
             }
         }
 
-        item {
+        if (prefs.aiProvider == AiProviderType.LOCAL_LLM) item {
             LocalModelCatalogSection(
-                title = if (de) "Lokale KI-Modelle für Bereinigung & Schreiben" else "Local AI Models for Cleanup & Writing",
+                title = if (de) "Offline-Schreibmodell" else "Offline writing model",
                 recommendationNote = if (de) {
-                    "Empfehlung: Qwen3 1.7B (Q4_K_M, 1,1 GB) — bestes lokales Modell für Sprachbereinigung (Rambler-Qualität) & Mehrsprachigkeit. Für Handys mit 4 GB RAM: Qwen3 0.6B (397 MB)."
+                    "Starte mit Qwen3 0.6B (397 MB). Für längere Texte gibt es Qwen3 1.7B (1,1 GB)."
                 } else {
-                    "Recommendation: Qwen3 1.7B (Q4_K_M, 1.1 GB) — strongest local model for voice cleanup & multilingual grammar. For 4 GB RAM devices: Qwen3 0.6B (397 MB)."
+                    "Start with Qwen3 0.6B (397 MB). Try Qwen3 1.7B (1.1 GB) for longer text."
                 },
-                models = LocalModelCatalog.llmModels,
+                models = if (advanced) LocalModelCatalog.llmModels else listOf(
+                    LocalModelCatalog.findById(prefs.selectedLocalLlmId)
+                        ?.takeIf { modelStates[it.id] is ModelInstallState.Installed || modelStates[it.id] is ModelInstallState.Downloading }
+                        ?: requireNotNull(LocalModelCatalog.findById("qwen3-0.6b-q4_k_m"))
+                ),
                 selectedModelId = prefs.selectedLocalLlmId,
                 states = modelStates,
                 de = de,
                 onSelectModel = { spec ->
                     onUpdatePrefs { it.copy(selectedLocalLlmId = spec.id, aiProvider = AiProviderType.LOCAL_LLM) }
                 },
-                onDownloadModel = { spec -> modelManager.startDownload(spec) },
+                onDownloadModel = { spec ->
+                    if (!advanced) onUpdatePrefs { it.copy(selectedLocalLlmId = spec.id) }
+                    modelManager.startDownload(spec)
+                },
                 onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
                 onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
                 onImportModel = { spec ->
@@ -2608,29 +2725,37 @@ private fun WritingToolsSettingsScreen(
                 },
                 onOpenUrl = { url ->
                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                }
+                },
+                showTechnicalDetails = advanced
             )
         }
 
-        item {
+        if (recommendedModel.isNotEmpty()) item {
             Column {
-                AppleSectionHeader(if (de) "Cloud-Modell & API-Key (Optional)" else "Cloud Model & API Key (Optional)")
+                AppleSectionHeader(if (de) "API-Schlüssel" else "API key")
                 AppleGroupedSurface {
                     Column(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        AppleInlineField(
-                            value = prefs.aiModel,
-                            onValueChange = { m -> onUpdatePrefs { it.copy(aiModel = m) } },
-                            placeholder = if (de) "Modellname" else "Model name"
-                        )
-                        if (prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE) {
+                        if (prefs.aiModel != recommendedModel) {
+                            FilledTonalButton(onClick = { onUpdatePrefs { it.copy(aiModel = recommendedModel) } }) {
+                                Text(if (de) "Empfohlenes Schreibmodell nutzen" else "Use recommended writing model")
+                            }
+                        }
+                        if (advanced) {
                             AppleInlineField(
-                                value = prefs.aiCustomEndpoint,
-                                onValueChange = { ep -> onUpdatePrefs { it.copy(aiCustomEndpoint = ep) } },
-                                placeholder = "https://api.openai.com/v1/chat/completions"
+                                value = prefs.aiModel,
+                                onValueChange = { model -> onUpdatePrefs { it.copy(aiModel = model) } },
+                                placeholder = if (de) "Modell für die Schreibhilfe" else "Model for Writing Tools"
                             )
+                            if (prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE) {
+                                AppleInlineField(
+                                    value = prefs.aiCustomEndpoint,
+                                    onValueChange = { endpoint -> onUpdatePrefs { it.copy(aiCustomEndpoint = endpoint) } },
+                                    placeholder = "https://api.openai.com/v1/chat/completions"
+                                )
+                            }
                         }
                         AppleInlineField(
                             value = apiKeyInput,
@@ -2641,16 +2766,17 @@ private fun WritingToolsSettingsScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = {
-                                    secureKeyStorage.saveApiKey(apiKeyInput)
+                                    val provider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
+                                    secureKeyStorage.saveApiKey(apiKeyInput, dictationProvider = provider?.name)
                                     maskedKey = secureKeyStorage.maskedPreview()
                                     apiKeyInput = ""
-                                    testStatus = if (de) "Key sicher im Android Keystore gespeichert." else "Saved in Android Keystore."
+                                    testStatus = if (de) "Schlüssel auf dem Gerät gespeichert." else "Key saved on this device."
                                 },
                                 enabled = apiKeyInput.isNotBlank(),
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(if (de) "Key speichern" else "Save", fontSize = 13.sp)
+                                Text(if (de) "Speichern" else "Save", fontSize = 13.sp)
                             }
                             FilledTonalButton(
                                 onClick = {
@@ -2697,7 +2823,7 @@ private fun WritingToolsSettingsScreen(
                             Spacer(Modifier.width(8.dp))
                         }
                         Text(
-                            text = if (de) "Verbindung testen" else "Test backend",
+                            text = if (de) "Verbindung testen" else "Test connection",
                             color = MaterialTheme.colorScheme.primary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Medium
@@ -2714,12 +2840,24 @@ private fun WritingToolsSettingsScreen(
                     }
                 }
                 AppleSectionFooter(
-                    if (maskedKey.isNotEmpty()) {
-                        "Android Keystore: $maskedKey"
-                    } else {
-                        if (de) "Kein API-Key nötig für lokale Modelle oder Offline-Regeln." else "No API key needed for local models or offline rules."
-                    }
+                    if (de) "Empfohlen für die Schreibhilfe: $recommendedModel. Der Anbieter berechnet die Nutzung über dein eigenes Konto."
+                    else "Recommended for Writing Tools: $recommendedModel. The provider bills usage through your own account."
                 )
+            }
+        }
+
+        item {
+            AppleGroupedSurface {
+                SettingsDisclosure(if (de) "Weitere Optionen" else "More options", advanced) {
+                    advanced = !advanced
+                }
+                if (advanced) {
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        if (de) "Alle Tastaturen unterstützen" else "Support all keyboards",
+                        prefs.aiSupportAllKeyboards
+                    ) { enabled -> onUpdatePrefs { it.copy(aiSupportAllKeyboards = enabled) } }
+                }
             }
         }
     }
@@ -2738,7 +2876,8 @@ private fun LocalModelCatalogSection(
     onCancelDownload: (LocalModelSpec) -> Unit,
     onDeleteModel: (LocalModelSpec) -> Unit,
     onImportModel: (LocalModelSpec) -> Unit,
-    onOpenUrl: (String) -> Unit
+    onOpenUrl: (String) -> Unit,
+    showTechnicalDetails: Boolean = true
 ) {
     Column {
         AppleSectionHeader(title)
@@ -2772,11 +2911,11 @@ private fun LocalModelCatalogSection(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = spec.displayName,
+                                    text = if (showTechnicalDetails) spec.displayName else spec.displayName.substringBefore(" ("),
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
-                                if (spec.isRecommended) {
+                                if (showTechnicalDetails && spec.isRecommended) {
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
                                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
@@ -2792,7 +2931,7 @@ private fun LocalModelCatalogSection(
                                 }
                             }
                             Text(
-                                text = "${spec.approxSizeMb} MB · ${spec.minRamGb}+ GB RAM",
+                                text = "${spec.approxSizeMb} MB" + if (showTechnicalDetails) " · ${spec.minRamGb}+ GB RAM" else "",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -2807,7 +2946,7 @@ private fun LocalModelCatalogSection(
                         }
                     }
 
-                    Text(
+                    if (showTechnicalDetails) Text(
                         text = if (de) spec.summaryDe else spec.summaryEn,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2833,7 +2972,7 @@ private fun LocalModelCatalogSection(
                                 }
                             }
                         }
-                        is ModelInstallState.Installed -> {
+                        is ModelInstallState.Installed -> if (showTechnicalDetails || !isSelected) {
                             val mb = state.sizeBytes / 1_000_000L
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -2874,7 +3013,7 @@ private fun LocalModelCatalogSection(
                                 ) {
                                     Text(if (de) "Erneut laden" else "Retry", fontSize = 12.sp)
                                 }
-                                TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
+                                if (showTechnicalDetails) TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
                                     Text("HuggingFace", fontSize = 12.sp)
                                 }
                             }
@@ -2893,13 +3032,13 @@ private fun LocalModelCatalogSection(
                                     Spacer(Modifier.width(4.dp))
                                     Text(if (de) "Laden" else "Download", fontSize = 12.sp)
                                 }
-                                FilledTonalButton(
+                                if (showTechnicalDetails) FilledTonalButton(
                                     onClick = { onImportModel(spec) },
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
                                     Text(if (de) "Datei" else "File", fontSize = 12.sp)
                                 }
-                                TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
+                                if (showTechnicalDetails) TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
                                     Text("Link", fontSize = 12.sp)
                                 }
                             }
@@ -2957,7 +3096,7 @@ private fun ClipboardSettingsScreen(
     ) {
         item {
             AppleGroupedSurface {
-                MinimalToggleRow(if (de) "Erweiterte Zwischenablage" else "Extended clipboard", prefs.clipboardEnabled) { v ->
+                MinimalToggleRow(if (de) "Verlauf und Einfügevorschläge" else "History and paste suggestions", prefs.clipboardEnabled) { v ->
                     onUpdatePrefs { it.copy(clipboardEnabled = v) }
                 }
                 AppleHairlineDivider(startIndent = 16.dp)
@@ -2987,8 +3126,8 @@ private fun ClipboardSettingsScreen(
                 }
             }
             AppleSectionFooter(
-                if (de) "Neue Screenshots werden automatisch in die Zwischenablage kopiert und mit Vorschau + OCR direkt in der Tastaturleiste angezeigt."
-                else "New screenshots are automatically copied to the clipboard and shown with thumbnail & OCR in the keyboard bar."
+                if (de) "Kopierter Text erscheint in der Vorschlagsleiste. Antippen fügt ihn ein. Mit den Screenshot-Optionen kannst du Bilder separat kopieren oder anzeigen."
+                else "Copied text appears in the suggestion bar. Tap it to paste. The screenshot options control copying and previews for images."
             )
         }
 
@@ -3274,6 +3413,46 @@ private fun MinimalToggleRow(
             modifier = Modifier.weight(1f)
         )
         AppleSwitch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun SettingsDisclosure(title: String, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(48.dp)
+            .clickable(
+                onClickLabel = if (expanded) stringResource(R.string.settings_collapse) else stringResource(R.string.settings_expand),
+                role = Role.Button,
+                onClick = onToggle
+            )
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, modifier = Modifier.weight(1f), fontSize = 15.sp)
+        Icon(
+            if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun VoiceChoice(title: String, description: String, selected: Boolean, onSelect: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, fontSize = 15.sp)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (selected) {
+            Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
     }
 }
 

@@ -76,8 +76,8 @@
     <string name="nav_languages">Idiomas y países</string>
     <string name="nav_dictionary">Diccionario y aprendizaje</string>
     <string name="nav_corrections">Escritura y autocorrección</string>
-    <string name="nav_voice">Voz y STT local</string>
-    <string name="nav_writing_tools">IA local y prompts</string>
+    <string name="nav_voice">Dictado</string>
+    <string name="nav_writing_tools">Ayuda de escritura</string>
     <string name="nav_clipboard">Portapapeles y capturas</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Acerca de Tapwing</string>
@@ -88,4 +88,9 @@
     <string name="setup_enable_tapwing">Activar Tapwing</string>
     <string name="setup_select_tapwing">Cambiar a Tapwing</string>
     <string name="setup_ready">Tapwing activo ✓</string>
+    <string name="clipboard_paste_suggestion">Pegar texto copiado</string>
+    <string name="clipboard_dismiss_suggestion">Ocultar sugerencia de pegado</string>
+    <string name="settings_expand">Expandir</string>
+    <string name="settings_collapse">Contraer</string>
+    <string name="clipboard_verification_code">Código %1$s</string>
 </resources>

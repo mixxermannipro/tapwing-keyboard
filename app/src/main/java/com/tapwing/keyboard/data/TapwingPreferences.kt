@@ -58,6 +58,8 @@ enum class VoiceDictationMode {
 enum class VoiceEngineMode {
     AUTO_LOCAL_FIRST,
     LOCAL_WHISPER,
+    ON_DEVICE_SPEECH,
+    CLOUD,
     SYSTEM_SPEECH
 }
 

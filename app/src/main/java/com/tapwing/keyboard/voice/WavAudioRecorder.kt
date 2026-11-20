@@ -11,8 +11,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.RandomAccessFile
 import kotlin.math.abs
@@ -27,149 +28,163 @@ data class WavRecordingResult(
 
 /**
  * High-quality 16 kHz Mono 16-bit PCM WAV audio recorder using Android's VOICE_RECOGNITION
- * source and optional NoiseSuppressor/AGC when available.
+ * source, with optional noise suppression and gain control for the fallback microphone source.
  * Reads responsive ~80 ms chunks so VU metering is fluid and stopping returns almost immediately.
  */
 class WavAudioRecorder {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var recordJob: Job? = null
-    @Volatile
-    private var recordingFlag = false
-    private var currentFile: File? = null
-    @Volatile
-    private var lastDurationMs: Long = 0L
-    @Volatile
-    private var lastPeakAbs: Int = 0
+    private class Capture(val file: File) {
+        @Volatile var stop = false
+        lateinit var job: Job
+        var result: WavRecordingResult? = null
+    }
+
+    private val microphone = Mutex()
+    private var current: Capture? = null
 
     @SuppressLint("MissingPermission")
     fun start(
         outputFile: File,
         onRmsDb: (Float) -> Unit,
         onElapsedSeconds: (Int) -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        onReady: () -> Unit = {}
     ): Boolean {
-        if (recordingFlag) return false
-        outputFile.parentFile?.mkdirs()
-        if (outputFile.exists()) outputFile.delete()
-        lastDurationMs = 0L
-        lastPeakAbs = 0
-
-        val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
-        if (minBuf <= 0) {
-            onError("AudioRecord unsupported on this device")
-            return false
-        }
-        val ringBufferBytes = maxOf(minBuf * 4, SAMPLE_RATE * 2) // >= 1s kernel ring buffer
-
-        val created = createBestAudioRecord(ringBufferBytes)
-        if (created == null) {
-            onError("Could not initialize microphone")
-            return false
-        }
-        val (recorder, sourceName) = created
-
-        // Do NOT attach AcousticEchoCanceler for dictation: without far-end VoIP playback,
-        // AEC on some vendor HALs attenuates normal voice input.
-        val sessionId = recorder.audioSessionId
-        val ns = runCatching {
-            if (sourceName != "VOICE_RECOGNITION" && NoiseSuppressor.isAvailable()) {
-                NoiseSuppressor.create(sessionId)?.apply { enabled = true }
-            } else null
-        }.getOrNull()
-        val agc = runCatching {
-            if (AutomaticGainControl.isAvailable()) {
-                AutomaticGainControl.create(sessionId)?.apply { enabled = true }
-            } else null
-        }.getOrNull()
-
-        currentFile = outputFile
-        recordingFlag = true
-        Log.i(TAG, "AudioRecord started source=$sourceName minBuf=$minBuf ring=$ringBufferBytes")
-
-        recordJob = scope.launch {
-            var totalBytes = 0L
-            val startMs = System.currentTimeMillis()
-            var lastSecReported = -1
-            var maxPeak = 0
-            val raf = RandomAccessFile(outputFile, "rw")
+        if (current != null) return false
+        val capture = Capture(outputFile)
+        current = capture
+        capture.job = scope.launch {
             try {
-                raf.write(ByteArray(44))
-                recorder.startRecording()
-
-                val pcm = ShortArray(READ_CHUNK_SAMPLES)
-                val byteBuf = ByteArray(pcm.size * 2)
-
-                while (isActive && recordingFlag) {
-                    val read = recorder.read(pcm, 0, pcm.size)
-                    if (read > 0) {
-                        var sumSq = 0.0
-                        for (i in 0 until read) {
-                            val s = pcm[i]
-                            val a = abs(s.toInt())
-                            if (a > maxPeak) maxPeak = a
-                            sumSq += (s.toDouble() * s.toDouble())
-                            byteBuf[i * 2] = (s.toInt() and 0xFF).toByte()
-                            byteBuf[i * 2 + 1] = ((s.toInt() shr 8) and 0xFF).toByte()
-                        }
-                        raf.write(byteBuf, 0, read * 2)
-                        totalBytes += read * 2
-                        lastPeakAbs = maxPeak
-
-                        val rms = sqrt(sumSq / read).coerceAtLeast(1.0)
-                        val db = (20.0 * log10(rms / 32768.0)).toFloat()
-                        val uiDb = ((db + 55f) / 4.2f).coerceIn(0f, 12f)
-                        onRmsDb(uiDb)
-
-                        val elapsedSec = ((System.currentTimeMillis() - startMs) / 1000L).toInt()
-                        if (elapsedSec != lastSecReported) {
-                            lastSecReported = elapsedSec
-                            onElapsedSeconds(elapsedSec)
-                        }
-                    } else if (read < 0) {
-                        Log.w(TAG, "AudioRecord.read returned error code $read")
-                        break
+                microphone.withLock {
+                    if (!capture.stop) {
+                        capture.result = record(capture, onReady, onRmsDb, onElapsedSeconds)
                     }
                 }
-
-                lastDurationMs = (totalBytes * 1000L) / (SAMPLE_RATE * 2L)
-                lastPeakAbs = maxPeak
-                writeWavHeader(raf, totalBytes)
-                Log.i(TAG, "AudioRecord stopped: bytes=$totalBytes durationMs=$lastDurationMs peakAbs=$maxPeak")
             } catch (ex: Exception) {
-                Log.e(TAG, "Recording loop failed", ex)
-                onError(ex.localizedMessage ?: "Recording failed")
-            } finally {
-                runCatching { recorder.stop() }
-                runCatching { recorder.release() }
-                runCatching { ns?.release() }
-                runCatching { agc?.release() }
-                runCatching { raf.close() }
-                recordingFlag = false
+                Log.w(TAG, "Microphone capture failed", ex)
+                onError("Microphone unavailable")
             }
         }
         return true
     }
 
-    suspend fun stopAndGetResult(): WavRecordingResult? {
-        recordingFlag = false
-        recordJob?.join()
-        recordJob = null
-        val file = currentFile
-        currentFile = null
-        return if (file != null && file.isFile && file.length() > 44L) {
-            WavRecordingResult(file = file, durationMs = lastDurationMs, peakSampleAbs = lastPeakAbs)
-        } else {
-            null
+    @SuppressLint("MissingPermission")
+    private fun record(
+        capture: Capture,
+        onReady: () -> Unit,
+        onRmsDb: (Float) -> Unit,
+        onElapsedSeconds: (Int) -> Unit
+    ): WavRecordingResult {
+        val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
+        check(minBuffer > 0)
+        val (recorder, sourceName) = checkNotNull(createBestAudioRecord(maxOf(minBuffer * 4, SAMPLE_RATE * 2)))
+        val sessionId = recorder.audioSessionId
+        val noiseSuppression = runCatching {
+            if (sourceName == "MIC" && NoiseSuppressor.isAvailable()) {
+                NoiseSuppressor.create(sessionId)?.apply { enabled = true }
+            } else null
+        }.getOrNull()
+        val gainControl = runCatching {
+            if (sourceName == "MIC" && AutomaticGainControl.isAvailable()) {
+                AutomaticGainControl.create(sessionId)?.apply { enabled = true }
+            } else null
+        }.getOrNull()
+
+        try {
+            return RandomAccessFile(capture.file, "rw").use { wav ->
+                wav.write(ByteArray(WAV_HEADER_BYTES))
+                recorder.startRecording()
+                check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING)
+                onReady()
+                val pcm = ShortArray(READ_CHUNK_SAMPLES)
+                val bytes = ByteArray(pcm.size * 2)
+                var totalBytes = 0L
+                var peak = 0
+                var firstActivity = -1L
+                var lastActivityEnd = 0L
+                var reportedSeconds = 0
+
+                while (!capture.stop) {
+                    val read = recorder.read(pcm, 0, pcm.size)
+                    check(read >= 0) { "AudioRecord read error $read" }
+                    if (read == 0) continue
+                    var sumSquares = 0.0
+                    for (i in 0 until read) {
+                        val sample = pcm[i].toInt()
+                        peak = maxOf(peak, abs(sample))
+                        sumSquares += sample.toDouble() * sample
+                        writeShortLE(bytes, i * 2, sample)
+                    }
+                    val byteCount = read * 2
+                    val rms = sqrt(sumSquares / read).coerceAtLeast(1.0)
+                    if (rms >= 48) {
+                        if (firstActivity < 0) firstActivity = totalBytes
+                        lastActivityEnd = totalBytes + byteCount
+                    }
+                    wav.write(bytes, 0, byteCount)
+                    totalBytes += byteCount
+
+                    val db = (20.0 * log10(rms / 32768.0)).toFloat()
+                    onRmsDb(((db + 55f) / 4.2f).coerceIn(0f, 12f))
+                    val seconds = (totalBytes / PCM_BYTES_PER_SECOND).toInt()
+                    if (seconds != reportedSeconds) {
+                        reportedSeconds = seconds
+                        onElapsedSeconds(seconds)
+                    }
+                }
+                val usedBytes = if (firstActivity >= 0) {
+                    trimQuietEdges(wav, totalBytes, firstActivity, lastActivityEnd)
+                } else totalBytes
+                writeWavHeader(wav, usedBytes)
+                WavRecordingResult(capture.file, usedBytes * 1_000 / PCM_BYTES_PER_SECOND, peak)
+            }
+        } finally {
+            runCatching { recorder.stop() }
+            runCatching { gainControl?.release() }
+            runCatching { noiseSuppression?.release() }
+            recorder.release()
         }
     }
 
+    private fun trimQuietEdges(wav: RandomAccessFile, total: Long, first: Long, last: Long): Long {
+        val start = (first - EDGE_PADDING_BYTES).coerceAtLeast(0)
+        val end = (last + EDGE_PADDING_BYTES).coerceAtMost(total)
+        val length = end - start
+        if (start > 0) {
+            val buffer = ByteArray(16_384)
+            var copied = 0L
+            while (copied < length) {
+                val count = (length - copied).coerceAtMost(buffer.size.toLong()).toInt()
+                wav.seek(WAV_HEADER_BYTES + start + copied)
+                wav.readFully(buffer, 0, count)
+                wav.seek(WAV_HEADER_BYTES + copied)
+                wav.write(buffer, 0, count)
+                copied += count
+            }
+        }
+        wav.setLength(WAV_HEADER_BYTES + length)
+        return length
+    }
+
+    suspend fun stopAndGetResult(): WavRecordingResult? {
+        val capture = current ?: return null
+        capture.stop = true
+        capture.job.join()
+        if (current !== capture) return null
+        current = null
+        return capture.result.also { if (it == null) capture.file.delete() }
+    }
+
     fun cancelAndDelete() {
-        recordingFlag = false
-        recordJob?.cancel()
-        recordJob = null
-        currentFile?.delete()
-        currentFile = null
+        val capture = current ?: return
+        current = null
+        capture.stop = true
+        // Wait for the reader to close before unlinking its file.
+        scope.launch {
+            capture.job.join()
+            capture.file.delete()
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -230,6 +245,9 @@ class WavAudioRecorder {
     companion object {
         private const val TAG = "TapwingVoice"
         const val SAMPLE_RATE = 16_000
+        private const val PCM_BYTES_PER_SECOND = SAMPLE_RATE * 2L
+        private const val EDGE_PADDING_BYTES = PCM_BYTES_PER_SECOND * 3 / 10
+        private const val WAV_HEADER_BYTES = 44
         private const val READ_CHUNK_SAMPLES = SAMPLE_RATE / 12 // ~83ms per read
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT

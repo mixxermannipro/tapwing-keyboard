@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -18,12 +19,14 @@ import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.VoiceEngineMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 data class VoiceUiState(
@@ -33,18 +36,19 @@ data class VoiceUiState(
     val rmsDb: Float = 0f,
     val elapsedSeconds: Int = 0,
     val isLocalWhisper: Boolean = false,
+    val isCloud: Boolean = false,
+    val isAndroidOffline: Boolean = false,
     val partialText: String = "",
     val processingLabel: String? = null,
     val errorMessage: String? = null,
     val activeLocaleTag: String = "de-DE"
 )
 
-class TapwingVoiceController(
+internal class TapwingVoiceController(
     private val context: Context,
     private val modelManager: LocalModelManager,
-    private val onTranscriptReady: (String) -> Unit,
-    private val onNeedAudioPermission: () -> Unit,
-    private val initialPromptProvider: () -> String = { "" }
+    private val onTranscriptReady: (String, Boolean) -> Unit,
+    private val onNeedAudioPermission: () -> Unit
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -57,6 +61,11 @@ class TapwingVoiceController(
     private var activeEngineMode: VoiceEngineMode = VoiceEngineMode.AUTO_LOCAL_FIRST
     private var activeWhisperModelId: String = "whisper-small-q5_1"
     private var activeWhisperFile: File? = null
+    private var activeCloud: CloudDictation? = null
+    private var activeStrictLanguage = true
+    private var activeOfflineOnly = false
+    private var activeFormatting = true
+    private var transcriptionJob: Job? = null
     private var usingLocalAudioCapture: Boolean = false
 
     private var lastCommittedSnapshot: String = ""
@@ -69,14 +78,25 @@ class TapwingVoiceController(
     private val _state = MutableStateFlow(VoiceUiState())
     val state: StateFlow<VoiceUiState> = _state.asStateFlow()
 
+    init {
+        val createdAt = System.currentTimeMillis()
+        controllerScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    context.cacheDir.listFiles()?.filter {
+                        it.name.startsWith("tapwing_voice_") && it.extension == "wav" && it.lastModified() < createdAt
+                    }?.forEach { it.delete() }
+                }
+            }
+        }
+    }
+
     fun hasAudioPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
     }
-
-    fun isSystemSpeechAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
 
     fun markConfigurationPause() {
         if (_state.value.isListening && !usingLocalAudioCapture) {
@@ -94,7 +114,9 @@ class TapwingVoiceController(
                 locale = activeLocale,
                 strictLanguageLock = strictLanguageLock,
                 engineMode = activeEngineMode,
-                whisperModelId = activeWhisperModelId
+                offlineOnly = activeOfflineOnly,
+                whisperModelId = activeWhisperModelId,
+                formatText = activeFormatting
             )
         }
     }
@@ -110,162 +132,165 @@ class TapwingVoiceController(
     }
 
     fun beginExternalProcessing(label: String) {
-        mainHandler.post {
-            _state.value = _state.value.copy(
-                isListening = false,
-                isProcessing = true,
-                processingLabel = label,
-                errorMessage = null
-            )
-        }
+        _state.value = _state.value.copy(
+            isListening = false,
+            isProcessing = true,
+            processingLabel = label,
+            errorMessage = null
+        )
     }
 
     fun finishExternalProcessing(errorMessage: String? = null) {
-        mainHandler.post {
-            _state.value = VoiceUiState(errorMessage = errorMessage)
-        }
+        _state.value = VoiceUiState(errorMessage = errorMessage)
     }
 
     fun startListening(
         locale: String,
         strictLanguageLock: Boolean,
-        engineMode: VoiceEngineMode = VoiceEngineMode.AUTO_LOCAL_FIRST,
-        whisperModelId: String = "whisper-small-q5_1"
+        engineMode: VoiceEngineMode,
+        offlineOnly: Boolean,
+        whisperModelId: String,
+        formatText: Boolean,
+        cloud: CloudDictation? = null
     ) {
+        if (sessionActive || _state.value.isProcessing) return
         activeLocale = locale
         activeEngineMode = engineMode
         activeWhisperModelId = whisperModelId
+        activeStrictLanguage = strictLanguageLock
+        activeFormatting = formatText
+        activeOfflineOnly = offlineOnly
 
         if (!hasAudioPermission()) {
             onNeedAudioPermission()
             return
         }
-
-        val installedWhisper = if (engineMode != VoiceEngineMode.SYSTEM_SPEECH) {
-            modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, whisperModelId)
+        val de = KeyboardLocales.baseLang(locale) == "de"
+        if (engineMode == VoiceEngineMode.CLOUD) {
+            if (cloud == null) {
+                showError(if (de) "Cloud-Diktat braucht einen Gemini- oder OpenAI-Schlüssel"
+                          else "Cloud dictation needs a Gemini or OpenAI key")
+            } else {
+                startAudioCapture(locale, modelFile = null, cloud = cloud)
+            }
+            return
+        }
+        if (engineMode == VoiceEngineMode.LOCAL_WHISPER || engineMode == VoiceEngineMode.AUTO_LOCAL_FIRST) {
+            val installed = modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, whisperModelId)
+            if (installed != null) {
+                startAudioCapture(locale, modelFile = installed.second, cloud = null)
+                return
+            }
+            if (engineMode == VoiceEngineMode.LOCAL_WHISPER) {
+                showError(if (de) "Lade unter Diktat ein Offline-Sprachmodell" else "Download an offline model in Dictation settings")
+                return
+            }
+        }
+        val available = if (offlineOnly || engineMode == VoiceEngineMode.ON_DEVICE_SPEECH) {
+            isOnDeviceSpeechAvailable(context)
         } else {
-            null
+            SpeechRecognizer.isRecognitionAvailable(context)
         }
-
-        if (installedWhisper != null) {
-            startLocalWhisperRecording(locale, installedWhisper.second)
-            return
+        if (available) {
+            startSystemSpeechSession(locale, strictLanguageLock)
+        } else {
+            showError(if (de) "Android-Diktat fehlt. Lade ein Offline-Sprachmodell"
+                      else "Android dictation unavailable. Download an offline model")
         }
-
-        if (engineMode == VoiceEngineMode.LOCAL_WHISPER) {
-            val base = KeyboardLocales.baseLang(locale)
-            _state.value = _state.value.copy(
-                isListening = false,
-                errorMessage = if (base == "de") {
-                    "Kein lokales Whisper-Modell geladen (Einstellungen > Spracheingabe)"
-                } else {
-                    "No local Whisper model downloaded (Settings > Voice)"
-                }
-            )
-            return
-        }
-
-        if (!isSystemSpeechAvailable()) {
-            val base = KeyboardLocales.baseLang(locale)
-            _state.value = _state.value.copy(
-                isListening = false,
-                errorMessage = if (base == "de") {
-                    "Kein Spracherkennungsdienst verfügbar — lade ein lokales Whisper-Modell"
-                } else {
-                    "No speech service available — download a local Whisper model"
-                }
-            )
-            return
-        }
-
-        startSystemSpeechSession(locale, strictLanguageLock)
     }
 
-    private fun startLocalWhisperRecording(locale: String, modelFile: File) {
-        mainHandler.post {
-            sessionGeneration++
-            sessionActive = true
-            stopRequested = false
-            usingLocalAudioCapture = true
-            activeWhisperFile = modelFile
-            accumulated.setLength(0)
-            lastCommittedSnapshot = ""
-            segmentPartial = ""
-            mainHandler.removeCallbacksAndMessages(null)
-            destroyRecognizerLocked()
+    private fun showError(message: String) {
+        _state.value = VoiceUiState(errorMessage = message)
+    }
 
-            val languageTag = KeyboardLocales.specFor(locale).bcp47Tag
-            val wavFile = File(context.cacheDir, "tapwing_voice_capture.wav")
-            val started = wavRecorder.start(
-                outputFile = wavFile,
-                onRmsDb = { db ->
-                    if (sessionActive && usingLocalAudioCapture) {
-                        _state.value = _state.value.copy(rmsDb = db)
-                    }
-                },
-                onElapsedSeconds = { sec ->
-                    if (sessionActive && usingLocalAudioCapture) {
-                        _state.value = _state.value.copy(elapsedSeconds = sec)
-                    }
-                },
-                onError = { err ->
-                    mainHandler.post {
-                        sessionActive = false
-                        usingLocalAudioCapture = false
-                        _state.value = VoiceUiState(errorMessage = err)
-                    }
+    private fun startAudioCapture(locale: String, modelFile: File?, cloud: CloudDictation?) {
+        sessionGeneration++
+        val generation = sessionGeneration
+        sessionActive = true
+        stopRequested = false
+        usingLocalAudioCapture = true
+        activeWhisperFile = modelFile
+        activeCloud = cloud
+        val de = KeyboardLocales.baseLang(locale) == "de"
+        val wavFile = File(context.cacheDir, "tapwing_voice_${java.util.UUID.randomUUID()}.wav")
+        val started = wavRecorder.start(
+            outputFile = wavFile,
+            onReady = { mainHandler.post {
+                if (generation == sessionGeneration && _state.value.isListening) {
+                    _state.value = _state.value.copy(processingLabel = null)
                 }
-            )
-
-            if (started) {
-                _state.value = VoiceUiState(
-                    isListening = true,
-                    isProcessing = false,
-                    isMinimized = false,
-                    rmsDb = 0f,
-                    elapsedSeconds = 0,
-                    isLocalWhisper = true,
-                    partialText = "",
-                    errorMessage = null,
-                    activeLocaleTag = languageTag
-                )
-            } else {
-                sessionActive = false
-                usingLocalAudioCapture = false
-            }
+            } },
+            onRmsDb = { db -> mainHandler.post {
+                if (generation == sessionGeneration && _state.value.isListening) {
+                    _state.value = _state.value.copy(rmsDb = db)
+                }
+            } },
+            onElapsedSeconds = { seconds -> mainHandler.post {
+                if (generation == sessionGeneration && _state.value.isListening) {
+                    _state.value = _state.value.copy(elapsedSeconds = seconds)
+                    if (seconds >= MAX_RECORDING_SECONDS) finishAndCommit()
+                }
+            } },
+            onError = { mainHandler.post {
+                if (generation == sessionGeneration && sessionActive) {
+                    wavRecorder.cancelAndDelete()
+                    finishSession()
+                    showError(if (de) "Mikrofon nicht verfügbar" else "Microphone unavailable")
+                }
+            } }
+        )
+        if (!started) {
+            finishSession()
+            showError(if (de) "Mikrofon wird noch freigegeben" else "Microphone is still closing")
+            return
+        }
+        _state.value = VoiceUiState(
+            isListening = true,
+            isLocalWhisper = modelFile != null,
+            isCloud = cloud != null,
+            processingLabel = if (de) "Mikrofon startet …" else "Starting microphone…",
+            activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag
+        )
+        if (modelFile != null) {
+            controllerScope.launch { LocalInferenceEngine.warmWhisper(modelFile) }
         }
     }
 
     private fun startSystemSpeechSession(locale: String, strictLanguageLock: Boolean) {
-        mainHandler.post {
-            sessionGeneration++
-            sessionActive = true
-            stopRequested = false
-            usingLocalAudioCapture = false
-            activeWhisperFile = null
-            accumulated.setLength(0)
-            lastCommittedSnapshot = ""
-            segmentPartial = ""
-            mainHandler.removeCallbacksAndMessages(null)
-            val languageTag = KeyboardLocales.specFor(locale).bcp47Tag
-            _state.value = VoiceUiState(
-                isListening = true,
-                isProcessing = false,
-                isMinimized = false,
-                isLocalWhisper = false,
-                partialText = "",
-                errorMessage = null,
-                activeLocaleTag = languageTag
-            )
-            startSegment(locale, strictLanguageLock)
-        }
+        sessionGeneration++
+        sessionActive = true
+        stopRequested = false
+        usingLocalAudioCapture = false
+        activeWhisperFile = null
+        activeCloud = null
+        accumulated.setLength(0)
+        lastCommittedSnapshot = ""
+        segmentPartial = ""
+        mainHandler.removeCallbacksAndMessages(null)
+        _state.value = VoiceUiState(
+            isListening = true,
+            isAndroidOffline = activeOfflineOnly || activeEngineMode == VoiceEngineMode.ON_DEVICE_SPEECH,
+            activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag
+        )
+        startSegment(locale, strictLanguageLock)
     }
 
     private fun startSegment(locale: String, strictLanguageLock: Boolean) {
         destroyRecognizerLocked()
         val generation = sessionGeneration
         val languageTag = KeyboardLocales.specFor(locale).bcp47Tag
-        val sr = SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+        val localRecognizer = activeOfflineOnly || activeEngineMode == VoiceEngineMode.ON_DEVICE_SPEECH
+        val sr = runCatching {
+            if (localRecognizer && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                SpeechRecognizer.createOnDeviceSpeechRecognizer(context.applicationContext)
+            } else {
+                SpeechRecognizer.createSpeechRecognizer(context.applicationContext)
+            }
+        }.getOrElse {
+            finishSession()
+            showError(mapSpeechError(SpeechRecognizer.ERROR_CLIENT, locale))
+            return
+        }
         recognizer = sr
         segmentPartial = ""
 
@@ -308,6 +333,7 @@ class TapwingVoiceController(
                 }
                 appendSegment(segmentPartial)
                 val message = mapSpeechError(error, locale)
+                val wasStopping = stopRequested
                 val text = accumulated.toString().trim()
                 if (text.isNotEmpty()) {
                     commitAccumulated()
@@ -316,7 +342,7 @@ class TapwingVoiceController(
                     _state.value = _state.value.copy(
                         isListening = false,
                         isProcessing = false,
-                        errorMessage = if (stopRequested && error in RESTARTABLE_ERRORS) null else message
+                        errorMessage = if (wasStopping && error in RESTARTABLE_ERRORS) null else message
                     )
                 }
             }
@@ -349,9 +375,14 @@ class TapwingVoiceController(
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && activeFormatting) {
+                putExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING, RecognizerIntent.FORMATTING_OPTIMIZE_LATENCY)
+                putExtra(RecognizerIntent.EXTRA_HIDE_PARTIAL_TRAILING_PUNCTUATION, true)
+            }
+            if (localRecognizer) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
+            if (strictLanguageLock) putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 15_000L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 15_000L)
             if (strictLanguageLock) {
@@ -359,11 +390,17 @@ class TapwingVoiceController(
                 putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true)
             }
         }
-        sr.startListening(intent)
+        try {
+            sr.startListening(intent)
+        } catch (_: RuntimeException) {
+            finishSession()
+            showError(mapSpeechError(SpeechRecognizer.ERROR_CLIENT, locale))
+        }
     }
 
     private fun scheduleNextSegment(locale: String, strictLanguageLock: Boolean, delayMs: Long) {
         val generation = sessionGeneration
+        destroyRecognizerLocked()
         segmentPartial = ""
         _state.value = _state.value.copy(
             isListening = true,
@@ -400,6 +437,8 @@ class TapwingVoiceController(
         sessionActive = false
         stopRequested = false
         usingLocalAudioCapture = false
+        activeWhisperFile = null
+        activeCloud = null
         mainHandler.removeCallbacksAndMessages(null)
         destroyRecognizerLocked()
     }
@@ -411,126 +450,110 @@ class TapwingVoiceController(
         _state.value = VoiceUiState()
         if (text.isNotEmpty() && text != lastCommittedSnapshot) {
             lastCommittedSnapshot = text
-            onTranscriptReady(text)
+            onTranscriptReady(text, false)
         }
     }
 
-    /** Second tap on mic/check: stops recording and runs local Whisper transcription + cleanup. */
     fun finishAndCommit() {
-        mainHandler.post {
-            if (!sessionActive) {
-                _state.value = VoiceUiState()
-                return@post
-            }
-            if (usingLocalAudioCapture) {
-                val modelFile = activeWhisperFile
-                val locale = activeLocale
-                val base = KeyboardLocales.baseLang(locale)
-                val gen = sessionGeneration
-                stopRequested = true
-                _state.value = _state.value.copy(
-                    isListening = false,
-                    isProcessing = true,
-                    processingLabel = if (base == "de") "Transkribiere lokal…" else "Transcribing locally…"
-                )
-                controllerScope.launch {
-                    val recResult = wavRecorder.stopAndGetResult()
-                    val wavFile = recResult?.file
-                    if (gen != sessionGeneration) {
-                        wavFile?.delete()
-                        return@launch
-                    }
-                    if (recResult == null || wavFile == null || modelFile == null || recResult.durationMs < 250L) {
-                        wavFile?.delete()
-                        finishSession()
-                        _state.value = VoiceUiState(
-                            errorMessage = if (base == "de") "Zu kurz — erst sprechen, dann ✓" else "Too short — speak before ✓"
-                        )
-                        return@launch
-                    }
-                    if (recResult.peakSampleAbs < 35) {
-                        wavFile.delete()
-                        finishSession()
-                        _state.value = VoiceUiState(
-                            errorMessage = if (base == "de") "Kein Mikrofonsignal erkannt" else "No microphone signal detected"
-                        )
-                        return@launch
-                    }
-                    val langCode = KeyboardLocales.baseLang(locale)
-                    val initialPrompt = initialPromptProvider().take(300)
-                    val res = try {
-                        LocalInferenceEngine.transcribeWav(
-                            wavPath = wavFile.absolutePath,
-                            modelFile = modelFile,
-                            languageCode = langCode,
-                            initialPrompt = initialPrompt.takeIf { it.isNotBlank() }
-                        )
-                    } finally {
-                        wavFile.delete()
-                    }
-                    if (gen != sessionGeneration) return@launch
-                    finishSession()
-                    val transcript = res.getOrNull()?.trim().orEmpty()
-                    if (transcript.isNotEmpty()) {
-                        _state.value = VoiceUiState(
-                            isListening = false,
-                            isProcessing = true,
-                            isLocalWhisper = true,
-                            processingLabel = if (base == "de") "Bereinige Text…" else "Polishing text…"
-                        )
-                        onTranscriptReady(transcript)
-                    } else {
-                        val fallbackErr = if (base == "de") {
-                            "Keine Sprache verstanden — bitte deutlicher sprechen"
-                        } else {
-                            "No speech detected — please try again"
-                        }
-                        _state.value = VoiceUiState(
-                            errorMessage = res.exceptionOrNull()?.localizedMessage ?: fallbackErr
-                        )
-                    }
-                }
-                return@post
-            }
+        if (!sessionActive || stopRequested) return
+        stopRequested = true
+        val generation = sessionGeneration
+        _state.value = _state.value.copy(isListening = false, isProcessing = true)
+        if (usingLocalAudioCapture) {
+            transcribeCapture(generation)
+            return
+        }
 
-            stopRequested = true
-            val sr = recognizer
-            val generation = sessionGeneration
-            _state.value = _state.value.copy(isListening = false, isProcessing = true)
-            if (sr != null) {
-                runCatching { sr.stopListening() }
-                mainHandler.postDelayed({
-                    if (generation == sessionGeneration && sessionActive) {
-                        appendSegment(segmentPartial)
-                        commitAccumulated()
-                    }
-                }, 2500L)
-            } else {
-                appendSegment(segmentPartial)
-                commitAccumulated()
+        val sr = recognizer
+        if (sr == null) {
+            appendSegment(segmentPartial)
+            commitAccumulated()
+        } else {
+            runCatching { sr.stopListening() }
+            val waitMs = if (segmentPartial.isNotBlank()) 1_300L else 2_500L
+            mainHandler.postDelayed({
+                if (generation == sessionGeneration && sessionActive) {
+                    appendSegment(segmentPartial)
+                    commitAccumulated()
+                }
+            }, waitMs)
+        }
+    }
+
+    private fun transcribeCapture(generation: Int) {
+        val model = activeWhisperFile
+        val cloud = activeCloud
+        val lang = KeyboardLocales.baseLang(activeLocale)
+        val languageHint = lang.takeIf { activeStrictLanguage }
+        val de = lang == "de"
+        _state.value = _state.value.copy(
+            processingLabel = when {
+                cloud != null && de -> "Cloud transkribiert …"
+                cloud != null -> "Transcribing in the cloud…"
+                de -> "Transkribiere auf dem Gerät …"
+                else -> "Transcribing on your device…"
+            }
+        )
+        transcriptionJob = controllerScope.launch {
+            val recording = wavRecorder.stopAndGetResult()
+            if (generation != sessionGeneration || !sessionActive) {
+                recording?.file?.delete()
+                return@launch
+            }
+            if (recording == null || recording.durationMs < 250L || recording.peakSampleAbs < 35) {
+                recording?.file?.delete()
+                finishSession()
+                showError(if (de) "Keine Sprache erkannt. Sprich nach dem Start." else "No speech detected. Speak after starting.")
+                return@launch
+            }
+            val result = try {
+                when {
+                    cloud != null -> cloud.transcribe(recording.file, languageHint)
+                    model != null -> LocalInferenceEngine.transcribeWav(
+                        wavPath = recording.file.absolutePath,
+                        modelFile = model,
+                        languageCode = languageHint
+                    )
+                    else -> Result.failure(IllegalStateException("Missing speech model"))
+                }
+            } finally {
+                recording.file.delete()
+            }
+            if (generation != sessionGeneration || !sessionActive) return@launch
+            finishSession()
+            val text = result.getOrNull().orEmpty()
+            when {
+                result.isFailure && cloud != null -> {
+                    showError(if (de) "Cloud-Diktat fehlgeschlagen. Prüfe Netz und Schlüssel."
+                              else "Cloud dictation failed. Check your connection and API key.")
+                }
+                result.isFailure -> {
+                    showError(if (de) "Offline-Modell fehlgeschlagen. Prüfe den Download."
+                              else "Offline model failed. Check the download.")
+                }
+                text.isBlank() -> showError(if (de) "Keine Sprache erkannt. Versuch es erneut."
+                                            else "No speech detected. Try again.")
+                else -> {
+                    _state.value = VoiceUiState()
+                    onTranscriptReady(text, cloud?.formatsText == true)
+                }
             }
         }
     }
 
-    fun cancel() {
-        wasListeningBeforeConfigChange = false
-        mainHandler.post {
-            sessionGeneration++
-            wavRecorder.cancelAndDelete()
-            accumulated.setLength(0)
-            finishSession()
-            _state.value = VoiceUiState()
-        }
+    fun cancel(keepRotationResume: Boolean = false) {
+        if (!keepRotationResume) wasListeningBeforeConfigChange = false
+        sessionGeneration++
+        transcriptionJob?.cancel()
+        transcriptionJob = null
+        wavRecorder.cancelAndDelete()
+        accumulated.setLength(0)
+        finishSession()
+        _state.value = VoiceUiState()
     }
 
     fun destroy() {
-        mainHandler.post {
-            sessionGeneration++
-            wavRecorder.cancelAndDelete()
-            accumulated.setLength(0)
-            finishSession()
-            _state.value = VoiceUiState()
-        }
+        cancel()
         controllerScope.cancel()
     }
 
@@ -550,6 +573,8 @@ class TapwingVoiceController(
                 if (de) "Mikrofonberechtigung fehlt" else "Microphone permission required"
             SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
                 if (de) "Netzwerk-Timeout bei Spracherkennung" else "Speech network timeout"
+            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
+                if (de) "Android-Sprachpaket fehlt. Prüfe die Spracheinstellungen." else "Android language pack missing. Check language settings."
             SpeechRecognizer.ERROR_NO_MATCH ->
                 if (de) "Keine Sprache erkannt" else "No speech matched"
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
@@ -560,8 +585,13 @@ class TapwingVoiceController(
         }
     }
 
-    private companion object {
-        val RESTARTABLE_ERRORS = setOf(
+    companion object {
+        private const val MAX_RECORDING_SECONDS = 120
+
+        fun isOnDeviceSpeechAvailable(context: Context): Boolean =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+
+        private val RESTARTABLE_ERRORS = setOf(
             SpeechRecognizer.ERROR_NO_MATCH,
             SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY

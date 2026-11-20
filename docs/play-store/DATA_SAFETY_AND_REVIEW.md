@@ -21,12 +21,13 @@ Native 16 KB page alignment: **Verified OK** (`arm64-v8a` & `x86_64` ELF `PT_LOA
 
 ## 2. Permissions Audit (`AndroidManifest.xml`)
 
-Tapwing declares only **4 permissions** — notably **NO** `READ_MEDIA_IMAGES`, **NO** `READ_EXTERNAL_STORAGE`, **NO** `READ_CONTACTS`, and **NO** `ACCESS_FINE_LOCATION`:
+Tapwing declares the permissions below. Photo OCR via the system picker needs no storage permission. The optional automatic screenshot features use media access.
 
 | Permission | Purpose | Play Policy Risk | Runtime Trigger |
 | :--- | :--- | :--- | :--- |
-| `INTERNET` | Optional user-configured Gemini / OpenAI API requests | Low | Only when user picks cloud provider + enters own key + invokes Writing Tools |
-| `RECORD_AUDIO` | Voice dictation via system `SpeechRecognizer` | Standard IME voice permission | Prompted only on mic tap |
+| `INTERNET` | Model downloads and optional user-configured cloud AI requests | Provider receives text or audio for the selected action | Model download, cloud writing, or explicitly enabled cloud dictation |
+| `RECORD_AUDIO` | Android, Whisper, and optional cloud dictation | Standard voice permission | Requested to enable dictation |
+| `READ_MEDIA_IMAGES` / `READ_EXTERNAL_STORAGE` (through API 32) | Optional screenshot detection | Broad photo access | Only if the user enables screenshot access |
 | `CAMERA` | Live camera text scan (`ScanTextActivity` + on-device ML Kit) | Low | Prompted only on opening Scan Text |
 | `VIBRATE` | Keypress haptic feedback | Normal (no prompt) | User setting (*Haptic feedback*) |
 | Photo/Gallery OCR | Uses `ActivityResultContracts.PickVisualMedia` (System Photo Picker) | **None** (0 storage permissions declared) | User taps *Scan photo* |
@@ -35,14 +36,9 @@ Tapwing declares only **4 permissions** — notably **NO** `READ_MEDIA_IMAGES`, 
 
 ## 3. Data Safety Questionnaire
 
-1. **Does your app collect or share any of the required user data types?**
-   - If you consider optional user-initiated requests from the device directly to the user's chosen Gemini/OpenAI endpoint ("App activity / User-generated text sent to third-party endpoint configured by the user"):
-     - **Option A (Strictest disclosure — recommended if declaring optional BYO Cloud AI):**
-       - *Does your app collect or share required user data?* **Yes** (or clarify *"Text submitted only when the user explicitly enters an API key and invokes AI Writing Tools"*).
-       - *Data type:* **Messages / Other user-generated content (User input text)** -> **Collected: Yes (ephemeral/on user request)**, **Shared: No** (sent directly from device to the AI provider configured by the user, never to Tapwing developer servers), **Optional: Yes**, **Purpose: App functionality**.
-       - *Is all collected data encrypted in transit?* **Yes** (`https://` TLS + `AndroidKeyStore` at rest for API keys).
-     - Note: Locally typed keystrokes, clipboard history, adaptive dictionary learning, and ML Kit OCR **never leave the device** and are not collected by the developer.
-   - Verify consistency with your hosted Privacy Policy URL before clicking *Submit*.
+- **Audio files → Voice or sound recordings**: Collected for app functionality, optional. Tapwing sends audio over HTTPS after the user selects cloud dictation, saves a key for Gemini or OpenAI, and stops recording. Mark this as non-ephemeral because provider retention depends on the user's account and provider. The transfer is user-initiated and disclosed before Cloud is selected.
+- **Other user-generated content**: Optional text sent to the configured provider for cloud writing or transcript cleanup. Use the provider's actual retention terms for the applicable configuration.
+- On-device mode, clipboard suggestions, local typing, and adaptive learning keep their content on the device. Keep the published privacy policy consistent with the active release.
 
 ---
 

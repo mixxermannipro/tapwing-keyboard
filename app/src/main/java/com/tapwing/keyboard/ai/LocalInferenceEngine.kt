@@ -39,17 +39,7 @@ object LocalInferenceEngine {
                 val wav = File(wavPath)
                 if (!wav.isFile || wav.length() <= 44L) error("Audio capture is empty")
 
-                val t0 = System.currentTimeMillis()
-                if (loadedWhisperPath != modelFile.absolutePath) {
-                    runCatching { WhisperBridge.release() }
-                    val ok = WhisperBridge.initModel(modelFile.absolutePath)
-                    if (!ok) {
-                        loadedWhisperPath = null
-                        error("Failed to initialize Whisper model (${modelFile.name})")
-                    }
-                    loadedWhisperPath = modelFile.absolutePath
-                    Log.i(TAG, "Whisper init (${modelFile.name}) took ${System.currentTimeMillis() - t0} ms")
-                }
+                loadWhisper(modelFile)
 
                 val tRun = System.currentTimeMillis()
                 val langArg = languageCode?.trim()?.lowercase()?.takeIf { it.isNotEmpty() && it != "auto" }
@@ -73,7 +63,7 @@ object LocalInferenceEngine {
                 Log.i(
                     TAG,
                     "Whisper transcribe took ${System.currentTimeMillis() - tRun} ms " +
-                        "(wav=${wav.length()}B raw='${raw.take(80)}' clean='${cleaned.take(80)}')"
+                        "(wav=${wav.length()}B, chars=${cleaned.length})"
                 )
                 cleaned
             }
@@ -169,32 +159,65 @@ object LocalInferenceEngine {
         }
     }
 
+    suspend fun warmWhisper(modelFile: File): Result<Unit> = withContext(Dispatchers.IO) {
+        whisperMutex.withLock { runCatching { loadWhisper(modelFile) } }
+    }
+
+    private fun loadWhisper(modelFile: File) {
+        if (loadedWhisperPath == modelFile.absolutePath) return
+        check(modelFile.isFile) { "Whisper model file missing" }
+        val start = System.nanoTime()
+        releaseWhisper()
+        check(WhisperBridge.initModel(modelFile.absolutePath)) { "Could not load the speech model" }
+        loadedWhisperPath = modelFile.absolutePath
+        Log.i(TAG, "Whisper model loaded in ${(System.nanoTime() - start) / 1_000_000} ms")
+    }
+
+    private fun releaseWhisper() {
+        if (loadedWhisperPath == null) return
+        runCatching { WhisperBridge.release() }
+        loadedWhisperPath = null
+    }
+
+    private fun releaseLlm() {
+        if (loadedLlmPath == null) return
+        runCatching { LlamaBridge.shutdown() }
+        loadedLlmPath = null
+    }
+
     fun unloadWhisper() {
-        if (loadedWhisperPath != null) {
-            runCatching { WhisperBridge.release() }
-            loadedWhisperPath = null
+        if (!whisperMutex.tryLock()) return
+        try {
+            releaseWhisper()
+        } finally {
+            whisperMutex.unlock()
         }
     }
 
     fun unloadIfModel(path: String) {
-        if (loadedWhisperPath == path) {
-            runCatching { WhisperBridge.release() }
-            loadedWhisperPath = null
+        if (whisperMutex.tryLock()) {
+            try {
+                if (loadedWhisperPath == path) releaseWhisper()
+            } finally {
+                whisperMutex.unlock()
+            }
         }
-        if (loadedLlmPath == path) {
-            runCatching { LlamaBridge.shutdown() }
-            loadedLlmPath = null
+        if (llmMutex.tryLock()) {
+            try {
+                if (loadedLlmPath == path) releaseLlm()
+            } finally {
+                llmMutex.unlock()
+            }
         }
     }
 
     fun unloadAll() {
-        if (loadedWhisperPath != null) {
-            runCatching { WhisperBridge.release() }
-            loadedWhisperPath = null
-        }
-        if (loadedLlmPath != null) {
-            runCatching { LlamaBridge.shutdown() }
-            loadedLlmPath = null
+        unloadWhisper()
+        if (!llmMutex.tryLock()) return
+        try {
+            releaseLlm()
+        } finally {
+            llmMutex.unlock()
         }
     }
 
@@ -218,11 +241,13 @@ object LocalInferenceEngine {
         var cleaned = raw
             .replace(Regex("""\[(?:BLANK_AUDIO|SILENCE|MUSIC|APPLAUSE|LAUGHTER|INAUDIBLE|NOISE|MUSIK|STILLE|LACHEN|APPLAUS|GERÄUSCH|STÖHNT)[^\]]*]""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""\((?:Musik|Music|Silence|Stille|Lachen|Laughter|Applaus|Applause|Stöhnt|Groaning|Sighs|Seufzt|Noise|Geräusche?)\)""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""(?:Untertitel\s+der\s+Amara\.org-Community|Vielen\s+Dank\s+für(?:'s|s)?\s+Zuschauen\.?|Thanks?\s+for\s+watching\.?)""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""[ \t]{2,}"""), " ")
             .trim()
-        val onlyPunct = cleaned.all { !it.isLetterOrDigit() }
-        if (onlyPunct) cleaned = ""
+        val stockCaption = Regex(
+            """(?:Untertitel\s+der\s+Amara\.org-Community|Vielen\s+Dank\s+für(?:'s|s)?\s+Zuschauen|Thanks?\s+for\s+watching)[.!?]*""",
+            RegexOption.IGNORE_CASE
+        )
+        if (cleaned.all { !it.isLetterOrDigit() } || stockCaption.matches(cleaned)) cleaned = ""
         return cleaned
     }
 }
