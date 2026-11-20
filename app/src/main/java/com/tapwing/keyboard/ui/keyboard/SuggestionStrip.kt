@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -61,6 +62,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -83,7 +85,12 @@ fun SuggestionStrip(
     suggestions: List<SuggestionChip>,
     proactiveUndo: UndoSnapshot?,
     recentScreenshot: RecentScreenshot?,
-    otpChipText: String?,
+
+    clipboardPreview: String?,
+    clipboardTimestamp: Long?,
+    clipboardVerificationCode: Boolean,
+    onPasteClipboard: (Long) -> Unit,
+    onDismissClipboard: (Long) -> Unit,
     inlineAutofillViews: List<View> = emptyList(),
     voiceState: VoiceUiState,
     isTyping: Boolean,
@@ -96,8 +103,8 @@ fun SuggestionStrip(
     onTapScreenshotChip: (RecentScreenshot) -> Unit,
     onTapScreenshotOcr: (RecentScreenshot) -> Unit,
     onDismissScreenshotChip: () -> Unit,
-    onTapOtpChip: (String) -> Unit,
-    onDismissOtpChip: () -> Unit,
+
+
     onStartVoice: () -> Unit,
     onFinishVoice: () -> Unit,
     onCancelVoice: () -> Unit,
@@ -109,16 +116,17 @@ fun SuggestionStrip(
     val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
 
     val voiceActive = voiceState.isListening || voiceState.isProcessing
-    val showVoiceError = !voiceActive && !voiceState.errorMessage.isNullOrBlank() && !isTyping
-    val showUndo = !showVoiceError && proactiveUndo != null && prefs.proactiveUndo
-    val showOtp = !showVoiceError && !showUndo && !otpChipText.isNullOrBlank() && !isTyping
-    val showShot = !showVoiceError && !showUndo && !showOtp && recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
-    val showAutofill = !showVoiceError && !showUndo && !showOtp && !showShot && inlineAutofillViews.isNotEmpty() && !isTyping
-    val showSuggestions = !showVoiceError && !showUndo && !showOtp && !showShot && !showAutofill && suggestions.isNotEmpty() &&
+    val showVoiceError = !voiceActive && !voiceState.errorMessage.isNullOrBlank()
+    val showAutofill = !showVoiceError && inlineAutofillViews.isNotEmpty()
+    val showUndo = !showVoiceError && !showAutofill && proactiveUndo != null && prefs.proactiveUndo
+    val showClipboard = !showVoiceError && !showAutofill && !showUndo && !clipboardPreview.isNullOrBlank()
+    val showShot = !showClipboard && !showVoiceError && !showUndo && !showAutofill &&
+        recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
+    val showSuggestions = !showVoiceError && !showUndo && !showShot && !showAutofill && suggestions.isNotEmpty() &&
         (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
-    // 0 = quick bar, 1 = error / undo / otp / screenshot chip, 2 = suggestion cells, 3 = inline autofill (Bitwarden, etc.)
     val middleKind = when {
-        showVoiceError || showUndo || showOtp || showShot -> 1
+        showVoiceError || showUndo || showShot -> 1
+        showClipboard -> 4
         showAutofill -> 3
         showSuggestions -> 2
         else -> 0
@@ -164,6 +172,46 @@ fun SuggestionStrip(
                     label = "stripMiddle"
                 ) { kind ->
                     when (kind) {
+                        4 -> if (clipboardPreview != null && clipboardTimestamp != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    color = kbColors.actionSurface.copy(alpha = 0.24f),
+                                    shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.weight(1f).clickable(
+                                        role = Role.Button,
+                                        onClickLabel = stringResource(R.string.clipboard_paste_suggestion),
+                                        onClick = { onPasteClipboard(clipboardTimestamp) }
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp).height(40.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            if (clipboardVerificationCode) Icons.Rounded.Key else Icons.Rounded.ContentPaste,
+                                            contentDescription = null,
+                                            tint = kbColors.keyText,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            if (clipboardVerificationCode) {
+                                                stringResource(R.string.clipboard_verification_code, clipboardPreview)
+                                            } else clipboardPreview,
+                                            color = kbColors.keyText,
+                                            fontSize = 14.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                FlatStripButton(
+                                    icon = Icons.Rounded.Close,
+                                    contentDescription = stringResource(R.string.clipboard_dismiss_suggestion),
+                                    onClick = { onDismissClipboard(clipboardTimestamp) }
+                                )
+                            }
+                        }
                         3 -> Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -261,39 +309,6 @@ fun SuggestionStrip(
                                             modifier = Modifier
                                                 .size(15.dp)
                                                 .clickable(onClick = onDismissUndo)
-                                        )
-                                    }
-                                }
-                            } else if (showOtp && !otpChipText.isNullOrBlank()) {
-                                Surface(
-                                    shape = RoundedCornerShape(18.dp),
-                                    color = kbColors.actionSurface.copy(alpha = 0.24f),
-                                    modifier = Modifier.clickable { onTapOtpChip(otpChipText) }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Key,
-                                            contentDescription = null,
-                                            tint = kbColors.keyText,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                        Text(
-                                            text = otpChipText,
-                                            color = kbColors.keyText,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Icon(
-                                            imageVector = Icons.Rounded.Close,
-                                            contentDescription = null,
-                                            tint = kbColors.keyHintText,
-                                            modifier = Modifier
-                                                .size(15.dp)
-                                                .clickable(onClick = onDismissOtpChip)
                                         )
                                     }
                                 }
@@ -582,7 +597,7 @@ private fun VoiceToolbarRow(
         targetValue = if (voiceState.isListening) kbColors.actionSurface else kbColors.modifierSurface,
         label = "voicePulseBg"
     )
-    val timerText = if (voiceState.isLocalWhisper && voiceState.isListening) {
+    val timerText = if ((voiceState.isLocalWhisper || voiceState.isCloud) && voiceState.isListening) {
         val m = voiceState.elapsedSeconds / 60
         val s = voiceState.elapsedSeconds % 60
         "%02d:%02d · ".format(m, s)
@@ -590,8 +605,8 @@ private fun VoiceToolbarRow(
         ""
     }
     val statusText = when {
+        !voiceState.processingLabel.isNullOrBlank() -> voiceState.processingLabel
         voiceState.partialText.isNotBlank() -> voiceState.partialText
-        voiceState.isProcessing && !voiceState.processingLabel.isNullOrBlank() -> voiceState.processingLabel
         voiceState.isProcessing && voiceState.isLocalWhisper -> stringResource(R.string.voice_processing_local)
         voiceState.isProcessing -> stringResource(R.string.voice_tidying_up)
         else -> "$timerText${stringResource(R.string.voice_hint_finish)}"
@@ -621,13 +636,13 @@ private fun VoiceToolbarRow(
             )
         }
 
-        if (voiceState.isLocalWhisper) {
+        if (voiceState.isLocalWhisper || voiceState.isCloud || voiceState.isAndroidOffline) {
             Surface(
                 shape = RoundedCornerShape(10.dp),
                 color = kbColors.actionSurface.copy(alpha = 0.22f)
             ) {
                 Text(
-                    text = "Local",
+                    text = if (voiceState.isCloud) "Cloud" else "Offline",
                     color = kbColors.keyText,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,

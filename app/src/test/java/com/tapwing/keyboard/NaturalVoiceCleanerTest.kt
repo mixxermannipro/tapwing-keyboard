@@ -56,4 +56,26 @@ class NaturalVoiceCleanerTest {
         val es = NaturalVoiceCleaner.clean("eh hola coma qué tal", locale = "es")
         assertEquals("Hola, qué tal.", es)
     }
+
+    @Test
+    fun preservesNumbersLinksAndMeaningfulWords() {
+        assertEquals(
+            "Er hält den Preis bei 3,50 € und die URL lautet example.de.",
+            NaturalVoiceCleaner.clean("äh er hält den Preis bei 3,50 € und die URL lautet example.de", "de")
+        )
+        assertEquals("Ich wollte halt kurz fragen.", NaturalVoiceCleaner.clean("ich wollte halt kurz fragen", "de"))
+        assertEquals("I am ready.", NaturalVoiceCleaner.clean("i i am ready", "en"))
+    }
+
+    @Test
+    fun replacesClockTimeWithoutLosingTheRestOfTheMessage() {
+        assertEquals(
+            "Schick mir morgen um 15 Uhr bitte den Entwurf.",
+            NaturalVoiceCleaner.clean("schick mir morgen um 14 Uhr, nein, warte, um 15 Uhr bitte den Entwurf", "de")
+        )
+        assertEquals(
+            "Wir treffen uns morgen im Büro. Ich meine es ernst.",
+            NaturalVoiceCleaner.clean("Wir treffen uns morgen im Büro. Ich meine es ernst.", "de")
+        )
+    }
 }

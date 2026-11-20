@@ -33,8 +33,8 @@ object LocalModelCatalog {
             downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
             isRecommended = true,
-            summaryDe = "Empfohlen: beste Balance aus Genauigkeit (DE/EN/99 Sprachen) und Geschwindigkeit auf dem Handy.",
-            summaryEn = "Recommended: best balance of accuracy (DE/EN/99 languages) and mobile speed."
+            summaryDe = "Mehr Reserven für Namen und Fachwörter. Braucht mehr Zeit und Speicher als Whisper Base.",
+            summaryEn = "More capacity for names and technical terms. Takes more time and memory than Whisper Base."
         ),
         LocalModelSpec(
             id = "whisper-base-q5_1",
@@ -70,7 +70,7 @@ object LocalModelCatalog {
             downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
             summaryDe = "Maximale Genauigkeit auch bei Fachbegriffen und Dialekten (für Smartphones mit 8+ GB RAM).",
-            summaryEn = "Near-cloud maximum accuracy for accents and terminology (8+ GB RAM phones)."
+            summaryEn = "Larger speech model for accents and terminology (8+ GB RAM phones)."
         )
     )
 
@@ -86,8 +86,8 @@ object LocalModelCatalog {
             repoUrl = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF",
             isRecommended = true,
             supportsNoThink = true,
-            summaryDe = "Empfohlen: bestes lokales Bereinigungs- & Schreibmodell (Rambler-Niveau, stark in Deutsch & Mehrsprachigkeit).",
-            summaryEn = "Recommended: strongest on-device cleanup & rewriting model (Rambler-level, strong multilingual & German)."
+            summaryDe = "Für längere Texte und mehrsprachige Schreibhilfe. Braucht mehr Speicher als Qwen3 0.6B.",
+            summaryEn = "For longer text and multilingual editing. Uses more memory than Qwen3 0.6B."
         ),
         LocalModelSpec(
             id = "qwen3-0.6b-q4_k_m",

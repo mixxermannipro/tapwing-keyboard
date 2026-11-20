@@ -41,9 +41,9 @@
     <string name="voice_onboarding_f1_desc">Entfernt Pausen, „ähm“, „äh“, Stottern und Füllwörter</string>
     <string name="voice_onboarding_f2_title">In eigenen Worten bearbeiten</string>
     <string name="voice_onboarding_f2_desc">Sage z. B. „mach es freundlicher“, „kürzer“ oder korrigiere dich mitten im Satz</string>
-    <string name="voice_onboarding_f3_title" formatted="false">100 % Lokal auf dem Handy</string>
-    <string name="voice_onboarding_f3_desc">Lade lokale Whisper- &amp; Qwen3-Modelle für unbegrenztes Offline-Diktat &amp; Bereinigung</string>
-    <string name="voice_onboarding_privacy">Läuft komplett offline mit lokalem Whisper + KI-Modell oder über Android-Spracherkennung.</string>
+    <string name="voice_onboarding_f3_title" formatted="false">Ohne Internet diktieren</string>
+    <string name="voice_onboarding_f3_desc">Mit einem Android-Sprachpaket oder Whisper bleibt die Aufnahme auf dem Gerät.</string>
+    <string name="voice_onboarding_privacy">Unter Diktat wählst du, wie Tapwing deine Aufnahme verarbeitet.</string>
     <string name="btn_get_started">Loslegen</string>
     <string name="btn_no_thanks">Nein, danke</string>
 
@@ -86,8 +86,8 @@
     <string name="nav_languages">Sprachen &amp; Länder</string>
     <string name="nav_dictionary">Wörterbuch &amp; Lernen</string>
     <string name="nav_corrections">Tippen &amp; Autokorrektur</string>
-    <string name="nav_voice">Spracheingabe &amp; Lokales STT</string>
-    <string name="nav_writing_tools">Lokale KI &amp; Prompts</string>
+    <string name="nav_voice">Diktat</string>
+    <string name="nav_writing_tools">Schreibhilfe</string>
     <string name="nav_clipboard">Zwischenablage &amp; Screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Über Tapwing</string>
@@ -98,4 +98,9 @@
     <string name="setup_enable_tapwing">Tapwing im System aktivieren</string>
     <string name="setup_select_tapwing">Zu Tapwing wechseln</string>
     <string name="setup_ready">Tapwing aktiv ✓</string>
+    <string name="clipboard_paste_suggestion">Kopierten Text einfügen</string>
+    <string name="clipboard_dismiss_suggestion">Einfügevorschlag ausblenden</string>
+    <string name="settings_expand">Aufklappen</string>
+    <string name="settings_collapse">Zuklappen</string>
+    <string name="clipboard_verification_code">Code %1$s</string>
 </resources>

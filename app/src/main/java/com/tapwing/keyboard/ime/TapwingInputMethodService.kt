@@ -60,6 +60,7 @@ import com.tapwing.keyboard.clipboard.ClipboardClip
 import com.tapwing.keyboard.clipboard.ClipboardStore
 import com.tapwing.keyboard.clipboard.RecentScreenshot
 import com.tapwing.keyboard.clipboard.ScreenshotMonitor
+import com.tapwing.keyboard.data.AiProviderType
 import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.QuickBarAction
@@ -68,6 +69,7 @@ import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.data.TypingStatsStore
 import com.tapwing.keyboard.data.VoiceDictationMode
+import com.tapwing.keyboard.data.VoiceEngineMode
 import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 import com.tapwing.keyboard.dictionary.KeyCenter
 import com.tapwing.keyboard.dictionary.OfflineDictionaryPackManager
@@ -91,15 +93,21 @@ import com.tapwing.keyboard.ui.keyboard.TextEditAction
 import com.tapwing.keyboard.undo.UndoManager
 import com.tapwing.keyboard.undo.UndoReason
 import com.tapwing.keyboard.undo.UndoSnapshot
+import com.tapwing.keyboard.voice.CloudDictation
+import com.tapwing.keyboard.voice.CloudSpeechProvider
 import com.tapwing.keyboard.voice.NaturalVoiceCleaner
 import com.tapwing.keyboard.voice.TapwingVoiceController
 import com.tapwing.keyboard.voice.VoiceCommandResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
+
+private const val VERIFICATION_CODE_LIFETIME_MS = 90_000L
 
 class TapwingInputMethodService :
     InputMethodService(),
@@ -136,9 +144,8 @@ class TapwingInputMethodService :
     private var isTyping by mutableStateOf(false)
     private var proactiveUndoState by mutableStateOf<UndoSnapshot?>(null)
     private var recentScreenshot by mutableStateOf<RecentScreenshot?>(null)
-    private var otpChipText by mutableStateOf<String?>(null)
-    private var otpClipAddedAtMs: Long = 0L
     private var inlineAutofillViews by mutableStateOf<List<View>>(emptyList())
+    private var inlineRequestGeneration = 0
     private var snippetsSnapshot by mutableStateOf<List<TextSnippet>>(emptyList())
     private var currentTargetPackage: String = ""
 
@@ -149,6 +156,18 @@ class TapwingInputMethodService :
 
     private var textEditSelectionActive by mutableStateOf(false)
     private var quickSearchInitial by mutableStateOf("")
+
+    private var pasteSuggestion by mutableStateOf<CopiedText?>(null)
+    private var dismissedCopyTimestamp = -1L
+    private var pasteExpiryJob: Job? = null
+    private var inputViewActive = false
+    private var prefsLoaded = false
+    private var privateEditor by mutableStateOf(false)
+    private var voicePrefs: TapwingPrefs? = null
+    private var voiceEditJob: Job? = null
+    private var voiceEditGeneration = 0
+
+    private data class CopiedText(val text: String, val timestamp: Long, val verificationCode: Boolean)
 
     private var lastSpaceTapMs: Long = 0L
     private var isEmailField: Boolean = false
@@ -162,10 +181,12 @@ class TapwingInputMethodService :
     private var lastWordBeforeEmoji: String = ""
 
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
-        if (!currentPrefs.clipboardEnabled || currentPrefs.incognitoMode) return@OnPrimaryClipChangedListener
-        val cm = getSystemService(ClipboardManager::class.java) ?: return@OnPrimaryClipChangedListener
-        val clip = cm.primaryClip ?: return@OnPrimaryClipChangedListener
-        if (clip.itemCount <= 0) return@OnPrimaryClipChangedListener
+        if (!clipboardAllowed()) return@OnPrimaryClipChangedListener
+        val clip = getSystemService(ClipboardManager::class.java)?.primaryClip
+        if (inputViewActive) updatePasteSuggestion(clip)
+        if (clip == null || clip.itemCount == 0 || clip.description.isSensitive()) {
+            return@OnPrimaryClipChangedListener
+        }
 
         val item = clip.getItemAt(0)
         val isImage = clip.description.hasMimeType("image/*") && item.uri != null
@@ -207,18 +228,82 @@ class TapwingInputMethodService :
         }
 
         val text = item.coerceToText(this)?.toString().orEmpty()
-        if (text.isNotBlank()) {
+        if (text.isNotBlank() && SuggestionEngine.extractOtpFromClipboard(text) == null) {
             clipboardStore.addClip(
                 rawText = text,
                 retention = currentPrefs.clipboardRetention,
                 maxUnpinnedItems = currentPrefs.clipboardMaxItems
             )
-            val otp = SuggestionEngine.extractOtpFromClipboard(text)
-            if (otp != null) {
-                otpChipText = otp
-                otpClipAddedAtMs = System.currentTimeMillis()
+        }
+    }
+
+    private fun clipboardAllowed() =
+        prefsLoaded && currentPrefs.clipboardEnabled && !currentPrefs.incognitoMode && !privateEditor
+
+    private fun ClipDescription.isSensitive() =
+        extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
+
+    private fun updatePasteSuggestion(
+        clip: android.content.ClipData? = if (clipboardAllowed()) {
+            getSystemService(ClipboardManager::class.java)?.primaryClip
+        } else null
+    ) {
+        pasteExpiryJob?.cancel()
+        pasteExpiryJob = null
+        pasteSuggestion = if (clipboardAllowed() && inputViewActive && clip != null &&
+            clip.itemCount > 0 && !clip.description.isSensitive() &&
+            clip.description.timestamp != dismissedCopyTimestamp
+        ) {
+            val timestamp = clip.description.timestamp
+            clip.getItemAt(0).text?.toString()?.takeIf { it.isNotBlank() }?.let { text ->
+                val code = SuggestionEngine.extractOtpFromClipboard(text)
+                when {
+                    code == null -> CopiedText(text, timestamp, verificationCode = false)
+                    System.currentTimeMillis() - timestamp in 0 until VERIFICATION_CODE_LIFETIME_MS ->
+                        CopiedText(code, timestamp, verificationCode = true)
+                    else -> null
+                }
+            }
+        } else null
+        val shown = pasteSuggestion
+        if (shown?.verificationCode == true) {
+            pasteExpiryJob = serviceScope.launch {
+                delay((shown.timestamp + VERIFICATION_CODE_LIFETIME_MS - System.currentTimeMillis()).coerceAtLeast(0))
+                if (pasteSuggestion == shown) pasteSuggestion = null
             }
         }
+    }
+
+    private fun pasteFromSuggestion(timestamp: Long) {
+        val shown = pasteSuggestion?.takeIf { it.timestamp == timestamp } ?: return
+        updatePasteSuggestion()
+        if (shown != pasteSuggestion) return
+        val connection = currentInputConnection ?: return
+        if (connection.commitText(shown.text, 1)) {
+            dismissPasteSuggestion(timestamp)
+            refreshContextAndSuggestions()
+        }
+    }
+
+    private fun dismissPasteSuggestion(timestamp: Long) {
+        if (pasteSuggestion?.timestamp != timestamp) return
+        dismissedCopyTimestamp = timestamp
+        pasteExpiryJob?.cancel()
+        pasteSuggestion = null
+    }
+
+    private fun isPrivateEditor(info: EditorInfo?): Boolean {
+        val inputType = info?.inputType ?: return true
+        val type = inputType and InputType.TYPE_MASK_CLASS
+        val variation = inputType and InputType.TYPE_MASK_VARIATION
+        return inputType == InputType.TYPE_NULL ||
+            info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0 ||
+            (type == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD) ||
+            (type == InputType.TYPE_CLASS_TEXT && variation in setOf(
+                InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+                InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD
+            ))
     }
 
     override fun onCreate() {
@@ -238,14 +323,17 @@ class TapwingInputMethodService :
         voiceController = TapwingVoiceController(
             context = this,
             modelManager = modelManager,
-            onTranscriptReady = { raw -> handleVoiceTranscript(raw) },
-            onNeedAudioPermission = { PermissionBridgeActivity.requestRecordAudio(this) },
-            initialPromptProvider = { "" }
+            onTranscriptReady = ::handleVoiceTranscript,
+            onNeedAudioPermission = { PermissionBridgeActivity.requestRecordAudio(this) }
         )
 
         serviceScope.launch {
             prefsRepo.prefsFlow.collect { prefs ->
+                val clipboardWasAllowed = clipboardAllowed()
                 currentPrefs = prefs
+                prefsLoaded = true
+                if (inputViewActive && clipboardWasAllowed != clipboardAllowed()) updatePasteSuggestion()
+                if (!prefs.inlineAutofillEnabled) clearAutofillSuggestions()
                 offlinePackManager.preloadLocaleAsync(prefs.activeLocale)
                 clipboardStore.prune(prefs.clipboardRetention, prefs.clipboardMaxItems)
                 ensureScreenshotObserverIfPermitted()
@@ -286,8 +374,12 @@ class TapwingInputMethodService :
                     suggestions = suggestions,
                     isTyping = isTyping,
                     proactiveUndo = proactiveUndoState,
-                    recentScreenshot = recentScreenshot,
-                    otpChipText = otpChipText,
+                    recentScreenshot = recentScreenshot.takeIf { !privateEditor && !currentPrefs.incognitoMode },
+                    clipboardPreview = pasteSuggestion?.text?.take(160)?.replace(Regex("""\s+"""), " "),
+                    clipboardTimestamp = pasteSuggestion?.timestamp,
+                    clipboardVerificationCode = pasteSuggestion?.verificationCode == true,
+                    onPasteClipboard = ::pasteFromSuggestion,
+                    onDismissClipboard = ::dismissPasteSuggestion,
                     inlineAutofillViews = inlineAutofillViews,
                     snippets = snippetsSnapshot,
                     voiceState = voiceUiState,
@@ -314,11 +406,6 @@ class TapwingInputMethodService :
                     onTapScreenshotChip = ::handleScreenshotPasteImage,
                     onTapScreenshotOcr = ::handleScreenshotPasteOcr,
                     onDismissScreenshotChip = { recentScreenshot = null },
-                    onTapOtpChip = { code ->
-                        commitTextWithSpaceSafety(code)
-                        otpChipText = null
-                    },
-                    onDismissOtpChip = { otpChipText = null },
                     onOpenToolsHub = { panelMode = KeyboardPanelMode.TOOLS_HUB },
                     onOpenCustomizeBar = { panelMode = KeyboardPanelMode.CUSTOMIZE_BAR },
                     onQuickAction = ::handleQuickBarAction,
@@ -422,15 +509,10 @@ class TapwingInputMethodService :
                     onVoiceOnboardingGetStarted = {
                         updatePref { it.copy(voiceOnboardingSeen = true) }
                         panelMode = KeyboardPanelMode.KEYS
-                        voiceController.startListening(
-                            locale = currentPrefs.activeLocale,
-                            strictLanguageLock = currentPrefs.voiceStrictLanguageLock,
-                            engineMode = currentPrefs.voiceEngine,
-                            whisperModelId = currentPrefs.selectedWhisperModelId
-                        )
+                        startVoice()
                     },
                     onFinishVoice = { voiceController.finishAndCommit() },
-                    onCancelVoice = { voiceController.cancel() },
+                    onCancelVoice = { cancelVoice() },
                     onToggleVoiceMinimize = { voiceController.toggleMinimized() },
                     onDismissVoiceError = { voiceController.clearError() },
                     onHideKeyboard = ::hideKeyboard
@@ -438,6 +520,25 @@ class TapwingInputMethodService :
             }
         }
         return composeView
+    }
+
+    override fun onStartInput(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInput(info, restarting)
+        val nextPrivate = isPrivateEditor(info)
+        if (!restarting || (nextPrivate && !privateEditor)) {
+            cancelVoice()
+            undoManager.clear()
+            proactiveUndoState = null
+            clearAutofillSuggestions()
+        }
+        privateEditor = nextPrivate
+        if (inputViewActive) updatePasteSuggestion()
+    }
+
+    override fun onFinishInput() {
+        super.onFinishInput()
+        clearAutofillSuggestions()
+        cancelVoice()
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
@@ -453,7 +554,9 @@ class TapwingInputMethodService :
         ensureScreenshotObserverIfPermitted()
 
         currentTargetPackage = info?.packageName.orEmpty()
-        inlineAutofillViews = emptyList()
+        privateEditor = isPrivateEditor(info)
+        inputViewActive = true
+        updatePasteSuggestion()
         val variation = (info?.inputType ?: 0) and InputType.TYPE_MASK_VARIATION
         isEmailField = variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS ||
             variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
@@ -466,10 +569,6 @@ class TapwingInputMethodService :
         pendingSmartUndoPair = null
         pendingSuggestionTrailingSpace = false
 
-        if (otpChipText != null && System.currentTimeMillis() - otpClipAddedAtMs > 90_000L) {
-            otpChipText = null
-        }
-
         consumePendingOcrText()
         refreshContextAndSuggestions()
         checkRecentScreenshot()
@@ -481,10 +580,11 @@ class TapwingInputMethodService :
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
-        inlineAutofillViews = emptyList()
-        if (!finishingInput) {
-            voiceController.markConfigurationPause()
-        }
+        inputViewActive = false
+        pasteExpiryJob?.cancel()
+        pasteSuggestion = null
+        if (finishingInput) clearAutofillSuggestions()
+        cancelVoice(keepRotationResume = !finishingInput)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
     }
 
@@ -497,7 +597,7 @@ class TapwingInputMethodService :
             return null
         }
         val density = resources.displayMetrics.density
-        val minW = (96f * density).toInt()
+        val minW = (48f * density).toInt()
         val minH = (36f * density).toInt()
         val maxW = (280f * density).toInt()
         val maxH = (44f * density).toInt()
@@ -547,32 +647,28 @@ class TapwingInputMethodService :
             .build()
     }
 
+    private fun clearAutofillSuggestions() {
+        inlineRequestGeneration++
+        inlineAutofillViews = emptyList()
+    }
+
     @RequiresApi(Build.VERSION_CODES.R)
     override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
-        if (!currentPrefs.inlineAutofillEnabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            inlineAutofillViews = emptyList()
-            return false
-        }
-        val suggestions = response.inlineSuggestions
-        if (suggestions.isEmpty()) {
-            inlineAutofillViews = emptyList()
-            return false
-        }
+        clearAutofillSuggestions()
+        if (!currentPrefs.inlineAutofillEnabled || currentInputConnection == null) return false
+        val suggestions = response.inlineSuggestions.take(4)
+        if (suggestions.isEmpty()) return false
+
+        val generation = inlineRequestGeneration
         val density = resources.displayMetrics.density
-        val size = Size(
-            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-            (40f * density).toInt()
-        )
+        val size = Size(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, (40f * density).toInt())
         val executor = ContextCompat.getMainExecutor(this)
-        val collected = ArrayList<View>(suggestions.size)
-        val expected = suggestions.take(4).size
-        suggestions.take(4).forEach { inlineSuggestion ->
-            inlineSuggestion.inflate(this, size, executor) { contentView ->
-                if (contentView != null) {
-                    collected.add(contentView)
-                    inlineAutofillViews = collected.toList()
-                } else if (collected.size >= expected) {
-                    inlineAutofillViews = collected.toList()
+        val rendered = arrayOfNulls<View>(suggestions.size)
+        suggestions.forEachIndexed { index, suggestion ->
+            suggestion.inflate(this, size, executor) { view ->
+                if (generation == inlineRequestGeneration && currentPrefs.inlineAutofillEnabled && view != null) {
+                    rendered[index] = view
+                    inlineAutofillViews = rendered.filterNotNull()
                 }
             }
         }
@@ -656,6 +752,7 @@ class TapwingInputMethodService :
     }
 
     private fun handleKeyPress(key: KeySpec, output: String) {
+        voiceController.clearError()
         val ic = currentInputConnection ?: return
         when (key.type) {
             KeyActionType.SHIFT -> {
@@ -1089,7 +1186,9 @@ class TapwingInputMethodService :
         val before = ic?.getTextBeforeCursor(100, 0)?.toString().orEmpty()
         val trailing = SuggestionEngine.extractTrailingWord(before)
         isTyping = trailing.isNotEmpty()
-        val latestClipText = clipboardStore.items.value.firstOrNull { !it.isImage }?.text.orEmpty()
+        val latestClipText = if (clipboardAllowed()) {
+            clipboardStore.items.value.firstOrNull { !it.isImage }?.text.orEmpty()
+        } else ""
         suggestions = SuggestionEngine.suggestionsFor(
             textBeforeCursor = before,
             locale = currentPrefs.activeLocale,
@@ -1126,93 +1225,133 @@ class TapwingInputMethodService :
             return
         }
         panelMode = KeyboardPanelMode.KEYS
+        startVoice()
+    }
+
+    private fun startVoice() {
+        val prefs = if (privateEditor) currentPrefs.copy(incognitoMode = true) else currentPrefs
+        voicePrefs = prefs
+        val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+        if (prefs.voiceEngine == VoiceEngineMode.CLOUD && prefs.incognitoMode) {
+            voiceController.finishExternalProcessing(
+                if (de) "Cloud-Diktat ist in privaten Feldern aus." else "Cloud dictation is off in private fields."
+            )
+            return
+        }
+        val natural = prefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP
+        val cloud = if (prefs.voiceEngine == VoiceEngineMode.CLOUD) {
+            val provider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
+            provider?.let {
+                val key = secureKeyStorage.readDictationKey(it.name)
+                if (key.isBlank()) null else CloudDictation(it, key, natural, prefs.voiceRemoveFillers, prefs.voiceAutoPunctuate)
+            }
+        } else null
         voiceController.startListening(
-            locale = currentPrefs.activeLocale,
-            strictLanguageLock = currentPrefs.voiceStrictLanguageLock,
-            engineMode = currentPrefs.voiceEngine,
-            whisperModelId = currentPrefs.selectedWhisperModelId
+            locale = prefs.activeLocale,
+            strictLanguageLock = prefs.voiceStrictLanguageLock,
+            engineMode = prefs.voiceEngine,
+            offlineOnly = prefs.incognitoMode,
+            whisperModelId = prefs.selectedWhisperModelId,
+            formatText = natural && prefs.voiceAutoPunctuate,
+            cloud = cloud
         )
     }
 
-    private fun handleVoiceTranscript(rawTranscript: String) {
-        if (currentPrefs.voiceMode == VoiceDictationMode.STANDARD) {
-            commitTextWithSpaceSafety(rawTranscript)
-            statsStore.recordVoiceDictation(rawTranscript.length, currentPrefs.incognitoMode)
-            voiceController.finishExternalProcessing()
+    private fun cancelVoice(keepRotationResume: Boolean = false) {
+        voiceEditGeneration++
+        voiceEditJob?.cancel()
+        voiceEditJob = null
+        if (!keepRotationResume) voicePrefs = null
+        if (::voiceController.isInitialized) voiceController.cancel(keepRotationResume)
+    }
+
+    private fun handleVoiceTranscript(raw: String, alreadyFormatted: Boolean) {
+        val prefs = voicePrefs ?: return
+        if (!inputViewActive) return
+        val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+        if (prefs.voiceMode == VoiceDictationMode.STANDARD) {
+            insertVoiceText(raw, prefs)
             return
         }
-
         val parsed = NaturalVoiceCleaner.parseCommandOrClean(
-            rawTranscript = rawTranscript,
-            locale = currentPrefs.activeLocale,
-            removeFillers = currentPrefs.voiceRemoveFillers,
-            autoPunctuate = currentPrefs.voiceAutoPunctuate,
-            dictionaryStore = dictionaryStore
+            rawTranscript = raw,
+            locale = prefs.activeLocale,
+            removeFillers = prefs.voiceRemoveFillers,
+            autoPunctuate = prefs.voiceAutoPunctuate,
+            dictionaryStore = dictionaryStore.takeUnless { prefs.incognitoMode }
         )
+        val generation = voiceEditGeneration
+        val offline = prefs.incognitoMode ||
+            prefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER ||
+            prefs.voiceEngine == VoiceEngineMode.ON_DEVICE_SPEECH
+        val processingPrefs = if (offline && prefs.aiProvider in setOf(
+            AiProviderType.GEMINI_API, AiProviderType.OPENAI_COMPATIBLE
+        )) prefs.copy(aiProvider = AiProviderType.LOCAL_RULES) else prefs
 
         when (parsed) {
-            is VoiceCommandResult.DeleteLastWord -> {
-                deletePreviousWord()
-                voiceController.finishExternalProcessing()
-            }
+            VoiceCommandResult.DeleteLastWord -> deletePreviousWord()
             is VoiceCommandResult.RewriteAction -> {
                 val fieldText = readWholeFieldText()
-                if (fieldText.isNotBlank()) {
-                    val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
-                    voiceController.beginExternalProcessing(
-                        if (de) "Überarbeite Text mit KI…" else "Rewriting with AI…"
-                    )
-                    serviceScope.launch {
-                        try {
-                            val out = writingToolsEngine.runAction(fieldText, parsed.action, currentPrefs)
-                            if (out.rewrittenText.isNotBlank()) {
-                                replaceWholeFieldText(out.rewrittenText)
-                                undoManager.record(
-                                    beforeText = fieldText,
-                                    afterText = out.rewrittenText,
-                                    reason = UndoReason.AI_REWRITE,
-                                    label = if (de) "KI rückgängig" else "Undo AI edit"
-                                )
-                                proactiveUndoState = undoManager.activeBanner()
-                            }
-                        } finally {
-                            voiceController.finishExternalProcessing()
-                        }
-                    }
-                } else {
-                    voiceController.finishExternalProcessing()
-                }
-            }
-            is VoiceCommandResult.Text -> {
-                val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
-                val willRunLlmOrCloud = currentPrefs.voiceAiPolish &&
-                    (currentPrefs.aiProvider != com.tapwing.keyboard.data.AiProviderType.LOCAL_RULES)
-                if (willRunLlmOrCloud) {
-                    voiceController.beginExternalProcessing(
-                        if (de) "Bereinige mit KI…" else "Cleaning up with AI…"
-                    )
-                }
-                serviceScope.launch {
+                if (fieldText.isBlank()) return
+                voiceController.beginExternalProcessing(if (de) "Überarbeite Text …" else "Rewriting text…")
+                voiceEditJob = serviceScope.launch {
                     try {
-                        val out = writingToolsEngine.cleanupVoiceTranscript(rawTranscript, currentPrefs)
-                        val finalText = out.rewrittenText.ifBlank { parsed.cleanedText }
-                        if (finalText.isNotBlank()) {
-                            commitTextWithSpaceSafety(finalText)
-                            statsStore.recordVoiceDictation(finalText.length, currentPrefs.incognitoMode)
+                        val commandPrefs = if (prefs.voiceEngine == VoiceEngineMode.CLOUD) {
+                            processingPrefs.copy(aiProvider = AiProviderType.LOCAL_RULES)
+                        } else processingPrefs
+                        val out = writingToolsEngine.runAction(fieldText, parsed.action, commandPrefs)
+                        if (generation == voiceEditGeneration && inputViewActive &&
+                            readWholeFieldText() == fieldText && out.rewrittenText.isNotBlank()
+                        ) {
+                            replaceWholeFieldText(out.rewrittenText)
                             undoManager.record(
-                                beforeText = "",
-                                afterText = finalText,
-                                reason = UndoReason.VOICE_INSERT,
-                                label = if (de) "Diktat rückgängig" else "Undo dictation"
+                                beforeText = fieldText,
+                                afterText = out.rewrittenText,
+                                reason = UndoReason.AI_REWRITE,
+                                label = if (de) "KI rückgängig" else "Undo AI edit"
                             )
                             proactiveUndoState = undoManager.activeBanner()
                         }
                     } finally {
-                        voiceController.finishExternalProcessing()
+                        if (generation == voiceEditGeneration) voiceController.finishExternalProcessing()
+                    }
+                }
+            }
+            is VoiceCommandResult.Text -> {
+                val fallback = if (alreadyFormatted) raw else parsed.cleanedText
+                if (!prefs.voiceAiPolish || processingPrefs.aiProvider == AiProviderType.LOCAL_RULES ||
+                    prefs.voiceEngine == VoiceEngineMode.CLOUD
+                ) {
+                    insertVoiceText(fallback, prefs)
+                    return
+                }
+                voiceController.beginExternalProcessing(if (de) "Überarbeite Diktat …" else "Polishing dictation…")
+                voiceEditJob = serviceScope.launch {
+                    try {
+                        val text = writingToolsEngine.cleanupVoiceTranscript(raw, processingPrefs, fallback)
+                        if (generation == voiceEditGeneration && inputViewActive) {
+                            insertVoiceText(text.rewrittenText, prefs)
+                        }
+                    } finally {
+                        if (generation == voiceEditGeneration) voiceController.finishExternalProcessing()
                     }
                 }
             }
         }
+    }
+
+    private fun insertVoiceText(text: String, prefs: TapwingPrefs) {
+        if (text.isBlank()) return
+        val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+        val inserted = commitTextWithSpaceSafety(text) ?: return
+        statsStore.recordVoiceDictation(text.length, prefs.incognitoMode)
+        undoManager.record(
+            beforeText = "",
+            afterText = inserted,
+            reason = UndoReason.VOICE_INSERT,
+            label = if (de) "Diktat rückgängig" else "Undo dictation"
+        )
+        proactiveUndoState = undoManager.activeBanner()
     }
 
     private fun deletePreviousWord() {
@@ -1304,13 +1443,15 @@ class TapwingInputMethodService :
         ic.endBatchEdit()
     }
 
-    private fun commitTextWithSpaceSafety(text: String) {
-        val ic = currentInputConnection ?: return
+    private fun commitTextWithSpaceSafety(text: String): String? {
+        if (text.isEmpty()) return null
+        val ic = currentInputConnection ?: return null
         val before = ic.getTextBeforeCursor(2, 0)?.toString().orEmpty()
         val needsLeadingSpace = before.isNotEmpty() && !before.last().isWhitespace() && !text.first().isWhitespace()
         val finalCommit = if (needsLeadingSpace) " $text" else text
-        ic.commitText(finalCommit, 1)
+        if (!ic.commitText(finalCommit, 1)) return null
         refreshContextAndSuggestions()
+        return finalCommit
     }
 
     private fun consumePendingOcrText() {

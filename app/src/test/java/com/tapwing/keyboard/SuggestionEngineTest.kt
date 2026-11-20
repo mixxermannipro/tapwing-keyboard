@@ -50,4 +50,13 @@ class SuggestionEngineTest {
         val chips = SuggestionEngine.suggestionsFor("max@gm", "de", isEmailField = true)
         assertTrue(chips.any { it.text == "gmail.com" })
     }
+
+    @Test
+    fun recognisesCopiedCodesWithoutPickingUnrelatedNumbers() {
+        assertEquals("482910", SuggestionEngine.extractOtpFromClipboard("Bestätigungscode: 482-910"))
+        assertEquals("763241", SuggestionEngine.extractOtpFromClipboard("Order 2026. Your verification code is 763241."))
+        assertEquals("987654", SuggestionEngine.extractOtpFromClipboard("987 654 is your sign-in code"))
+        assertNull(SuggestionEngine.extractOtpFromClipboard("Source code for issue 123456"))
+        assertNull(SuggestionEngine.extractOtpFromClipboard("Your verification code is https://example.com/123456"))
+    }
 }

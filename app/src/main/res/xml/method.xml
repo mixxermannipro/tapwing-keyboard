@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <input-method xmlns:android="http://schemas.android.com/apk/res/android"
     android:settingsActivity="com.tapwing.keyboard.settings.SettingsActivity"
-    android:supportsSwitchingToNextInputMethod="true">
+    android:supportsSwitchingToNextInputMethod="true"
+    android:supportsInlineSuggestions="true">
     <subtype
         android:icon="@mipmap/ic_launcher"
         android:imeSubtypeExtraValue="KeyboardLayoutSet=qwertz"

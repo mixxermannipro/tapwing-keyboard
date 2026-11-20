@@ -19,12 +19,12 @@ class SecureKeyStorage(context: Context) {
 
     private val appContext = context.applicationContext
 
-    fun saveApiKey(rawKey: String) {
+    fun saveApiKey(rawKey: String, dictationProvider: String? = null) {
         if (!TapwingPreferencesRepository.isUserUnlocked(appContext)) return
         val trimmed = rawKey.trim()
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (trimmed.isEmpty()) {
-            prefs.edit().remove(KEY_CIPHER).remove(KEY_IV).apply()
+            prefs.edit().remove(KEY_CIPHER).remove(KEY_IV).remove(DICTATION_PROVIDER).apply()
             return
         }
         val secretKey = getOrCreateKey()
@@ -35,14 +35,20 @@ class SecureKeyStorage(context: Context) {
         prefs.edit()
             .putString(KEY_CIPHER, Base64.encodeToString(encrypted, Base64.NO_WRAP))
             .putString(KEY_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
+            .putString(DICTATION_PROVIDER, dictationProvider)
             .apply()
     }
 
-    fun readApiKey(): String {
+    fun readApiKey(): String = readKey()
+
+    fun readDictationKey(provider: String): String = readKey(provider)
+
+    private fun readKey(dictationProvider: String? = null): String {
         if (!TapwingPreferencesRepository.isUserUnlocked(appContext)) return ""
-        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val cipherB64 = prefs.getString(KEY_CIPHER, null) ?: return ""
-        val ivB64 = prefs.getString(KEY_IV, null) ?: return ""
+        val entries = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).all
+        if (dictationProvider != null && entries[DICTATION_PROVIDER] != dictationProvider) return ""
+        val cipherB64 = entries[KEY_CIPHER] as? String ?: return ""
+        val ivB64 = entries[KEY_IV] as? String ?: return ""
         return runCatching {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
             val secretKey = keyStore.getKey(KEY_ALIAS, null) as? SecretKey ?: return ""
@@ -90,6 +96,7 @@ class SecureKeyStorage(context: Context) {
         const val PREFS_NAME = "tapwing_secure_keys"
         const val KEY_CIPHER = "api_key_ciphertext"
         const val KEY_IV = "api_key_iv"
+        const val DICTATION_PROVIDER = "dictation_provider"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val GCM_TAG_BITS = 128
     }

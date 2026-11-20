@@ -18,15 +18,32 @@ sealed interface VoiceCommandResult {
 object NaturalVoiceCleaner {
 
     private val fillersByLang = mapOf(
-        "de" to setOf("äh", "ähm", "öhm", "öh", "hm", "hmm", "mhm", "ähhh", "halt", "sozusagen"),
-        "en" to setOf("um", "uh", "erm", "er", "ah", "hmm", "hm", "uhm"),
-        "fr" to setOf("euh", "ben", "bah", "hm", "hmm", "voilà", "genre"),
-        "es" to setOf("eh", "em", "este", "pues", "o sea", "hm", "hmm"),
-        "it" to setOf("ehm", "eh", "allora", "cioè", "tipo", "hm", "hmm"),
-        "pt" to setOf("é", "hm", "hmm", "tipo", "assim", "né"),
-        "nl" to setOf("eh", "uh", "uhm", "zeg maar", "eigenlijk", "hm", "hmm"),
-        "pl" to setOf("yy", "yym", "ee", "hm", "hmm", "no", "znaczy"),
-        "tr" to setOf("şey", "yani", "ıı", "ee", "hm", "hmm")
+        "de" to setOf("äh", "ähm", "öhm", "öh", "hm", "hmm", "mhm", "ähhh"),
+        "en" to setOf("um", "uh", "erm", "ah", "hmm", "hm", "uhm"),
+        "fr" to setOf("euh", "hm", "hmm"),
+        "es" to setOf("eh", "em", "hm", "hmm"),
+        "it" to setOf("ehm", "eh", "hm", "hmm"),
+        "pt" to setOf("hm", "hmm"),
+        "nl" to setOf("eh", "uh", "uhm", "hm", "hmm"),
+        "pl" to setOf("yy", "yym", "ee", "hm", "hmm"),
+        "tr" to setOf("ıı", "ee", "hm", "hmm")
+    )
+
+    private val germanClockCorrection = Regex(
+        """\bum\s+(?:\d{1,2}(?::\d{2})?|ein(?:s)?|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|dreizehn|vierzehn|fünfzehn|sechzehn|siebzehn|achtzehn|neunzehn|zwanzig)\s+uhr\s*,?\s+(?:nein\s*,?\s*warte|ich meine|besser gesagt)\s*,?\s*(?=um\s+\S+\s+uhr\b)""",
+        RegexOption.IGNORE_CASE
+    )
+    private val germanPlaceCorrection = Regex(
+        """(?i:\bnach\s+)(?-i:[\p{Lu}][\p{L}-]*)\s*,?\s+(?i:nein\s*,?\s*warte|ich meine|besser gesagt)\s*,?\s*(?=(?i:nach\s+)?[\p{Lu}][\p{L}-]*\b)"""
+    )
+    private val weekdays = "monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+    private val englishDayCorrection = Regex(
+        """\b(?:$weekdays)\s*,?\s+(?:wait\s*,?\s*no|no\s*,?\s*wait|i mean)\s*,?\s*(?=(?:$weekdays)\b)""",
+        RegexOption.IGNORE_CASE
+    )
+    private val repeatedStarts = mapOf(
+        "de" to Regex("""\b(ich|du|wir|und)[ \t]+\1(?=\s|[,!?])""", RegexOption.IGNORE_CASE),
+        "en" to Regex("""\b(i|you|we|and|the)[ \t]+\1(?=\s|[,!?])""", RegexOption.IGNORE_CASE)
     )
 
     private val questionStartersByLang = mapOf(
@@ -124,52 +141,24 @@ object NaturalVoiceCleaner {
         return text.trim()
     }
 
-    private fun applySelfCorrections(input: String, baseLang: String): String {
-        var current = input
-        val triggers = when (baseLang) {
-            "de" -> listOf("nein warte", "ich meine", "besser gesagt", "äh ich meine")
-            "fr" -> listOf("non attends", "je veux dire", "enfin")
-            "es" -> listOf("no espera", "quiero decir", "mejor dicho")
-            "it" -> listOf("no aspetta", "intendo dire", "anzi")
-            else -> listOf("wait no", "actually i mean", "i mean", "scratch that", "no wait")
-        }
-
-        val trailingPunctTokens = when (baseLang) {
-            "de" -> setOf("punkt", "komma", "fragezeichen", "ausrufezeichen")
-            "fr" -> setOf("point", "virgule")
-            "es" -> setOf("punto", "coma")
-            else -> setOf("period", "comma", "question", "exclamation")
-        }
-
-        for (trigger in triggers) {
-            val regex = Regex("""\b$trigger\b[,\s]*""", RegexOption.IGNORE_CASE)
-            while (true) {
-                val match = regex.find(current) ?: break
-                val prefix = current.substring(0, match.range.first).trimEnd()
-                val suffix = current.substring(match.range.last + 1).trimStart()
-                val prefixWords = if (prefix.isEmpty()) emptyList() else prefix.split(Regex("""\s+"""))
-                val suffixWords = if (suffix.isEmpty()) emptyList() else suffix.split(Regex("""\s+"""))
-
-                val replacementSpan = suffixWords
-                    .takeWhile { it.lowercase().trim(',', '.', '!', '?') !in trailingPunctTokens }
-                    .size
-                    .coerceIn(1, 4)
-                val dropCount = replacementSpan.coerceAtMost(prefixWords.size)
-                val keptPrefix = prefixWords.dropLast(dropCount).joinToString(" ")
-                current = listOf(keptPrefix, suffix).filter { it.isNotEmpty() }.joinToString(" ")
+    private fun applySelfCorrections(input: String, baseLang: String): String =
+        when (baseLang) {
+            "de" -> {
+                val timesCorrected = germanClockCorrection.replace(input, "")
+                germanPlaceCorrection.replace(timesCorrected) { match ->
+                    if (timesCorrected.startsWith("nach ", match.range.last + 1, ignoreCase = true)) "" else "nach "
+                }
             }
+            "en" -> englishDayCorrection.replace(input, "")
+            else -> input
         }
-        return current
-    }
 
     private fun stripFillers(input: String, baseLang: String): String {
-        val fillers = fillersByLang[baseLang] ?: fillersByLang["en"]!!
-        val tokens = input.split(Regex("""\s+"""))
-        val kept = tokens.filter { token ->
-            val stripped = token.lowercase().trim(',', '.', '!', '?')
-            stripped.isNotEmpty() && stripped !in fillers
+        val fillers = fillersByLang[baseLang].orEmpty()
+        val withoutFillers = Regex("""\S+""").replace(input) { match ->
+            if (match.value.lowercase().trim(',', '.', '!', '?', '…') in fillers) "" else match.value
         }
-        return kept.joinToString(" ")
+        return repeatedStarts[baseLang]?.replace(withoutFillers, "$1") ?: withoutFillers
     }
 
     private fun replaceSpokenPunctuation(input: String, baseLang: String): String {
@@ -219,25 +208,23 @@ object NaturalVoiceCleaner {
     }
 
     private fun normalizeWhitespaceAndPunctuation(input: String): String {
-        var text = input
+        return input
             .replace(Regex("""[ \t]+"""), " ")
             .replace(Regex(""" *([.,!?:;])"""), "$1")
-            .replace(Regex("""([.,!?:;])([^\s\n.,!?:;])"""), "$1 $2")
             .replace(Regex(""" *\n *"""), "\n")
-        text = text.replace(Regex("""([,!?:;])\1+"""), "$1")
-        return text.trim()
+            .trim()
     }
 
     private fun capitalizeSentences(input: String): String {
         val sb = StringBuilder(input.length)
         var capitalizeNext = true
-        for (ch in input) {
+        for ((index, ch) in input.withIndex()) {
             if (capitalizeNext && ch.isLetter()) {
                 sb.append(ch.uppercaseChar())
                 capitalizeNext = false
             } else {
                 sb.append(ch)
-                if (ch == '.' || ch == '!' || ch == '?' || ch == '\n') {
+                if (ch == '\n' || (ch in ".!?" && input.getOrNull(index + 1)?.isWhitespace() == true)) {
                     capitalizeNext = true
                 }
             }

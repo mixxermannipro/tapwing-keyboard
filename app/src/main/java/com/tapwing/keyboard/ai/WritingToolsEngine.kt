@@ -97,7 +97,8 @@ class WritingToolsEngine(
      */
     suspend fun cleanupVoiceTranscript(
         rawTranscript: String,
-        prefs: TapwingPrefs
+        prefs: TapwingPrefs,
+        ruleCleaned: String
     ): WritingToolsOutput {
         if (rawTranscript.isBlank()) return WritingToolsOutput("", "On-Device")
 
@@ -176,12 +177,6 @@ class WritingToolsEngine(
             }
         }
 
-        val ruleCleaned = LocalWritingAssistant.transform(
-            input = rawTranscript,
-            action = WritingAction.VOICE_CLEANUP,
-            locale = prefs.activeLocale,
-            dictionaryStore = dictionaryStore
-        )
         return WritingToolsOutput(
             rewrittenText = ruleCleaned,
             badge = "On-Device Rules"

@@ -411,16 +411,32 @@ object SuggestionEngine {
     }
 
     /** Extracts a 4–8 digit 2FA / OTP verification code from a recent clipboard message. */
+    private val verificationLabel = Regex(
+        """\b(?:bestätigungs-?code|verifizierungs-?code|sicherheits-?code|einmal-?(?:code|passwort)|anmelde-?code|prüf-?code|tan|otp|2fa|(?:verification|security|authentication|sign[- ]in|login|one[- ]time)\s+(?:code|password|pin)|passcode|2fa code)\b""",
+        RegexOption.IGNORE_CASE
+    )
+    private val verificationDigits = Regex("""(?<![\p{L}\d/@])(?:[0-9]{3}[- ][0-9]{3}|[0-9]{4,8})(?![\p{L}\d/@])""")
+
     fun extractOtpFromClipboard(clipText: String): String? {
         val clean = clipText.trim()
-        if (clean.length > 260 || clean.isEmpty()) return null
-        if (clean.matches(Regex("""^\d{4,8}$"""))) return clean
-        val keywordHint = Regex(
-            """(?i)(code|otp|pin|passcode|bestätigung|verifizierung|sicherheit|tan|token|verification|confirm)"""
-        )
-        if (!keywordHint.containsMatchIn(clean)) return null
-        val match = Regex("""(?<!\d)(\d{4,8})(?!\d)""").find(clean) ?: return null
-        return match.groupValues[1]
+        if (clean.length !in 4..500) return null
+        if (verificationDigits.matches(clean)) return clean.filter(Char::isDigit)
+        val labels = verificationLabel.findAll(clean).toList()
+        if (labels.isEmpty()) return null
+        val candidates = verificationDigits.findAll(clean).mapNotNull { digits ->
+            val distance = labels.minOf { label ->
+                when {
+                    digits.range.first > label.range.last -> digits.range.first - label.range.last
+                    digits.range.last < label.range.first -> label.range.first - digits.range.last
+                    else -> Int.MAX_VALUE
+                }
+            }
+            if (distance <= 32) digits.value.filter(Char::isDigit) to distance else null
+        }.sortedBy { it.second }.toList()
+        val first = candidates.firstOrNull() ?: return null
+        return first.first.takeUnless {
+            candidates.getOrNull(1)?.let { other -> other.second == first.second && other.first != first.first } == true
+        }
     }
 
     fun isAtSentenceStart(textBeforeCursor: String, currentWord: String = extractTrailingWord(textBeforeCursor)): Boolean {

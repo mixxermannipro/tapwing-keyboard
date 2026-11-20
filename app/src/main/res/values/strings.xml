@@ -41,9 +41,9 @@
     <string name="voice_onboarding_f1_desc">Removes pauses, ‘ums’, ‘ahs’ and stutters</string>
     <string name="voice_onboarding_f2_title">Edit in your own words</string>
     <string name="voice_onboarding_f2_desc">Say ‘make it friendly’, ‘make it shorter’ or self-correct mid-sentence</string>
-    <string name="voice_onboarding_f3_title" formatted="false">100% On-Device AI option</string>
-    <string name="voice_onboarding_f3_desc">Download local Whisper &amp; Qwen3 models for unlimited offline dictation &amp; cleanup</string>
-    <string name="voice_onboarding_privacy" formatted="false">Works 100% offline with local Whisper + LLM models, or via Android Speech Services.</string>
+    <string name="voice_onboarding_f3_title" formatted="false">Offline options</string>
+    <string name="voice_onboarding_f3_desc">Use an Android language pack or download Whisper to keep audio on your device.</string>
+    <string name="voice_onboarding_privacy" formatted="false">Choose how Tapwing handles your audio in Dictation settings.</string>
     <string name="btn_get_started">Get started</string>
     <string name="btn_no_thanks">No, thanks</string>
 
@@ -86,8 +86,8 @@
     <string name="nav_languages">Languages &amp; Countries</string>
     <string name="nav_dictionary">Dictionary &amp; Learning</string>
     <string name="nav_corrections">Typing &amp; Autocorrect</string>
-    <string name="nav_voice">Voice &amp; Local STT</string>
-    <string name="nav_writing_tools">Local AI &amp; Prompts</string>
+    <string name="nav_voice">Dictation</string>
+    <string name="nav_writing_tools">Writing tools</string>
     <string name="nav_clipboard">Clipboard &amp; Screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">About Tapwing</string>
@@ -98,4 +98,9 @@
     <string name="setup_enable_tapwing">Enable Tapwing in System</string>
     <string name="setup_select_tapwing">Switch to Tapwing</string>
     <string name="setup_ready">Tapwing active ✓</string>
+    <string name="clipboard_paste_suggestion">Paste copied text</string>
+    <string name="clipboard_dismiss_suggestion">Hide paste suggestion</string>
+    <string name="settings_expand">Expand</string>
+    <string name="settings_collapse">Collapse</string>
+    <string name="clipboard_verification_code">Code %1$s</string>
 </resources>
