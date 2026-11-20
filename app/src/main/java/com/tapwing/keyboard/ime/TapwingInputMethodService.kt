@@ -658,6 +658,12 @@ class TapwingInputMethodService :
     }
 
     private fun handleVoiceMicClicked() {
+        // Toggle: a second tap on the mic stops recording and inserts the text.
+        val vs = voiceController.state.value
+        if (vs.isListening || vs.isProcessing) {
+            voiceController.finishAndCommit()
+            return
+        }
         if (!currentPrefs.voiceOnboardingSeen && currentPrefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP) {
             panelMode = KeyboardPanelMode.VOICE_ONBOARDING
             return

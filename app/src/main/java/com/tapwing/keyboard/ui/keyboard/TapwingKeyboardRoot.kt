@@ -7,7 +7,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,10 +27,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -125,6 +134,10 @@ fun TapwingKeyboardRoot(
         val view = LocalView.current
         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val footerHeight = maxOf(navBarBottom, 44.dp)
+        val density = LocalDensity.current
+        // Height of the letter keyboard; every other panel is locked to it so the layout never jumps.
+        var keysHeightPx by remember { mutableIntStateOf(0) }
+        val panelHeight = if (keysHeightPx > 0) with(density) { keysHeightPx.toDp() } else 270.dp
 
         val backgroundModifier = if (kbColors.appleLiquidGlass) {
             Modifier.background(
@@ -153,17 +166,28 @@ fun TapwingKeyboardRoot(
             AnimatedContent(
                 targetState = panelMode,
                 transitionSpec = {
-                    val enter = fadeIn(tween(170)) + slideInVertically(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    ) { it / 14 }
-                    val exit = fadeOut(tween(120))
-                    enter togetherWith exit
+                    val enter = fadeIn(tween(240, delayMillis = 50, easing = FastOutSlowInEasing)) +
+                        scaleIn(
+                            initialScale = 0.97f,
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) +
+                        slideInVertically(
+                            animationSpec = tween(280, easing = FastOutSlowInEasing)
+                        ) { it / 24 }
+                    val exit = fadeOut(tween(140, easing = FastOutSlowInEasing))
+                    (enter togetherWith exit).using(
+                        SizeTransform(clip = false) { _, _ -> tween(260, easing = FastOutSlowInEasing) }
+                    )
                 },
                 label = "keyboardPanelTransition"
             ) { mode ->
+                val lockedModifier = if (
+                    mode == KeyboardPanelMode.KEYS ||
+                    mode == KeyboardPanelMode.VOICE_ONBOARDING ||
+                    mode == KeyboardPanelMode.WRITING_ONBOARDING ||
+                    mode == KeyboardPanelMode.RESIZE
+                ) Modifier else Modifier.fillMaxWidth().height(panelHeight)
+                Box(modifier = lockedModifier) {
                 when (mode) {
                     KeyboardPanelMode.VOICE_ONBOARDING -> {
                         NaturalVoiceOnboardingSheet(
@@ -269,7 +293,15 @@ fun TapwingKeyboardRoot(
                         )
                     }
                     KeyboardPanelMode.KEYS -> {
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onSizeChanged {
+                                    if (!((voiceState.isListening || voiceState.isProcessing) && voiceState.isMinimized)) {
+                                        keysHeightPx = it.height
+                                    }
+                                }
+                        ) {
                             SuggestionStrip(
                                 prefs = prefs,
                                 suggestions = suggestions,
@@ -307,6 +339,7 @@ fun TapwingKeyboardRoot(
                         }
                     }
                 }
+                }
             }
 
             if (prefs.keyboardBottomLiftDp > 0) {
@@ -323,6 +356,31 @@ fun TapwingKeyboardRoot(
                     .fillMaxWidth()
                     .height(footerHeight)
             ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 22.dp, top = 4.dp)
+                        .width(52.dp)
+                        .height(40.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = false, radius = 24.dp),
+                            onClick = {
+                                if (prefs.hapticFeedback) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                }
+                                onSwitchLanguage()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Language,
+                        contentDescription = null,
+                        tint = kbColors.keyHintText,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
