@@ -1,7 +1,14 @@
 package com.tapwing.keyboard.ui.keyboard
 
 import android.view.HapticFeedbackConstants
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -79,255 +86,291 @@ fun SuggestionStrip(
     val view = LocalView.current
     val de = prefs.activeLocale == "de"
 
-    if (voiceState.isListening || voiceState.isProcessing) {
-        VoiceToolbarRow(
-            prefs = prefs,
-            voiceState = voiceState,
-            onFinishVoice = onFinishVoice,
-            onCancelVoice = onCancelVoice,
-            onToggleMinimize = onToggleVoiceMinimize
-        )
-        return
+    val voiceActive = voiceState.isListening || voiceState.isProcessing
+    val showUndo = proactiveUndo != null && prefs.proactiveUndo
+    val showShot = !showUndo && recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
+    val showSuggestions = !showUndo && !showShot && suggestions.isNotEmpty() &&
+        (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
+    // 0 = quick bar, 1 = undo / screenshot chip, 2 = Gboard-style suggestion cells
+    val middleKind = when {
+        showUndo || showShot -> 1
+        showSuggestions -> 2
+        else -> 0
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        // Left 4-square Tools Hub button
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(kbColors.modifierSurface)
-                .clickable(onClick = onOpenToolsHub),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (prefs.incognitoMode) Icons.Rounded.VisibilityOff else Icons.Rounded.GridView,
-                contentDescription = stringResource(R.string.cd_tools_hub),
-                tint = kbColors.modifierText,
-                modifier = Modifier.size(20.dp)
+    AnimatedContent(
+        targetState = voiceActive,
+        transitionSpec = {
+            fadeIn(tween(200, delayMillis = 40, easing = FastOutSlowInEasing)) togetherWith
+                fadeOut(tween(120, easing = FastOutSlowInEasing))
+        },
+        label = "stripVoiceSwitch"
+    ) { voice ->
+        if (voice) {
+            VoiceToolbarRow(
+                prefs = prefs,
+                voiceState = voiceState,
+                onFinishVoice = onFinishVoice,
+                onCancelVoice = onCancelVoice,
+                onToggleMinimize = onToggleVoiceMinimize
             )
-        }
-
-        val hasScrollableChips = (proactiveUndo != null && prefs.proactiveUndo) ||
-            (recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping) ||
-            (isTyping && suggestions.isNotEmpty()) ||
-            prefs.incognitoMode
-
-        if (hasScrollableChips && (isTyping || proactiveUndo != null || recentScreenshot != null)) {
+        } else {
             Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (proactiveUndo != null && prefs.proactiveUndo) {
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = kbColors.actionSurface.copy(alpha = 0.22f),
-                        modifier = Modifier.clickable(onClick = onTriggerUndo)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                // Left: flat tools-hub button (Gboard style)
+                FlatStripButton(
+                    icon = if (prefs.incognitoMode) Icons.Rounded.VisibilityOff else Icons.Rounded.GridView,
+                    contentDescription = stringResource(R.string.cd_tools_hub),
+                    onClick = onOpenToolsHub
+                )
+
+                AnimatedContent(
+                    targetState = middleKind,
+                    modifier = Modifier.weight(1f),
+                    transitionSpec = {
+                        fadeIn(tween(180, delayMillis = 30, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(tween(110, easing = FastOutSlowInEasing))
+                    },
+                    label = "stripMiddle"
+                ) { kind ->
+                    when (kind) {
+                        2 -> SuggestionCells(
+                            suggestions = suggestions.take(3),
+                            onSelect = onSelectSuggestion
+                        )
+                        1 -> Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.Undo,
-                                contentDescription = stringResource(R.string.btn_undo),
-                                tint = kbColors.actionText,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = proactiveUndo.label,
-                                color = kbColors.keyText,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = null,
-                                tint = kbColors.keyHintText,
-                                modifier = Modifier
-                                    .size(15.dp)
-                                    .clickable(onClick = onDismissUndo)
-                            )
+                            if (proactiveUndo != null && showUndo) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = kbColors.actionSurface.copy(alpha = 0.22f),
+                                    modifier = Modifier.clickable(onClick = onTriggerUndo)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.Undo,
+                                            contentDescription = stringResource(R.string.btn_undo),
+                                            tint = kbColors.actionText,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = proactiveUndo.label,
+                                            color = kbColors.keyText,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = null,
+                                            tint = kbColors.keyHintText,
+                                            modifier = Modifier
+                                                .size(15.dp)
+                                                .clickable(onClick = onDismissUndo)
+                                        )
+                                    }
+                                }
+                            } else if (recentScreenshot != null && showShot) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = kbColors.stripChipSurface,
+                                    modifier = Modifier.clickable { onTapScreenshotChip(recentScreenshot) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Screenshot,
+                                            contentDescription = null,
+                                            tint = kbColors.keyText,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = if (de) "Screenshot-Text" else "Scan screenshot",
+                                            color = kbColors.stripChipText,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
                         }
-                    }
-                } else if (recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping) {
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = kbColors.stripChipSurface,
-                        modifier = Modifier.clickable { onTapScreenshotChip(recentScreenshot) }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Screenshot,
-                                contentDescription = null,
-                                tint = kbColors.keyText,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = if (de) "Screenshot-Text" else "Scan screenshot",
-                                color = kbColors.stripChipText,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1
-                            )
-                        }
+                        else -> QuickBarRow(
+                            prefs = prefs,
+                            de = de,
+                            onQuickAction = onQuickAction,
+                            onLongPressQuickBar = onLongPressQuickBar,
+                            onHaptic = {
+                                if (prefs.hapticFeedback) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                }
+                            }
+                        )
                     }
                 }
 
-                if (suggestions.isNotEmpty() && (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })) {
-                    if (prefs.aiWritingToolsEnabled && QuickBarAction.WRITING_TOOLS in prefs.quickBarActions) {
-                        QuickIconPill(
-                            icon = Icons.Rounded.AutoAwesome,
-                            contentDescription = stringResource(R.string.cd_writing_tools),
-                            highlighted = true,
-                            onClick = { onQuickAction(QuickBarAction.WRITING_TOOLS) },
-                            onLongClick = {
-                                if (prefs.hapticFeedback) {
-                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                }
-                                onLongPressQuickBar()
-                            }
-                        )
-                    }
-                    suggestions.forEach { chip ->
-                        val isEmphasized = chip.isCorrection || chip.isGrammarFix || chip.isShortcut || chip.isMath
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (isEmphasized) {
-                                kbColors.actionSurface.copy(alpha = 0.25f)
-                            } else {
-                                kbColors.stripChipSurface
-                            },
-                            modifier = Modifier.clickable { onSelectSuggestion(chip) }
-                        ) {
-                            val label = when {
-                                chip.isShortcut -> "⚡ ${chip.text}"
-                                chip.isMath -> "🧮 ${chip.text}"
-                                else -> chip.text
-                            }
-                            Text(
-                                text = label,
-                                color = kbColors.stripChipText,
-                                fontSize = 14.sp,
-                                fontWeight = if (isEmphasized) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                }
+                // Right: flat mic button
+                FlatStripButton(
+                    icon = Icons.Rounded.Mic,
+                    contentDescription = stringResource(R.string.cd_voice_mic),
+                    onClick = onStartVoice
+                )
             }
-        } else {
-            val pinned = prefs.quickBarActions
-            if (pinned.isEmpty()) {
+        }
+    }
+}
+
+@Composable
+private fun FlatStripButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = kbColors.modifierText,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+/** Gboard-style: up to three equal-width text cells separated by thin dividers. */
+@Composable
+private fun SuggestionCells(
+    suggestions: List<SuggestionChip>,
+    onSelect: (SuggestionChip) -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        suggestions.forEachIndexed { index, chip ->
+            if (index > 0) {
                 Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = kbColors.modifierSurface.copy(alpha = 0.45f),
-                        modifier = Modifier.clickable(onClick = onLongPressQuickBar)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Tune,
-                                contentDescription = null,
-                                tint = kbColors.modifierText,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = if (de) "Leiste anpassen" else "Customize bar",
-                                color = kbColors.modifierText,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            } else if (pinned.size <= 5) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    pinned.forEach { action ->
-                        QuickIconPill(
-                            icon = action.icon(),
-                            contentDescription = action.title(de),
-                            highlighted = action.isHighlighted(prefs),
-                            onClick = { onQuickAction(action) },
-                            onLongClick = {
-                                if (prefs.hapticFeedback) {
-                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                }
-                                onLongPressQuickBar()
-                            }
-                        )
-                    }
-                }
-            } else {
-                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        .width(1.dp)
+                        .height(22.dp)
+                        .background(kbColors.keyBorder)
+                )
+            }
+            val isEmphasized = chip.isCorrection || chip.isGrammarFix || chip.isShortcut || chip.isMath
+            val label = when {
+                chip.isShortcut -> "⚡ ${chip.text}"
+                chip.isMath -> "🧮 ${chip.text}"
+                else -> chip.text
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onSelect(chip) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    color = kbColors.stripChipText,
+                    fontSize = 16.sp,
+                    fontWeight = if (isEmphasized) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickBarRow(
+    prefs: TapwingPrefs,
+    de: Boolean,
+    onQuickAction: (QuickBarAction) -> Unit,
+    onLongPressQuickBar: () -> Unit,
+    onHaptic: () -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    val pinned = prefs.quickBarActions
+    if (pinned.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = kbColors.modifierSurface.copy(alpha = 0.45f),
+                modifier = Modifier.clickable(onClick = onLongPressQuickBar)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    pinned.forEach { action ->
-                        QuickIconPill(
-                            icon = action.icon(),
-                            contentDescription = action.title(de),
-                            highlighted = action.isHighlighted(prefs),
-                            onClick = { onQuickAction(action) },
-                            onLongClick = {
-                                if (prefs.hapticFeedback) {
-                                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                }
-                                onLongPressQuickBar()
-                            }
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Rounded.Tune,
+                        contentDescription = null,
+                        tint = kbColors.modifierText,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (de) "Leiste anpassen" else "Customize bar",
+                        color = kbColors.modifierText,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
-
-        // Right circular Mic button
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(kbColors.modifierSurface)
-                .clickable(onClick = onStartVoice),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Mic,
-                contentDescription = stringResource(R.string.cd_voice_mic),
-                tint = kbColors.modifierText,
-                modifier = Modifier.size(20.dp)
+        return
+    }
+    val rowModifier = if (pinned.size <= 5) {
+        Modifier.fillMaxWidth()
+    } else {
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+    }
+    Row(
+        modifier = rowModifier,
+        horizontalArrangement = if (pinned.size <= 5) Arrangement.SpaceEvenly else Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        pinned.forEach { action ->
+            QuickIconPill(
+                icon = action.icon(),
+                contentDescription = action.title(de),
+                highlighted = action.isHighlighted(prefs),
+                onClick = { onQuickAction(action) },
+                onLongClick = {
+                    onHaptic()
+                    onLongPressQuickBar()
+                }
             )
         }
     }
@@ -355,7 +398,7 @@ private fun VoiceToolbarRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(50.dp)
+            .height(48.dp)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -163,7 +164,7 @@ fun ToolsHubPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(278.dp)
+            .fillMaxHeight()
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
         Row(
@@ -421,7 +422,7 @@ fun TextEditPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(268.dp)
+            .fillMaxHeight()
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -590,7 +591,7 @@ fun QuickSearchPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(250.dp)
+            .fillMaxHeight()
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -667,7 +668,7 @@ fun WritingToolsPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(266.dp)
+            .fillMaxHeight()
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -987,7 +988,7 @@ fun ClipboardPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp)
+            .fillMaxHeight()
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
         Row(
@@ -1098,7 +1099,7 @@ fun EmojiPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp)
+            .fillMaxHeight()
             .padding(horizontal = 8.dp, vertical = 4.dp)
     ) {
         Row(
@@ -1190,7 +1191,7 @@ fun QuickBarCustomizePanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(292.dp)
+            .fillMaxHeight()
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {

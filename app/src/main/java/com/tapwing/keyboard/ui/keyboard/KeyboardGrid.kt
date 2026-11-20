@@ -42,7 +42,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,6 +61,17 @@ import androidx.compose.ui.unit.sp
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.runtime.mutableFloatStateOf
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -88,9 +98,18 @@ fun KeyboardGrid(
         )
     }
 
-    var activeAlternates by remember { mutableStateOf<List<String>>(emptyList()) }
-    var activeAlternateOrigin by remember { mutableStateOf<KeySpec?>(null) }
+    var altPopup by remember { mutableStateOf<AlternatePopup?>(null) }
+    var lastAltPopup by remember { mutableStateOf<AlternatePopup?>(null) }
     var previewChar by remember { mutableStateOf<String?>(null) }
+    var gridLeftRoot by remember { mutableFloatStateOf(0f) }
+    var gridWidthPx by remember { mutableFloatStateOf(0f) }
+    val view = LocalView.current
+    val density = LocalDensity.current
+    val itemWidthPx = with(density) { 44.dp.toPx() }
+    val edgePx = with(density) { 6.dp.toPx() }
+    val deadZonePx = with(density) { 14.dp.toPx() }
+    val popupRaisePx = with(density) { 48.dp.roundToPx() }
+    if (altPopup != null) lastAltPopup = altPopup
 
     // Continuous dynamic height scaling (75%..135%) applied smoothly on top of keyboardHeight preset
     val baseDp = if (prefs.showNumberRow) 46f else prefs.keyboardHeight.rowHeightDp.toFloat()
@@ -109,80 +128,20 @@ fun KeyboardGrid(
             )
         }
 
-        Column(
+        Box(
             modifier = Modifier
                 .weight(1f)
+                .onGloballyPositioned {
+                    gridLeftRoot = it.positionInRoot().x
+                    gridWidthPx = it.size.width.toFloat()
+                }
+        ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
                 .padding(horizontal = 5.dp, vertical = 3.dp),
             verticalArrangement = Arrangement.spacedBy(rowGap)
         ) {
-            AnimatedVisibility(
-                visible = previewChar != null && prefs.appleModeEnabled && activeAlternates.isEmpty(),
-                enter = fadeIn() + scaleIn(initialScale = 0.85f),
-                exit = fadeOut() + scaleOut(targetScale = 0.85f)
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = kbColors.cardSurface,
-                        border = BorderStroke(0.8.dp, kbColors.keyGlassHighlight),
-                        shadowElevation = 8.dp
-                    ) {
-                        Text(
-                            text = previewChar.orEmpty(),
-                            color = kbColors.keyText,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-
-            if (activeAlternates.isNotEmpty() && activeAlternateOrigin != null) {
-                Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = kbColors.cardSurface,
-                    border = if (kbColors.appleLiquidGlass) {
-                        BorderStroke(0.8.dp, kbColors.keyGlassHighlight)
-                    } else null,
-                    shadowElevation = 8.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        activeAlternates.forEach { alt ->
-                            val casedAlt = applyShiftCase(alt, shiftState)
-                            Surface(
-                                shape = CircleShape,
-                                color = kbColors.stripChipSurface,
-                                modifier = Modifier.clickable {
-                                    onKeyPress(activeAlternateOrigin!!, casedAlt)
-                                    activeAlternates = emptyList()
-                                    activeAlternateOrigin = null
-                                }
-                            ) {
-                                Text(
-                                    text = casedAlt,
-                                    color = kbColors.keyText,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
             rows.forEachIndexed { rowIndex, row ->
                 val isIndentedAlphaRow = row.size == 9 && row.first().type == KeyActionType.CHAR
                 Row(
@@ -207,21 +166,64 @@ fun KeyboardGrid(
                                 } else null
                             },
                             onPress = { resolvedOutput ->
-                                activeAlternates = emptyList()
-                                activeAlternateOrigin = null
+                                altPopup = null
                                 onKeyPress(key, resolvedOutput)
                             },
-                            onLongPress = {
+                            onLongPress = { centerX ->
                                 when {
                                     key.type == KeyActionType.SPACE -> onSwitchLanguage()
                                     key.alternates.size == 1 -> {
-                                        // Instant 1-symbol long-press input (matching PixelBoard!)
+                                        // Instant 1-symbol long-press input (matching Gboard)
                                         onKeyPress(key, applyShiftCase(key.alternates.first(), shiftState))
                                     }
                                     key.alternates.size > 1 -> {
-                                        activeAlternates = key.alternates
-                                        activeAlternateOrigin = key
+                                        // Letters (ö, é, ß …) first, so holding a key selects the umlaut right away.
+                                        val sorted = key.alternates.sortedBy { alt ->
+                                            if (alt.firstOrNull()?.isLetter() == true) 0 else 1
+                                        }
+                                        val isRightHalf = centerX > gridLeftRoot + gridWidthPx * 0.55f
+                                        val items = if (isRightHalf) sorted.reversed() else sorted
+                                        val defaultIndex = if (isRightHalf) items.lastIndex else 0
+                                        val total = items.size * itemWidthPx
+                                        val minLeft = gridLeftRoot + edgePx
+                                        val maxLeft = (gridLeftRoot + gridWidthPx - total - edgePx).coerceAtLeast(minLeft)
+                                        val rawLeft = if (isRightHalf) {
+                                            centerX - total + itemWidthPx / 2f
+                                        } else {
+                                            centerX - itemWidthPx / 2f
+                                        }
+                                        val left = rawLeft.coerceIn(minLeft, maxLeft)
+                                        altPopup = AlternatePopup(
+                                            items = items,
+                                            origin = key,
+                                            selected = defaultIndex,
+                                            leftRootPx = left,
+                                            startXPx = centerX
+                                        )
                                     }
+                                }
+                            },
+                            onAlternateDrag = { x ->
+                                val p = altPopup
+                                if (p != null) {
+                                    val idx = if (kotlin.math.abs(x - p.startXPx) < deadZonePx) {
+                                        p.selected
+                                    } else {
+                                        ((x - p.leftRootPx) / itemWidthPx).toInt().coerceIn(0, p.items.lastIndex)
+                                    }
+                                    if (idx != p.selected) {
+                                        if (prefs.hapticFeedback) {
+                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                        }
+                                        altPopup = p.copy(selected = idx)
+                                    }
+                                }
+                            },
+                            onAlternateRelease = {
+                                val p = altPopup
+                                altPopup = null
+                                if (p != null) {
+                                    onKeyPress(p.origin, applyShiftCase(p.items[p.selected], shiftState))
                                 }
                             },
                             onCursorMoveSteps = onCursorMoveSteps,
@@ -230,6 +232,77 @@ fun KeyboardGrid(
                     }
                 }
             }
+        }
+
+        androidx.compose.animation.AnimatedVisibility(
+            visible = altPopup != null,
+            enter = fadeIn(tween(110)) + scaleIn(initialScale = 0.92f, animationSpec = tween(140, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(90)),
+            modifier = Modifier.offset {
+                IntOffset(
+                    ((lastAltPopup?.leftRootPx ?: 0f) - gridLeftRoot).roundToInt(),
+                    -popupRaisePx
+                )
+            }
+        ) {
+            lastAltPopup?.let { pop ->
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = kbColors.cardAltSurface,
+                    shadowElevation = 10.dp
+                ) {
+                    Row(modifier = Modifier.padding(4.dp)) {
+                        pop.items.forEachIndexed { i, alt ->
+                            val sel = i == pop.selected
+                            val bg by animateColorAsState(
+                                if (sel) kbColors.actionSurface else Color.Transparent,
+                                animationSpec = tween(110),
+                                label = "altItemBg"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .width(44.dp)
+                                    .height(40.dp)
+                                    .clip(CircleShape)
+                                    .background(bg),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = applyShiftCase(alt, shiftState),
+                                    color = if (sel) kbColors.actionText else kbColors.keyText,
+                                    fontSize = 20.sp,
+                                    fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        androidx.compose.animation.AnimatedVisibility(
+            visible = previewChar != null && prefs.appleModeEnabled && altPopup == null,
+            enter = fadeIn(tween(90)) + scaleIn(initialScale = 0.85f, animationSpec = tween(120)),
+            exit = fadeOut(tween(90)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = (-44).dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = kbColors.cardSurface,
+                border = BorderStroke(0.8.dp, kbColors.keyGlassHighlight),
+                shadowElevation = 8.dp
+            ) {
+                Text(
+                    text = previewChar.orEmpty(),
+                    color = kbColors.keyText,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+        }
         }
 
         if (prefs.oneHandedMode == OneHandedMode.LEFT) {
@@ -296,7 +369,9 @@ private fun ExpressiveKeyCap(
     imeActionLabel: KeyActionLabel,
     onPressStateChanged: (Boolean) -> Unit,
     onPress: (String) -> Unit,
-    onLongPress: () -> Unit,
+    onLongPress: (Float) -> Unit,
+    onAlternateDrag: (Float) -> Unit,
+    onAlternateRelease: () -> Unit,
     onCursorMoveSteps: (Int) -> Unit,
     onSwipeBackspaceWord: () -> Unit
 ) {
@@ -304,12 +379,14 @@ private fun ExpressiveKeyCap(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     var pressed by remember { mutableStateOf(false) }
+    var keyLeftRoot by remember { mutableFloatStateOf(0f) }
+    var keyWidthPx by remember { mutableFloatStateOf(0f) }
 
     val pressScale by animateFloatAsState(
-        targetValue = if (pressed) (if (kbColors.appleLiquidGlass) 0.91f else 0.96f) else 1f,
+        targetValue = if (pressed) (if (kbColors.appleLiquidGlass) 0.95f else 0.97f) else 1f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessHigh
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
         ),
         label = "keyPressScale"
     )
@@ -332,7 +409,7 @@ private fun ExpressiveKeyCap(
         RoundedCornerShape(7.dp)
     }
 
-    val bgColor = when {
+    val bgTarget = when {
         isActionKey -> kbColors.actionSurface
         key.type == KeyActionType.SHIFT && shiftState != ShiftState.OFF -> kbColors.actionSurface.copy(alpha = 0.85f)
         pressed -> kbColors.keyPressed
@@ -340,6 +417,12 @@ private fun ExpressiveKeyCap(
         isModifierKey -> kbColors.modifierSurface
         else -> kbColors.keySurface
     }
+
+    val bgColor by animateColorAsState(
+        targetValue = bgTarget,
+        animationSpec = tween(if (pressed) 60 else 220, easing = FastOutSlowInEasing),
+        label = "keyBg"
+    )
 
     val fgColor = when {
         isActionKey -> kbColors.actionText
@@ -395,7 +478,7 @@ private fun ExpressiveKeyCap(
                     }
                     val longJob = scope.launch {
                         delay(prefs.longPressDelayMs.toLong() + 140L)
-                        onLongPress()
+                        onLongPress(keyLeftRoot + keyWidthPx / 2f)
                     }
                     val startTime = System.currentTimeMillis()
                     while (true) {
@@ -466,17 +549,28 @@ private fun ExpressiveKeyCap(
                     if (key.alternates.isNotEmpty()) {
                         delay(prefs.longPressDelayMs.toLong())
                         triggeredLong = true
-                        onLongPress()
+                        onPressStateChanged(false)
+                        if (prefs.hapticFeedback) {
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        }
+                        onLongPress(keyLeftRoot + keyWidthPx / 2f)
                     }
                 }
                 while (true) {
                     val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull()
+                    if (triggeredLong && change != null && change.pressed) {
+                        onAlternateDrag(keyLeftRoot + change.position.x)
+                        change.consume()
+                    }
                     if (event.changes.all { !it.pressed }) break
                 }
                 holdJob.cancel()
                 pressed = false
                 onPressStateChanged(false)
-                if (!triggeredLong) {
+                if (triggeredLong) {
+                    onAlternateRelease()
+                } else {
                     val output = if (key.type == KeyActionType.CHAR) {
                         applyShiftCase(key.output, shiftState)
                     } else {
@@ -496,6 +590,10 @@ private fun ExpressiveKeyCap(
 
     Surface(
         modifier = interactionModifier
+            .onGloballyPositioned {
+                keyLeftRoot = it.positionInRoot().x
+                keyWidthPx = it.size.width.toFloat()
+            }
             .graphicsLayer {
                 scaleX = pressScale
                 scaleY = pressScale
@@ -603,3 +701,11 @@ private fun applyShiftCase(raw: String, shiftState: ShiftState): String {
     if (shiftState == ShiftState.OFF) return raw
     return if (raw == "ß") "ẞ" else raw.uppercase()
 }
+
+private data class AlternatePopup(
+    val items: List<String>,
+    val origin: KeySpec,
+    val selected: Int,
+    val leftRootPx: Float,
+    val startXPx: Float
+)
