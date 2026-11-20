@@ -1,7 +1,9 @@
 package com.tapwing.keyboard.ai
 
+import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 import com.tapwing.keyboard.dictionary.SuggestionEngine
+import com.tapwing.keyboard.voice.NaturalVoiceCleaner
 
 enum class WritingAction {
     PROOFREAD,
@@ -9,12 +11,15 @@ enum class WritingAction {
     CASUAL,
     CONCISE,
     EMOTIVE,
-    REPHRASE
+    REPHRASE,
+    SUMMARIZE,
+    TRANSLATE,
+    VOICE_CLEANUP
 }
 
 /**
- * Pure Kotlin, offline rule-based writing assistant for German and English.
- * Guarantees instant Writing Tools functionality even without network or external AI keys.
+ * Pure Kotlin, offline rule-based writing assistant supporting multi-language proofreading
+ * and German/English tone transforms when no local LLM or cloud key is active.
  */
 object LocalWritingAssistant {
 
@@ -26,16 +31,25 @@ object LocalWritingAssistant {
     ): String {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) return ""
-        val de = locale.lowercase().startsWith("de")
-        val lang = if (de) "de" else "en"
+        val base = KeyboardLocales.baseLang(locale)
+        val de = base == "de"
 
         return when (action) {
-            WritingAction.PROOFREAD -> proofread(trimmed, lang, dictionaryStore)
-            WritingAction.PROFESSIONAL -> makeProfessional(proofread(trimmed, lang, dictionaryStore), de)
-            WritingAction.CASUAL -> makeCasual(proofread(trimmed, lang, dictionaryStore), de)
-            WritingAction.CONCISE -> makeConcise(proofread(trimmed, lang, dictionaryStore), de)
-            WritingAction.EMOTIVE -> makeEmotive(proofread(trimmed, lang, dictionaryStore), de)
-            WritingAction.REPHRASE -> rephrase(proofread(trimmed, lang, dictionaryStore), de)
+            WritingAction.PROOFREAD -> proofread(trimmed, locale, dictionaryStore)
+            WritingAction.PROFESSIONAL -> makeProfessional(proofread(trimmed, locale, dictionaryStore), de)
+            WritingAction.CASUAL -> makeCasual(proofread(trimmed, locale, dictionaryStore), de)
+            WritingAction.CONCISE -> makeConcise(proofread(trimmed, locale, dictionaryStore), de)
+            WritingAction.EMOTIVE -> makeEmotive(proofread(trimmed, locale, dictionaryStore), de)
+            WritingAction.REPHRASE -> rephrase(proofread(trimmed, locale, dictionaryStore), de)
+            WritingAction.SUMMARIZE -> summarize(proofread(trimmed, locale, dictionaryStore))
+            WritingAction.TRANSLATE -> proofread(trimmed, locale, dictionaryStore)
+            WritingAction.VOICE_CLEANUP -> NaturalVoiceCleaner.clean(
+                rawTranscript = trimmed,
+                locale = locale,
+                removeFillers = true,
+                autoPunctuate = true,
+                dictionaryStore = dictionaryStore
+            )
         }
     }
 
@@ -52,13 +66,17 @@ object LocalWritingAssistant {
         // Fix consecutive repeated words ("the the" -> "the")
         text = text.replace(Regex("""\b(\p{L}{2,})\s+\1\b""", RegexOption.IGNORE_CASE), "$1")
 
-        // Fix known typos & apply custom dictionary casing token-by-token while keeping punctuation
+        // Fix known typos & apply custom/mid-sentence casing safely without forcing sentence-start caps
         val wordRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
         text = wordRegex.replace(text) { match ->
             val word = match.value
-            val customCanonical = dictionaryStore?.allKnownVocabularyWords()
-                ?.firstOrNull { it.equals(word, ignoreCase = true) }
-            customCanonical ?: SuggestionEngine.autoCorrectionFor(word, locale, dictionaryStore) ?: word
+            val startIdx = match.range.first
+            val prefix = text.substring(0, startIdx)
+            val atStart = prefix.isBlank() || prefix.endsWith("\n") || Regex("""[.!?]\s+$""").containsMatchIn(prefix)
+            val customCanonical = dictionaryStore?.canonicalMidSentenceCasingFor(word, locale)
+            customCanonical
+                ?: SuggestionEngine.autoCorrectionFor(word, locale, dictionaryStore, atSentenceStart = atStart)
+                ?: word
         }
 
         text = capitalizeSentences(text)
@@ -66,6 +84,12 @@ object LocalWritingAssistant {
             text += "."
         }
         return text
+    }
+
+    private fun summarize(text: String): String {
+        val sentences = text.split(Regex("""(?<=[.!?])\s+""")).map { it.trim() }.filter { it.isNotEmpty() }
+        if (sentences.size <= 2) return text
+        return sentences.take(2).joinToString(" ") { "• $it" }
     }
 
     private fun makeProfessional(text: String, de: Boolean): String {

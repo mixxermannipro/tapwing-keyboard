@@ -3,6 +3,7 @@ package com.tapwing.keyboard.dictionary
 import com.tapwing.keyboard.ai.LocalWritingAssistant
 import com.tapwing.keyboard.ai.WritingAction
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,14 +15,11 @@ class AdaptiveDictionaryTest {
         val store = AdaptiveDictionaryStore(storageFile = null)
         store.importText("standart\nTapwingFlow,150\nbrb => Bin gleich zurück")
 
-        // Custom word 'standart' must NOT be overridden by stock German typo map ('Standard')
         assertNull(SuggestionEngine.autoCorrectionFor("standart", "de", store))
 
-        // Prefix suggestions must prioritize imported high-weight word
         val chips = SuggestionEngine.suggestionsFor("Tapw", "de", dictionaryStore = store)
         assertEquals("TapwingFlow", chips.first().text)
 
-        // Shortcut lookup works cleanly
         val sc = SuggestionEngine.suggestionsFor("brb", "de", dictionaryStore = store)
         assertTrue(sc.any { it.isShortcut && it.text == "Bin gleich zurück" })
     }
@@ -39,13 +37,97 @@ class AdaptiveDictionaryTest {
         val stripSuggestions = SuggestionEngine.suggestionsFor("guten ", "de", dictionaryStore = store)
         assertEquals("Kaffee", stripSuggestions.first().text)
 
-        // Rejecting correction learns user's intended word and stops fighting them
         store.recordCorrectionRejected("nciht", learningEnabled = true, incognito = false)
         assertNull(SuggestionEngine.autoCorrectionFor("nciht", "de", store))
 
-        // Writing Tools proofread preserves custom word casing
         store.addCustomWord("TapwingAI")
         val proof = LocalWritingAssistant.transform("ich nutze tapwingai heute", WritingAction.PROOFREAD, "de", store)
         assertTrue(proof.contains("TapwingAI"))
+    }
+
+    @Test
+    fun sentenceStartCapitalizationNeverForcesMidSentenceUnd() {
+        val store = AdaptiveDictionaryStore(storageFile = null)
+
+        // User repeatedly starts sentences with "Und"
+        repeat(10) {
+            store.recordTypedWord(
+                word = "Und",
+                previousWord = null,
+                learningEnabled = true,
+                incognito = false,
+                wasSentenceStart = true,
+                locale = "de"
+            )
+        }
+
+        // Mid-sentence "und" MUST NOT be autocorrected to "Und"
+        assertNull(SuggestionEngine.autoCorrectionFor("und", "de", store, atSentenceStart = false))
+
+        // Proofreading mid-sentence "ich und du" keeps lowercase "und"
+        val proof = LocalWritingAssistant.transform("ich und du", WritingAction.PROOFREAD, "de", store)
+        assertEquals("Ich und du.", proof)
+    }
+
+    @Test
+    fun trigramAndContextPrefixRankingImproveOverTime() {
+        val store = AdaptiveDictionaryStore(storageFile = null)
+
+        repeat(3) {
+            store.recordTypedWord(
+                word = "Büro",
+                previousWord = "ins",
+                previousTwoWord = "fahre",
+                learningEnabled = true,
+                incognito = false,
+                wasSentenceStart = false,
+                locale = "de"
+            )
+        }
+
+        val next = store.predictNextWords(previousWord = "ins", previousTwoWord = "fahre")
+        assertEquals("Büro", next.first())
+
+        val strip = SuggestionEngine.suggestionsFor("ich fahre ins ", "de", dictionaryStore = store)
+        assertEquals("Büro", strip.first().text)
+
+        assertNotNull(store.lookupShortcut("/woche", "de"))
+        assertNotNull(store.lookupShortcut("/jahr", "en"))
+    }
+
+    @Test
+    fun perAppContextLearnsWordsAndWritingTonesSeparately() {
+        val store = AdaptiveDictionaryStore(storageFile = null)
+
+        // Teach "Quartalsbericht" specifically for Gmail and "Brudi" for WhatsApp
+        repeat(4) {
+            store.recordTypedWord(
+                word = "Quartalsbericht",
+                previousWord = null,
+                learningEnabled = true,
+                incognito = false,
+                locale = "de",
+                appPackage = "com.google.android.gm"
+            )
+            store.recordTypedWord(
+                word = "Quartalsplan",
+                previousWord = null,
+                learningEnabled = true,
+                incognito = false,
+                locale = "de",
+                appPackage = "com.slack"
+            )
+        }
+
+        val gmCandidates = store.rankedPrefixCandidates("Quar", appPackage = "com.google.android.gm")
+        val slackCandidates = store.rankedPrefixCandidates("Quar", appPackage = "com.slack")
+        assertEquals("Quartalsbericht", gmCandidates.first())
+        assertEquals("Quartalsplan", slackCandidates.first())
+
+        assertEquals(WritingAction.CASUAL, store.preferredToneForApp("com.whatsapp"))
+        assertEquals(WritingAction.PROFESSIONAL, store.preferredToneForApp("com.google.android.gm"))
+
+        store.recordAppWritingAction("com.whatsapp", WritingAction.CONCISE, learningEnabled = true, incognito = false)
+        assertEquals(WritingAction.CONCISE, store.preferredToneForApp("com.whatsapp"))
     }
 }

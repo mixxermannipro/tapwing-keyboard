@@ -1,7 +1,9 @@
 package com.tapwing.keyboard.dictionary
 
+import com.tapwing.keyboard.data.KeyboardLocales
 import java.math.BigDecimal
 import java.math.RoundingMode
+import kotlin.math.pow
 
 data class MathSuggestion(
     val formattedResult: String,
@@ -11,11 +13,11 @@ data class MathSuggestion(
 
 /**
  * Pure Kotlin safe recursive-descent arithmetic evaluator for the keyboard suggestion strip.
- * Evaluates trailing math expressions such as "24*7", "19,5+4,5=", or "(12+8)/4=" into a 1-tap chip.
+ * Supports +, -, *, /, ^, and percentage modifiers (e.g. "24*7", "150+19%=", "2^8=", "(12+8)/4=").
  */
 object InlineMathEvaluator {
 
-    private val trailingMathRegex = Regex("""([0-9(][0-9.,+\-*/×÷()\s]*[+\-*/×÷][0-9.,+\-*/×÷()\s]*)=?$""")
+    private val trailingMathRegex = Regex("""([0-9(][0-9.,+\-*/×÷^%()\s]*[+\-*/×÷^][0-9.,+\-*/×÷^%()\s]*)=?$""")
 
     fun evaluateTrailingExpression(textBeforeCursor: String, locale: String): MathSuggestion? {
         if (textBeforeCursor.isEmpty()) return null
@@ -30,7 +32,7 @@ object InlineMathEvaluator {
             .replace('÷', '/')
             .replace(',', '.')
 
-        if (!normalized.any { it in charArrayOf('+', '-', '*', '/') }) return null
+        if (!normalized.any { it in charArrayOf('+', '-', '*', '/', '^') }) return null
 
         val value = runCatching { Parser(normalized).parse() }.getOrNull() ?: return null
         if (!value.isFinite()) return null
@@ -46,7 +48,8 @@ object InlineMathEvaluator {
     private fun formatNumber(value: Double, locale: String): String {
         val bd = BigDecimal.valueOf(value).setScale(6, RoundingMode.HALF_UP).stripTrailingZeros()
         val raw = bd.toPlainString()
-        return if (locale.startsWith("de")) raw.replace('.', ',') else raw
+        val usesComma = KeyboardLocales.specFor(locale).usesCommaDecimal
+        return if (usesComma) raw.replace('.', ',') else raw
     }
 
     private class Parser(private val s: String) {
@@ -62,27 +65,57 @@ object InlineMathEvaluator {
             var x = parseTerm()
             while (pos < s.length) {
                 when (s[pos]) {
-                    '+' -> { pos++; x += parseTerm() }
-                    '-' -> { pos++; x -= parseTerm() }
+                    '+' -> {
+                        pos++
+                        val term = parseTermWithPercentBase(x)
+                        x += term
+                    }
+                    '-' -> {
+                        pos++
+                        val term = parseTermWithPercentBase(x)
+                        x -= term
+                    }
                     else -> return x
                 }
             }
             return x
         }
 
+        private fun parseTermWithPercentBase(base: Double): Double {
+            val startPos = pos
+            val rawTerm = parseTerm()
+            // Check if the term ended with '%' at top level (handled in parsePower/parseFactor as /100.0;
+            // for "+ 19%" or "- 20%" on base, treat x + y% as x + x * (y/100))
+            val slice = s.substring(startPos, pos)
+            if (slice.endsWith("%") && !slice.contains('*') && !slice.contains('/')) {
+                return base * rawTerm
+            }
+            return rawTerm
+        }
+
         private fun parseTerm(): Double {
-            var x = parseFactor()
+            var x = parsePower()
             while (pos < s.length) {
                 when (s[pos]) {
-                    '*' -> { pos++; x *= parseFactor() }
+                    '*' -> { pos++; x *= parsePower() }
                     '/' -> {
                         pos++
-                        val d = parseFactor()
+                        val d = parsePower()
                         if (d == 0.0) throw ArithmeticException("Division by zero")
                         x /= d
                     }
                     else -> return x
                 }
+            }
+            return x
+        }
+
+        private fun parsePower(): Double {
+            var x = parseFactor()
+            if (pos < s.length && s[pos] == '^') {
+                pos++
+                val exp = parsePower()
+                x = x.pow(exp)
             }
             return x
         }
@@ -96,21 +129,27 @@ object InlineMathEvaluator {
                 pos++
                 return -parseFactor()
             }
+            var value: Double
             if (pos < s.length && s[pos] == '(') {
                 pos++
-                val x = parseExpression()
+                value = parseExpression()
                 if (pos >= s.length || s[pos] != ')') {
                     throw IllegalArgumentException("Missing closing paren")
                 }
                 pos++
-                return x
+            } else {
+                val start = pos
+                while (pos < s.length && (s[pos].isDigit() || s[pos] == '.')) {
+                    pos++
+                }
+                if (pos == start) throw IllegalArgumentException("Expected number")
+                value = s.substring(start, pos).toDouble()
             }
-            val start = pos
-            while (pos < s.length && (s[pos].isDigit() || s[pos] == '.')) {
+            while (pos < s.length && s[pos] == '%') {
                 pos++
+                value /= 100.0
             }
-            if (pos == start) throw IllegalArgumentException("Expected number")
-            return s.substring(start, pos).toDouble()
+            return value
         }
     }
 }

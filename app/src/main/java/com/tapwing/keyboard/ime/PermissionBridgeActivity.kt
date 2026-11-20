@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import com.tapwing.keyboard.clipboard.ScreenshotMonitor
 
 /**
  * Translucent helper Activity used by TapwingInputMethodService to request runtime
@@ -34,6 +35,10 @@ class PermissionBridgeActivity : ComponentActivity() {
 
         fun requestRecordAudio(context: Context) {
             launch(context, Manifest.permission.RECORD_AUDIO)
+        }
+
+        fun requestMediaImages(context: Context) {
+            launch(context, ScreenshotMonitor.requiredMediaPermission())
         }
 
         fun launch(context: Context, permission: String) {

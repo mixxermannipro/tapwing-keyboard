@@ -2,6 +2,7 @@ package com.tapwing.keyboard.dictionary
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -28,5 +29,25 @@ class SuggestionEngineTest {
     fun providesPrefixSuggestions() {
         val chips = SuggestionEngine.suggestionsFor("morg", "de", includeEmoji = false)
         assertTrue(chips.any { it.text.equals("morgen", ignoreCase = true) })
+    }
+
+    @Test
+    fun supportsMultilingualTypingAndOtpExtraction() {
+        // Bilingual typing: typing English "teh" while active layout is German still corrects cleanly
+        val corr = SuggestionEngine.autoCorrectionFor("teh", "de", secondaryLocales = listOf("en"))
+        assertEquals("the", corr)
+
+        // Valid English word on German keyboard is not mangled
+        assertNull(SuggestionEngine.autoCorrectionFor("tomorrow", "de", secondaryLocales = listOf("en")))
+
+        // 2FA OTP code extraction
+        assertEquals("482910", SuggestionEngine.extractOtpFromClipboard("Dein Bestätigungscode lautet 482910."))
+        assertNull(SuggestionEngine.extractOtpFromClipboard("Heute ist der 2026 Tag."))
+    }
+
+    @Test
+    fun supportsEmailDomainChips() {
+        val chips = SuggestionEngine.suggestionsFor("max@gm", "de", isEmailField = true)
+        assertTrue(chips.any { it.text == "gmail.com" })
     }
 }

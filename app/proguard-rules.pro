@@ -9,6 +9,11 @@
 -dontwarn com.google.mlkit.**
 -dontwarn androidx.camera.**
 
+# Keep Llamatik native JNI bridges (Whisper & Llama)
+-keep class com.llamatik.library.** { *; }
+-keepclassmembers class com.llamatik.library.platform.GenStream { *; }
+-dontwarn com.llamatik.library.**
+
 # Keep DataStore & Kotlin coroutines metadata
 -keepclassmembers class * {
     @androidx.annotation.Keep <methods>;

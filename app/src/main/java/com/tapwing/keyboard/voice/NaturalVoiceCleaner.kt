@@ -1,6 +1,7 @@
 package com.tapwing.keyboard.voice
 
 import com.tapwing.keyboard.ai.WritingAction
+import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
 
 sealed interface VoiceCommandResult {
@@ -10,28 +11,41 @@ sealed interface VoiceCommandResult {
 }
 
 /**
- * Clean-room natural voice dictation cleanup engine:
+ * Multilingual natural voice dictation cleanup engine:
  * strips hesitation fillers, applies mid-sentence self-corrections,
  * converts spoken punctuation, auto-capitalizes sentences, and detects voice edit commands.
  */
 object NaturalVoiceCleaner {
 
-    private val germanFillers = setOf(
-        "äh", "ähm", "öhm", "öh", "hm", "hmm", "mhm", "ähhh", "halt", "sozusagen"
-    )
-    private val englishFillers = setOf(
-        "um", "uh", "erm", "er", "ah", "hmm", "hm", "uhm"
+    private val fillersByLang = mapOf(
+        "de" to setOf("äh", "ähm", "öhm", "öh", "hm", "hmm", "mhm", "ähhh", "halt", "sozusagen"),
+        "en" to setOf("um", "uh", "erm", "er", "ah", "hmm", "hm", "uhm"),
+        "fr" to setOf("euh", "ben", "bah", "hm", "hmm", "voilà", "genre"),
+        "es" to setOf("eh", "em", "este", "pues", "o sea", "hm", "hmm"),
+        "it" to setOf("ehm", "eh", "allora", "cioè", "tipo", "hm", "hmm"),
+        "pt" to setOf("é", "hm", "hmm", "tipo", "assim", "né"),
+        "nl" to setOf("eh", "uh", "uhm", "zeg maar", "eigenlijk", "hm", "hmm"),
+        "pl" to setOf("yy", "yym", "ee", "hm", "hmm", "no", "znaczy"),
+        "tr" to setOf("şey", "yani", "ıı", "ee", "hm", "hmm")
     )
 
-    private val germanQuestionStarters = setOf(
-        "wer", "wie", "was", "warum", "wieso", "weshalb", "wann", "wo", "wohin",
-        "woher", "welche", "welcher", "welches", "kannst", "können", "hast", "haben",
-        "bist", "seid", "ist", "sind", "darf", "soll", "willst", "möchtest"
-    )
-
-    private val englishQuestionStarters = setOf(
-        "who", "what", "where", "when", "why", "how", "which", "can", "could",
-        "would", "should", "do", "does", "did", "is", "are", "am", "have", "has", "will"
+    private val questionStartersByLang = mapOf(
+        "de" to setOf(
+            "wer", "wie", "was", "warum", "wieso", "weshalb", "wann", "wo", "wohin",
+            "woher", "welche", "welcher", "welches", "kannst", "können", "hast", "haben",
+            "bist", "seid", "ist", "sind", "darf", "soll", "willst", "möchtest"
+        ),
+        "en" to setOf(
+            "who", "what", "where", "when", "why", "how", "which", "can", "could",
+            "would", "should", "do", "does", "did", "is", "are", "am", "have", "has", "will"
+        ),
+        "fr" to setOf("qui", "quoi", "où", "quand", "pourquoi", "comment", "quel", "quelle", "est-ce", "peux", "pouvez"),
+        "es" to setOf("quién", "qué", "dónde", "cuándo", "por qué", "cómo", "cuál", "puedes"),
+        "it" to setOf("chi", "cosa", "dove", "quando", "perché", "come", "quale", "puoi"),
+        "pt" to setOf("quem", "que", "onde", "quando", "por que", "como", "qual", "pode"),
+        "nl" to setOf("wie", "wat", "waar", "wanneer", "waarom", "hoe", "welke", "kun"),
+        "pl" to setOf("kto", "co", "gdzie", "kiedy", "dlaczego", "jak", "czy", "możesz"),
+        "tr" to setOf("kim", "ne", "nerede", "ne zaman", "neden", "nasıl", "hangi")
     )
 
     fun parseCommandOrClean(
@@ -43,7 +57,7 @@ object NaturalVoiceCleaner {
     ): VoiceCommandResult {
         val trimmed = rawTranscript.trim()
         if (trimmed.isEmpty()) return VoiceCommandResult.Text("")
-        val lower = trimmed.lowercase()
+        val lower = trimmed.lowercase().trimEnd('.', '!', '?')
 
         when {
             lower == "lösche das letzte wort" || lower == "letztes wort löschen" ||
@@ -84,46 +98,47 @@ object NaturalVoiceCleaner {
     ): String {
         var text = rawTranscript.trim()
         if (text.isEmpty()) return ""
+        val baseLang = KeyboardLocales.baseLang(locale)
 
-        text = applySelfCorrections(text, locale)
+        text = applySelfCorrections(text, baseLang)
 
         if (removeFillers) {
-            text = stripFillers(text, locale)
+            text = stripFillers(text, baseLang)
         }
 
-        text = replaceSpokenPunctuation(text, locale)
+        text = replaceSpokenPunctuation(text, baseLang)
         text = normalizeWhitespaceAndPunctuation(text)
 
         if (dictionaryStore != null && text.isNotEmpty()) {
-            val vocab = dictionaryStore.allKnownVocabularyWords()
-            if (vocab.isNotEmpty()) {
-                val wordRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
-                text = wordRegex.replace(text) { match ->
-                    vocab.firstOrNull { it.equals(match.value, ignoreCase = true) } ?: match.value
-                }
+            val wordRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
+            text = wordRegex.replace(text) { match ->
+                dictionaryStore.canonicalMidSentenceCasingFor(match.value, locale) ?: match.value
             }
         }
 
         if (autoPunctuate && text.isNotEmpty()) {
             text = capitalizeSentences(text)
-            text = ensureTerminalPunctuation(text, locale)
+            text = ensureTerminalPunctuation(text, baseLang)
         }
 
         return text.trim()
     }
 
-    private fun applySelfCorrections(input: String, locale: String): String {
+    private fun applySelfCorrections(input: String, baseLang: String): String {
         var current = input
-        val triggers = if (locale == "de") {
-            listOf("nein warte", "ich meine", "besser gesagt", "äh ich meine")
-        } else {
-            listOf("wait no", "actually i mean", "i mean", "scratch that", "no wait")
+        val triggers = when (baseLang) {
+            "de" -> listOf("nein warte", "ich meine", "besser gesagt", "äh ich meine")
+            "fr" -> listOf("non attends", "je veux dire", "enfin")
+            "es" -> listOf("no espera", "quiero decir", "mejor dicho")
+            "it" -> listOf("no aspetta", "intendo dire", "anzi")
+            else -> listOf("wait no", "actually i mean", "i mean", "scratch that", "no wait")
         }
 
-        val trailingPunctTokens = if (locale == "de") {
-            setOf("punkt", "komma", "fragezeichen", "ausrufezeichen")
-        } else {
-            setOf("period", "comma", "question", "exclamation")
+        val trailingPunctTokens = when (baseLang) {
+            "de" -> setOf("punkt", "komma", "fragezeichen", "ausrufezeichen")
+            "fr" -> setOf("point", "virgule")
+            "es" -> setOf("punto", "coma")
+            else -> setOf("period", "comma", "question", "exclamation")
         }
 
         for (trigger in triggers) {
@@ -147,8 +162,8 @@ object NaturalVoiceCleaner {
         return current
     }
 
-    private fun stripFillers(input: String, locale: String): String {
-        val fillers = if (locale == "de") germanFillers else englishFillers
+    private fun stripFillers(input: String, baseLang: String): String {
+        val fillers = fillersByLang[baseLang] ?: fillersByLang["en"]!!
         val tokens = input.split(Regex("""\s+"""))
         val kept = tokens.filter { token ->
             val stripped = token.lowercase().trim(',', '.', '!', '?')
@@ -157,10 +172,10 @@ object NaturalVoiceCleaner {
         return kept.joinToString(" ")
     }
 
-    private fun replaceSpokenPunctuation(input: String, locale: String): String {
+    private fun replaceSpokenPunctuation(input: String, baseLang: String): String {
         var text = input
-        val replacements = if (locale == "de") {
-            listOf(
+        val replacements = when (baseLang) {
+            "de" -> listOf(
                 Regex("""\bneue zeile\b""", RegexOption.IGNORE_CASE) to "\n",
                 Regex("""\bneuer absatz\b""", RegexOption.IGNORE_CASE) to "\n\n",
                 Regex("""\bfragezeichen\b""", RegexOption.IGNORE_CASE) to "?",
@@ -170,8 +185,21 @@ object NaturalVoiceCleaner {
                 Regex("""\bkomma\b""", RegexOption.IGNORE_CASE) to ",",
                 Regex("""\bpunkt\b""", RegexOption.IGNORE_CASE) to "."
             )
-        } else {
-            listOf(
+            "fr" -> listOf(
+                Regex("""\bnouveau paragraphe\b""", RegexOption.IGNORE_CASE) to "\n\n",
+                Regex("""\bnouvelle ligne\b""", RegexOption.IGNORE_CASE) to "\n",
+                Regex("""\bpoint d'interrogation\b""", RegexOption.IGNORE_CASE) to "?",
+                Regex("""\bpoint d'exclamation\b""", RegexOption.IGNORE_CASE) to "!",
+                Regex("""\bvirgule\b""", RegexOption.IGNORE_CASE) to ",",
+                Regex("""\bpoint\b""", RegexOption.IGNORE_CASE) to "."
+            )
+            "es" -> listOf(
+                Regex("""\bnuevo párrafo\b""", RegexOption.IGNORE_CASE) to "\n\n",
+                Regex("""\bnueva línea\b""", RegexOption.IGNORE_CASE) to "\n",
+                Regex("""\bcoma\b""", RegexOption.IGNORE_CASE) to ",",
+                Regex("""\bpunto\b""", RegexOption.IGNORE_CASE) to "."
+            )
+            else -> listOf(
                 Regex("""\bnew paragraph\b""", RegexOption.IGNORE_CASE) to "\n\n",
                 Regex("""\bnew line\b""", RegexOption.IGNORE_CASE) to "\n",
                 Regex("""\bquestion mark\b""", RegexOption.IGNORE_CASE) to "?",
@@ -196,7 +224,6 @@ object NaturalVoiceCleaner {
             .replace(Regex(""" *([.,!?:;])"""), "$1")
             .replace(Regex("""([.,!?:;])([^\s\n.,!?:;])"""), "$1 $2")
             .replace(Regex(""" *\n *"""), "\n")
-        // Collapse accidental duplicate punctuation like ".." or "??" except "..."
         text = text.replace(Regex("""([,!?:;])\1+"""), "$1")
         return text.trim()
     }
@@ -218,11 +245,11 @@ object NaturalVoiceCleaner {
         return sb.toString()
     }
 
-    private fun ensureTerminalPunctuation(input: String, locale: String): String {
+    private fun ensureTerminalPunctuation(input: String, baseLang: String): String {
         val last = input.lastOrNull() ?: return input
         if (last in setOf('.', '!', '?', ':', ';', '\n')) return input
         val firstWord = input.trimStart().substringBefore(' ').lowercase().trim(',', '.')
-        val starters = if (locale == "de") germanQuestionStarters else englishQuestionStarters
+        val starters = questionStartersByLang[baseLang] ?: questionStartersByLang["en"]!!
         val suffix = if (firstWord in starters) "?" else "."
         return "$input$suffix"
     }

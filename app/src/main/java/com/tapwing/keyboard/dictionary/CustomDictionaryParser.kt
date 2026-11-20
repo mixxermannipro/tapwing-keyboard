@@ -106,7 +106,7 @@ object CustomDictionaryParser {
                         }
                         entryOut.write(buf, 0, read)
                     }
-                    val parsed = parse(entryOut.toString(Charsets.UTF_8))
+                    val parsed = parse(entryOut.toByteArray().toString(Charsets.UTF_8))
                     parsed.words.forEach { (w, weight) ->
                         mergedWords[w] = maxOf(mergedWords.getOrDefault(w, 0), weight)
                     }

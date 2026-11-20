@@ -2,7 +2,16 @@
 <resources>
     <string name="app_name">Tapwing</string>
     <string name="subtype_de_qwertz">Deutsch (QWERTZ)</string>
-    <string name="subtype_en_qwerty">Englisch (QWERTY)</string>
+    <string name="subtype_de_ch_qwertz">Deutsch Schweiz (QWERTZ)</string>
+    <string name="subtype_en_qwerty">Englisch US (QWERTY)</string>
+    <string name="subtype_en_gb_qwerty">Englisch UK (QWERTY)</string>
+    <string name="subtype_fr_azerty">Französisch (AZERTY)</string>
+    <string name="subtype_es_qwerty">Spanisch (QWERTY)</string>
+    <string name="subtype_it_qwerty">Italienisch (QWERTY)</string>
+    <string name="subtype_pt_qwerty">Portugiesisch (QWERTY)</string>
+    <string name="subtype_nl_qwerty">Niederländisch (QWERTY)</string>
+    <string name="subtype_pl_qwerty">Polnisch (QWERTY)</string>
+    <string name="subtype_tr_qwerty">Türkisch (Q)</string>
     <string name="scan_text_title">Text scannen (OCR)</string>
 
     <!-- Bedienungshilfen & Tasten -->
@@ -11,7 +20,7 @@
     <string name="cd_clipboard">Zwischenablage öffnen</string>
     <string name="cd_scan_text">Text mit Kamera scannen</string>
     <string name="cd_settings">Tapwing-Einstellungen öffnen</string>
-    <string name="cd_voice_mic">Spracheingabe starten</string>
+    <string name="cd_voice_mic">Spracheingabe starten oder stoppen</string>
     <string name="cd_voice_done">Spracheingabe beenden und übernehmen</string>
     <string name="cd_voice_cancel">Spracheingabe abbrechen</string>
     <string name="cd_voice_minimize">Tastatur minimieren oder erweitern</string>
@@ -23,25 +32,70 @@
     <string name="cd_hide_keyboard">Tastatur ausblenden</string>
 
     <!-- Spracheingabe & Schreibhilfe -->
-    <string name="voice_hint_finish">Tippe \u2713 zum Beenden und Anzeigen</string>
-    <string name="voice_listening">Ich höre zu\u2026 sprich einfach natürlich</string>
+    <string name="voice_hint_finish">Sprich frei — tippe ✓ oder Mikrofon zum Stoppen</string>
+    <string name="voice_listening">Ich höre zu… nochmal tippen zum Stoppen</string>
+    <string name="voice_processing_local">Transkribiere &amp; bereinige lokal…</string>
+    <string name="voice_tidying_up">Wird bereinigt…</string>
     <string name="voice_onboarding_title">Sprich einfach natürlich</string>
     <string name="voice_onboarding_f1_title">Automatisch bereinigen</string>
-    <string name="voice_onboarding_f1_desc">Entfernt Pausen, \u201eähm\u201c, \u201eäh\u201c und Füllwörter</string>
+    <string name="voice_onboarding_f1_desc">Entfernt Pausen, „ähm“, „äh“, Stottern und Füllwörter</string>
     <string name="voice_onboarding_f2_title">In eigenen Worten bearbeiten</string>
-    <string name="voice_onboarding_f2_desc">Sage z. B. \u201emach es freundlicher\u201c oder \u201ekürzer\u201c</string>
-    <string name="voice_onboarding_f3_title">Klare Zeichensetzung &amp; Sprachsperre</string>
-    <string name="voice_onboarding_f3_desc">Automatische Satzzeichen und feste Sprache ohne ungewollten Wechsel</string>
-    <string name="voice_onboarding_privacy">Sprache wird über die Android-Spracherkennung verarbeitet. Optionale KI-Veredelung erfolgt nur mit deinem eigenen API-Schlüssel.</string>
+    <string name="voice_onboarding_f2_desc">Sage z. B. „mach es freundlicher“, „kürzer“ oder korrigiere dich mitten im Satz</string>
+    <string name="voice_onboarding_f3_title" formatted="false">100 % Lokal auf dem Handy</string>
+    <string name="voice_onboarding_f3_desc">Lade lokale Whisper- &amp; Qwen3-Modelle für unbegrenztes Offline-Diktat &amp; Bereinigung</string>
+    <string name="voice_onboarding_privacy">Läuft komplett offline mit lokalem Whisper + KI-Modell oder über Android-Spracherkennung.</string>
     <string name="btn_get_started">Loslegen</string>
     <string name="btn_no_thanks">Nein, danke</string>
 
     <string name="writing_tools_title">Schreibhilfe</string>
     <string name="writing_tools_empty_title">Tippe etwas, um zu starten</string>
-    <string name="writing_tools_empty_desc">Starke Werkzeuge zum Korrigieren von Fehlern, Kürzen, Tonfall anpassen und mehr</string>
+    <string name="writing_tools_empty_desc">Fehler korrigieren, zusammenfassen, übersetzen, Tonfall ändern oder eigenen Prompt nutzen</string>
     <string name="writing_tools_onboarding_title">Starke Werkzeuge für deine Texte</string>
-    <string name="writing_tools_onboarding_desc">Korrigieren, umformulieren oder Tonfall wechseln. Läuft lokal ohne Cloud oder mit eigenem Gemini-/OpenAI-API-Schlüssel.</string>
+    <string name="writing_tools_onboarding_desc">Korrigieren, umformulieren, zusammenfassen oder übersetzen. Läuft lokal ohne Cloud oder mit eigenem API-Key.</string>
     <string name="btn_continue">Weiter</string>
     <string name="btn_apply">Übernehmen</string>
     <string name="btn_undo">Rückgängig</string>
+    <string name="btn_rewriting">Wird überarbeitet…</string>
+
+    <string name="action_proofread">Korrigieren</string>
+    <string name="action_professional">Professionell</string>
+    <string name="action_casual">Locker</string>
+    <string name="action_concise">Kürzer</string>
+    <string name="action_emotive">Ausdrucksstark</string>
+    <string name="action_rephrase">Umformulieren</string>
+    <string name="action_summarize">Zusammenfassen</string>
+    <string name="action_translate">Übersetzen</string>
+
+    <!-- Leiste, Zwischenablage & Screenshots -->
+    <string name="strip_customize_bar">Leiste anpassen</string>
+    <string name="strip_paste_screenshot">Screenshot einfügen</string>
+    <string name="strip_screenshot_ocr">OCR</string>
+    <string name="clipboard_empty">Kopierte Texte &amp; Screenshots erscheinen hier automatisch.</string>
+    <string name="clipboard_clear">Leeren</string>
+    <string name="clipboard_paste_image">Bild einfügen</string>
+    <string name="clipboard_paste_ocr">Text (OCR)</string>
+    <string name="tools_title">Tapwing Werkzeuge</string>
+    <string name="tools_edit_bar">Leiste</string>
+
+    <!-- Einstellungen -->
+    <string name="settings_subtitle">Offline-KI-Tastatur · v2.0</string>
+    <string name="settings_search_placeholder">Einstellungen suchen</string>
+    <string name="settings_test_placeholder">Hier Tastatur testen…</string>
+    <string name="nav_appearance">Design &amp; Größe</string>
+    <string name="nav_quick_bar">Schnellleiste</string>
+    <string name="nav_languages">Sprachen &amp; Länder</string>
+    <string name="nav_dictionary">Wörterbuch &amp; Lernen</string>
+    <string name="nav_corrections">Tippen &amp; Autokorrektur</string>
+    <string name="nav_voice">Spracheingabe &amp; Lokales STT</string>
+    <string name="nav_writing_tools">Lokale KI &amp; Prompts</string>
+    <string name="nav_clipboard">Zwischenablage &amp; Screenshots</string>
+    <string name="nav_emoji">Emoji</string>
+    <string name="nav_about">Über Tapwing</string>
+    <string name="section_setup">Einrichtung</string>
+    <string name="section_keyboard">Tastatur</string>
+    <string name="section_smart_ai">KI &amp; Sprache</string>
+    <string name="section_privacy">Zwischenablage &amp; System</string>
+    <string name="setup_enable_tapwing">Tapwing im System aktivieren</string>
+    <string name="setup_select_tapwing">Zu Tapwing wechseln</string>
+    <string name="setup_ready">Tapwing aktiv ✓</string>
 </resources>

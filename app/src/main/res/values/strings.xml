@@ -2,7 +2,16 @@
 <resources>
     <string name="app_name">Tapwing</string>
     <string name="subtype_de_qwertz">German (QWERTZ)</string>
-    <string name="subtype_en_qwerty">English (QWERTY)</string>
+    <string name="subtype_de_ch_qwertz">German Switzerland (QWERTZ)</string>
+    <string name="subtype_en_qwerty">English US (QWERTY)</string>
+    <string name="subtype_en_gb_qwerty">English UK (QWERTY)</string>
+    <string name="subtype_fr_azerty">French (AZERTY)</string>
+    <string name="subtype_es_qwerty">Spanish (QWERTY)</string>
+    <string name="subtype_it_qwerty">Italian (QWERTY)</string>
+    <string name="subtype_pt_qwerty">Portuguese (QWERTY)</string>
+    <string name="subtype_nl_qwerty">Dutch (QWERTY)</string>
+    <string name="subtype_pl_qwerty">Polish (QWERTY)</string>
+    <string name="subtype_tr_qwerty">Turkish (Q)</string>
     <string name="scan_text_title">Scan Text (OCR)</string>
 
     <!-- Accessibility & Keyboard Controls -->
@@ -11,7 +20,7 @@
     <string name="cd_clipboard">Open clipboard history</string>
     <string name="cd_scan_text">Scan text with camera</string>
     <string name="cd_settings">Open Tapwing settings</string>
-    <string name="cd_voice_mic">Start voice typing</string>
+    <string name="cd_voice_mic">Start or stop voice typing</string>
     <string name="cd_voice_done">Finish and apply voice text</string>
     <string name="cd_voice_cancel">Cancel voice typing</string>
     <string name="cd_voice_minimize">Minimize or expand keyboard</string>
@@ -23,25 +32,70 @@
     <string name="cd_hide_keyboard">Hide keyboard</string>
 
     <!-- Voice & Writing Tools UI -->
-    <string name="voice_hint_finish">Tap \u2713 to finish and see your text</string>
-    <string name="voice_listening">Listening\u2026 speak naturally</string>
+    <string name="voice_hint_finish">Speak freely — tap ✓ or Mic to stop</string>
+    <string name="voice_listening">Listening… tap again to stop</string>
+    <string name="voice_processing_local">Transcribing &amp; cleaning locally…</string>
+    <string name="voice_tidying_up">Tidying up…</string>
     <string name="voice_onboarding_title">Just speak naturally</string>
     <string name="voice_onboarding_f1_title">Tidy up automatically</string>
-    <string name="voice_onboarding_f1_desc">Remove pauses, \u2018ums\u2019 and \u2018ahs\u2019</string>
+    <string name="voice_onboarding_f1_desc">Removes pauses, ‘ums’, ‘ahs’ and stutters</string>
     <string name="voice_onboarding_f2_title">Edit in your own words</string>
-    <string name="voice_onboarding_f2_desc">Just say \u2018make it friendly\u2019 or \u2018make it shorter\u2019</string>
-    <string name="voice_onboarding_f3_title">Auto-punctuate &amp; switch cleanly</string>
-    <string name="voice_onboarding_f3_desc">Automatic punctuation and strict language lock without unwanted switching</string>
-    <string name="voice_onboarding_privacy">Audio is processed via Android Speech Services. Optional AI polish only runs if you configure your own API key.</string>
+    <string name="voice_onboarding_f2_desc">Say ‘make it friendly’, ‘make it shorter’ or self-correct mid-sentence</string>
+    <string name="voice_onboarding_f3_title" formatted="false">100% On-Device AI option</string>
+    <string name="voice_onboarding_f3_desc">Download local Whisper &amp; Qwen3 models for unlimited offline dictation &amp; cleanup</string>
+    <string name="voice_onboarding_privacy" formatted="false">Works 100% offline with local Whisper + LLM models, or via Android Speech Services.</string>
     <string name="btn_get_started">Get started</string>
     <string name="btn_no_thanks">No, thanks</string>
 
     <string name="writing_tools_title">Writing tools</string>
     <string name="writing_tools_empty_title">Type something to get started</string>
-    <string name="writing_tools_empty_desc">Powerful tools to help you fix mistakes, shorten text, use a professional tone and more</string>
+    <string name="writing_tools_empty_desc">Fix mistakes, summarize, translate, change tone or run your custom local AI prompt</string>
     <string name="writing_tools_onboarding_title">Powerful tools to improve your writing</string>
-    <string name="writing_tools_onboarding_desc">Proofread, rephrase or change tone. Works offline with local rules or with your own Gemini / OpenAI API key.</string>
+    <string name="writing_tools_onboarding_desc">Proofread, rephrase, summarize or translate. Works offline with local rules, on-device GGUF models, or your own API key.</string>
     <string name="btn_continue">Continue</string>
     <string name="btn_apply">Apply</string>
     <string name="btn_undo">Undo</string>
+    <string name="btn_rewriting">Rewriting…</string>
+
+    <string name="action_proofread">Proofread</string>
+    <string name="action_professional">Professional</string>
+    <string name="action_casual">Casual</string>
+    <string name="action_concise">Concise</string>
+    <string name="action_emotive">Emotive</string>
+    <string name="action_rephrase">Rephrase</string>
+    <string name="action_summarize">Summarize</string>
+    <string name="action_translate">Translate</string>
+
+    <!-- Strip, Clipboard & Screenshots -->
+    <string name="strip_customize_bar">Customize bar</string>
+    <string name="strip_paste_screenshot">Paste screenshot</string>
+    <string name="strip_screenshot_ocr">OCR</string>
+    <string name="clipboard_empty">Copied text &amp; screenshots appear here automatically.</string>
+    <string name="clipboard_clear">Clear</string>
+    <string name="clipboard_paste_image">Paste image</string>
+    <string name="clipboard_paste_ocr">OCR text</string>
+    <string name="tools_title">Tapwing Tools</string>
+    <string name="tools_edit_bar">Edit bar</string>
+
+    <!-- Settings Titles & Sections -->
+    <string name="settings_subtitle">Privacy-first AI keyboard · v2.0</string>
+    <string name="settings_search_placeholder">Search settings</string>
+    <string name="settings_test_placeholder">Test keyboard here…</string>
+    <string name="nav_appearance">Theme &amp; Size</string>
+    <string name="nav_quick_bar">Quick Bar</string>
+    <string name="nav_languages">Languages &amp; Countries</string>
+    <string name="nav_dictionary">Dictionary &amp; Learning</string>
+    <string name="nav_corrections">Typing &amp; Autocorrect</string>
+    <string name="nav_voice">Voice &amp; Local STT</string>
+    <string name="nav_writing_tools">Local AI &amp; Prompts</string>
+    <string name="nav_clipboard">Clipboard &amp; Screenshots</string>
+    <string name="nav_emoji">Emoji</string>
+    <string name="nav_about">About Tapwing</string>
+    <string name="section_setup">Setup</string>
+    <string name="section_keyboard">Keyboard</string>
+    <string name="section_smart_ai">Intelligence &amp; Voice</string>
+    <string name="section_privacy">Clipboard &amp; System</string>
+    <string name="setup_enable_tapwing">Enable Tapwing in System</string>
+    <string name="setup_select_tapwing">Switch to Tapwing</string>
+    <string name="setup_ready">Tapwing active ✓</string>
 </resources>

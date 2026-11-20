@@ -16,7 +16,8 @@ enum class QuickBarAction {
     QUICK_SEARCH,
     APPLE_MODE,
     LANGUAGE,
-    UNDO;
+    UNDO,
+    SNIPPETS;
 
     companion object {
         val DEFAULT_ACTIONS: List<QuickBarAction> = listOf(

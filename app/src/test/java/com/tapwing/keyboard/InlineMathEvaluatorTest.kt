@@ -22,6 +22,12 @@ class InlineMathEvaluatorTest {
         val div = InlineMathEvaluator.evaluateTrailingExpression("(10+5)/2=", "en")
         assertEquals("7.5", div?.formattedResult)
 
+        val pct = InlineMathEvaluator.evaluateTrailingExpression("150+19%=", "de")
+        assertEquals("178,5", pct?.formattedResult)
+
+        val pow = InlineMathEvaluator.evaluateTrailingExpression("2^8=", "en")
+        assertEquals("256", pow?.formattedResult)
+
         // Single number without operator must not trigger
         assertNull(InlineMathEvaluator.evaluateTrailingExpression("2026", "de"))
     }

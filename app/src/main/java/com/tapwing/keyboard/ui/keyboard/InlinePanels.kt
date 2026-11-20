@@ -1,7 +1,10 @@
 package com.tapwing.keyboard.ui.keyboard
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -39,6 +42,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
@@ -77,14 +81,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -97,11 +104,16 @@ import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.ai.WritingToolsOutput
 import com.tapwing.keyboard.clipboard.ClipboardClip
+import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.TapwingPrefs
+import com.tapwing.keyboard.dictionary.SnippetPlaceholderResolver
+import com.tapwing.keyboard.dictionary.TextSnippet
 import com.tapwing.keyboard.emoji.EmojiCatalog
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 enum class TextEditAction {
@@ -124,6 +136,7 @@ fun ToolsHubPanel(
     onOpenCustomizeBar: () -> Unit,
     onOpenWritingTools: () -> Unit,
     onOpenClipboard: () -> Unit,
+    onOpenSnippets: () -> Unit = {},
     onOpenResize: () -> Unit,
     onOpenTextEdit: () -> Unit,
     onOpenScanText: () -> Unit,
@@ -148,6 +161,7 @@ fun ToolsHubPanel(
     val items = listOf(
         ToolTileSpec(if (de) "Schreibhilfe" else "Writing", Icons.Rounded.AutoAwesome, onClick = onOpenWritingTools),
         ToolTileSpec(if (de) "Ablage" else "Clipboard", Icons.Rounded.ContentPaste, onClick = onOpenClipboard),
+        ToolTileSpec(if (de) "Bausteine" else "Snippets", Icons.Rounded.Description, onClick = onOpenSnippets),
         ToolTileSpec(if (de) "Größe" else "Resize", Icons.Rounded.Height, onClick = onOpenResize),
         ToolTileSpec(if (de) "Text-Edit" else "Text edit", Icons.Rounded.OpenWith, onClick = onOpenTextEdit),
         ToolTileSpec(if (de) "Scannen" else "Scan OCR", Icons.Rounded.DocumentScanner, onClick = onOpenScanText),
@@ -175,7 +189,7 @@ fun ToolsHubPanel(
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_back), tint = kbColors.keyText)
             }
             Text(
-                text = if (de) "Tapwing Werkzeuge" else "Tapwing Tools",
+                text = stringResource(R.string.tools_title),
                 color = kbColors.keyText,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
@@ -193,7 +207,7 @@ fun ToolsHubPanel(
                 ) {
                     Icon(Icons.Rounded.Tune, contentDescription = null, tint = kbColors.keyText, modifier = Modifier.size(15.dp))
                     Text(
-                        text = if (de) "Leiste" else "Edit bar",
+                        text = stringResource(R.string.tools_edit_bar),
                         color = kbColors.keyText,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
@@ -657,12 +671,14 @@ fun WritingToolsPanel(
     val de = prefs.activeLocale == "de"
 
     val actions = listOf(
-        WritingAction.PROOFREAD to (if (de) "Korrigieren" else "Proofread"),
-        WritingAction.PROFESSIONAL to (if (de) "Professionell" else "Professional"),
-        WritingAction.CASUAL to (if (de) "Locker" else "Casual"),
-        WritingAction.CONCISE to (if (de) "Kürzer" else "Concise"),
-        WritingAction.EMOTIVE to (if (de) "Ausdrucksstark" else "Emotive"),
-        WritingAction.REPHRASE to (if (de) "Umformulieren" else "Rephrase")
+        WritingAction.PROOFREAD to stringResource(R.string.action_proofread),
+        WritingAction.PROFESSIONAL to stringResource(R.string.action_professional),
+        WritingAction.CASUAL to stringResource(R.string.action_casual),
+        WritingAction.CONCISE to stringResource(R.string.action_concise),
+        WritingAction.EMOTIVE to stringResource(R.string.action_emotive),
+        WritingAction.REPHRASE to stringResource(R.string.action_rephrase),
+        WritingAction.SUMMARIZE to stringResource(R.string.action_summarize),
+        WritingAction.TRANSLATE to stringResource(R.string.action_translate)
     )
 
     Column(
@@ -746,7 +762,7 @@ fun WritingToolsPanel(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             Text(
-                                text = if (de) "Wird überarbeitet…" else "Rewriting…",
+                                text = stringResource(R.string.btn_rewriting),
                                 color = kbColors.keyHintText,
                                 fontSize = 13.sp
                             )
@@ -978,12 +994,12 @@ fun ClipboardPanel(
     clips: List<ClipboardClip>,
     onBack: () -> Unit,
     onPasteClip: (ClipboardClip) -> Unit,
+    onPasteClipOcr: (ClipboardClip) -> Unit = {},
     onTogglePin: (ClipboardClip) -> Unit,
     onDeleteClip: (ClipboardClip) -> Unit,
     onClearUnpinned: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
-    val de = prefs.activeLocale == "de"
 
     Column(
         modifier = Modifier
@@ -999,8 +1015,7 @@ fun ClipboardPanel(
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_back), tint = kbColors.keyText)
             }
             Text(
-                text = if (de) "Zwischenablage (${clips.size}/${prefs.clipboardMaxItems})"
-                else "Clipboard (${clips.size}/${prefs.clipboardMaxItems})",
+                text = "${stringResource(R.string.cd_clipboard).substringBefore(' ')} (${clips.size}/${prefs.clipboardMaxItems})",
                 color = kbColors.keyText,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
@@ -1008,7 +1023,7 @@ fun ClipboardPanel(
             )
             if (clips.any { !it.pinned }) {
                 TextButton(onClick = onClearUnpinned) {
-                    Text(if (de) "Leeren" else "Clear", fontSize = 12.sp)
+                    Text(stringResource(R.string.clipboard_clear), fontSize = 12.sp)
                 }
             }
         }
@@ -1021,10 +1036,10 @@ fun ClipboardPanel(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (de) "Kopierte Texte erscheinen hier automatisch."
-                    else "Copied text clips will appear here automatically.",
+                    text = stringResource(R.string.clipboard_empty),
                     color = kbColors.keyHintText,
-                    fontSize = 13.sp
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
                 )
             }
         } else {
@@ -1037,6 +1052,17 @@ fun ClipboardPanel(
                     .weight(1f)
             ) {
                 items(clips, key = { it.id }) { clip ->
+                    val thumb by produceState<Bitmap?>(initialValue = null, clip.imagePath) {
+                        val path = clip.imagePath
+                        value = if (path != null) {
+                            withContext(Dispatchers.IO) {
+                                runCatching {
+                                    val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+                                    BitmapFactory.decodeFile(path, opts)
+                                }.getOrNull()
+                            }
+                        } else null
+                    }
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = if (clip.pinned) kbColors.cardAltSurface else kbColors.cardSurface,
@@ -1046,35 +1072,183 @@ fun ClipboardPanel(
                             modifier = Modifier.padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            if (clip.isImage && thumb != null) {
+                                Image(
+                                    bitmap = thumb!!.asImageBitmap(),
+                                    contentDescription = clip.text,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(64.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                )
+                            } else {
+                                Text(
+                                    text = clip.text,
+                                    color = kbColors.keyText,
+                                    fontSize = 13.sp,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (clip.isImage) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = kbColors.actionSurface.copy(alpha = 0.18f),
+                                        modifier = Modifier.clickable { onPasteClipOcr(clip) }
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.strip_screenshot_ocr),
+                                            color = kbColors.keyText,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                } else {
+                                    Spacer(Modifier.width(1.dp))
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.PushPin,
+                                        contentDescription = null,
+                                        tint = if (clip.pinned) kbColors.actionSurface else kbColors.keyHintText,
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable { onTogglePin(clip) }
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Icon(
+                                        imageVector = Icons.Rounded.DeleteOutline,
+                                        contentDescription = null,
+                                        tint = kbColors.keyHintText,
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable { onDeleteClip(clip) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SnippetsPanel(
+    prefs: TapwingPrefs,
+    snippets: List<TextSnippet>,
+    latestClipboardText: String,
+    onBack: () -> Unit,
+    onInsertSnippet: (TextSnippet, String) -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_back), tint = kbColors.keyText)
+            }
+            Text(
+                text = if (de) "Textbausteine (${snippets.size})" else "Text Snippets (${snippets.size})",
+                color = kbColors.keyText,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        if (snippets.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (de) "Erstelle Bausteine in Einstellungen → Wörterbuch."
+                    else "Create snippets in Settings → Dictionary.",
+                    color = kbColors.keyHintText,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                items(snippets, key = { it.id }) { snippet ->
+                    val resolved = remember(snippet, prefs.activeLocale, latestClipboardText, prefs.snippetUserName, prefs.snippetUserEmail) {
+                        SnippetPlaceholderResolver.resolve(
+                            template = snippet.body,
+                            locale = prefs.activeLocale,
+                            latestClipboardText = latestClipboardText,
+                            userName = prefs.snippetUserName,
+                            userEmail = prefs.snippetUserEmail
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = kbColors.cardSurface,
+                        modifier = Modifier.clickable { onInsertSnippet(snippet, resolved) }
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = kbColors.actionSurface.copy(alpha = 0.22f)
+                                ) {
+                                    Text(
+                                        text = snippet.trigger,
+                                        color = kbColors.keyText,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(
+                                    text = snippet.title,
+                                    color = kbColors.keyText,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                             Text(
-                                text = clip.text,
-                                color = kbColors.keyText,
-                                fontSize = 13.sp,
+                                text = resolved,
+                                color = kbColors.keyHintText,
+                                fontSize = 11.sp,
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.PushPin,
-                                    contentDescription = null,
-                                    tint = if (clip.pinned) kbColors.actionSurface else kbColors.keyHintText,
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clickable { onTogglePin(clip) }
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Icon(
-                                    imageVector = Icons.Rounded.DeleteOutline,
-                                    contentDescription = null,
-                                    tint = kbColors.keyHintText,
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clickable { onDeleteClip(clip) }
-                                )
-                            }
                         }
                     }
                 }

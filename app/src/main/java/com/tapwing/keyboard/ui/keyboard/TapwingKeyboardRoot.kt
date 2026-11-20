@@ -1,16 +1,15 @@
 package com.tapwing.keyboard.ui.keyboard
 
 import android.view.HapticFeedbackConstants
+import android.view.View
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,15 +30,17 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -48,9 +49,13 @@ import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.ai.WritingToolsOutput
 import com.tapwing.keyboard.clipboard.ClipboardClip
 import com.tapwing.keyboard.clipboard.RecentScreenshot
+import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.TapwingPrefs
+import com.tapwing.keyboard.dictionary.KeyCenter
 import com.tapwing.keyboard.dictionary.SuggestionChip
+import com.tapwing.keyboard.dictionary.SwipePoint
+import com.tapwing.keyboard.dictionary.TextSnippet
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
 import com.tapwing.keyboard.ui.theme.TapwingTheme
 import com.tapwing.keyboard.undo.UndoSnapshot
@@ -67,6 +72,9 @@ fun TapwingKeyboardRoot(
     isTyping: Boolean,
     proactiveUndo: UndoSnapshot?,
     recentScreenshot: RecentScreenshot?,
+    otpChipText: String?,
+    inlineAutofillViews: List<View> = emptyList(),
+    snippets: List<TextSnippet> = emptyList(),
     voiceState: VoiceUiState,
     writingSourceText: String,
     writingOutput: WritingToolsOutput?,
@@ -76,6 +84,7 @@ fun TapwingKeyboardRoot(
     textEditSelectionActive: Boolean,
     quickSearchInitial: String,
     onKeyPress: (KeySpec, String) -> Unit,
+    onSwipeWord: (List<SwipePoint>, List<KeyCenter>) -> Unit,
     onCursorMoveSteps: (Int) -> Unit,
     onDeletePreviousWord: () -> Unit,
     onSwitchLanguage: () -> Unit,
@@ -85,6 +94,10 @@ fun TapwingKeyboardRoot(
     onTriggerUndo: () -> Unit,
     onDismissUndo: () -> Unit,
     onTapScreenshotChip: (RecentScreenshot) -> Unit,
+    onTapScreenshotOcr: (RecentScreenshot) -> Unit,
+    onDismissScreenshotChip: () -> Unit,
+    onTapOtpChip: (String) -> Unit,
+    onDismissOtpChip: () -> Unit,
     onOpenToolsHub: () -> Unit,
     onOpenCustomizeBar: () -> Unit,
     onQuickAction: (QuickBarAction) -> Unit,
@@ -96,7 +109,10 @@ fun TapwingKeyboardRoot(
     onRunWritingAction: (WritingAction) -> Unit,
     onApplyWritingResult: (String) -> Unit,
     onOpenClipboard: () -> Unit,
+    onOpenSnippets: () -> Unit = {},
+    onInsertSnippet: (TextSnippet, String) -> Unit = { _, _ -> },
     onPasteClip: (ClipboardClip) -> Unit,
+    onPasteClipOcr: (ClipboardClip) -> Unit,
     onTogglePinClip: (ClipboardClip) -> Unit,
     onDeleteClip: (ClipboardClip) -> Unit,
     onClearUnpinnedClips: () -> Unit,
@@ -125,286 +141,310 @@ fun TapwingKeyboardRoot(
     onToggleVoiceMinimize: () -> Unit,
     onHideKeyboard: () -> Unit
 ) {
-    TapwingTheme(
-        themeMode = prefs.themeMode,
-        darkModePreference = prefs.darkMode,
-        appleModeEnabled = prefs.appleModeEnabled
-    ) {
-        val kbColors = LocalTapwingKeyboardColors.current
-        val view = LocalView.current
-        val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val footerHeight = maxOf(navBarBottom, 44.dp)
-        val density = LocalDensity.current
-        // Height of the letter keyboard; every other panel is locked to it so the layout never jumps.
-        var keysHeightPx by remember { mutableIntStateOf(0) }
-        val panelHeight = if (keysHeightPx > 0) with(density) { keysHeightPx.toDp() } else 270.dp
+    val baseCtx = LocalContext.current
+    val localizedCtx = remember(baseCtx, prefs.appUiLocale) {
+        KeyboardLocales.localizedContext(baseCtx, prefs.appUiLocale)
+    }
 
-        val backgroundModifier = if (kbColors.appleLiquidGlass) {
-            Modifier.background(
-                Brush.verticalGradient(
-                    listOf(kbColors.boardBackground, kbColors.boardGradientBottom)
-                )
-            )
-        } else {
-            Modifier.background(kbColors.boardBackground)
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(backgroundModifier)
+    CompositionLocalProvider(LocalContext provides localizedCtx) {
+        TapwingTheme(
+            themeMode = prefs.themeMode,
+            darkModePreference = prefs.darkMode,
+            appleModeEnabled = prefs.appleModeEnabled
         ) {
-            if (kbColors.appleLiquidGlass) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(0.8.dp)
-                        .background(kbColors.keyGlassHighlight)
+            val kbColors = LocalTapwingKeyboardColors.current
+            val view = LocalView.current
+            val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            val footerHeight = maxOf(navBarBottom, 44.dp)
+            val density = LocalDensity.current
+            var keysHeightPx by remember { mutableIntStateOf(0) }
+            val panelHeight = if (keysHeightPx > 0) with(density) { keysHeightPx.toDp() } else 270.dp
+
+            val backgroundModifier = if (kbColors.appleLiquidGlass) {
+                Modifier.background(
+                    Brush.verticalGradient(
+                        listOf(kbColors.boardBackground, kbColors.boardGradientBottom)
+                    )
                 )
+            } else {
+                Modifier.background(kbColors.boardBackground)
             }
 
-            AnimatedContent(
-                targetState = panelMode,
-                transitionSpec = {
-                    val enter = fadeIn(tween(240, delayMillis = 50, easing = FastOutSlowInEasing)) +
-                        scaleIn(
-                            initialScale = 0.97f,
-                            animationSpec = tween(280, easing = FastOutSlowInEasing)
-                        ) +
-                        slideInVertically(
-                            animationSpec = tween(280, easing = FastOutSlowInEasing)
-                        ) { it / 24 }
-                    val exit = fadeOut(tween(140, easing = FastOutSlowInEasing))
-                    (enter togetherWith exit).using(
-                        SizeTransform(clip = false) { _, _ -> tween(260, easing = FastOutSlowInEasing) }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(backgroundModifier)
+            ) {
+                if (kbColors.appleLiquidGlass) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.8.dp)
+                            .background(kbColors.keyGlassHighlight)
                     )
-                },
-                label = "keyboardPanelTransition"
-            ) { mode ->
-                val lockedModifier = if (
-                    mode == KeyboardPanelMode.KEYS ||
-                    mode == KeyboardPanelMode.VOICE_ONBOARDING ||
-                    mode == KeyboardPanelMode.WRITING_ONBOARDING ||
-                    mode == KeyboardPanelMode.RESIZE
-                ) Modifier else Modifier.fillMaxWidth().height(panelHeight)
-                Box(modifier = lockedModifier) {
-                when (mode) {
-                    KeyboardPanelMode.VOICE_ONBOARDING -> {
-                        NaturalVoiceOnboardingSheet(
-                            onGetStarted = onVoiceOnboardingGetStarted,
-                            onDismiss = onCloseSubPanel
-                        )
-                    }
-                    KeyboardPanelMode.WRITING_ONBOARDING -> {
-                        WritingToolsOnboardingCard(
-                            onContinue = onWritingOnboardingContinue,
-                            onDismiss = onCloseSubPanel
-                        )
-                    }
-                    KeyboardPanelMode.WRITING_TOOLS -> {
-                        WritingToolsPanel(
-                            prefs = prefs,
-                            sourceText = writingSourceText,
-                            output = writingOutput,
-                            isLoading = writingLoading,
-                            selectedAction = writingAction,
-                            onBack = onCloseSubPanel,
-                            onRunAction = onRunWritingAction,
-                            onApplyResult = onApplyWritingResult,
-                            onUndoApplied = onTriggerUndo
-                        )
-                    }
-                    KeyboardPanelMode.TOOLS_HUB -> {
-                        ToolsHubPanel(
-                            prefs = prefs,
-                            onClose = onCloseSubPanel,
-                            onOpenCustomizeBar = onOpenCustomizeBar,
-                            onOpenWritingTools = onOpenWritingTools,
-                            onOpenClipboard = onOpenClipboard,
-                            onOpenResize = onOpenResize,
-                            onOpenTextEdit = onOpenTextEdit,
-                            onOpenScanText = onOpenScanText,
-                            onStartVoice = onStartVoice,
-                            onOpenEmoji = onOpenEmoji,
-                            onCycleOneHanded = onCycleOneHanded,
-                            onToggleIncognito = onToggleIncognito,
-                            onOpenQuickSearch = onOpenQuickSearch,
-                            onToggleAppleMode = onToggleAppleMode,
-                            onOpenSettings = onOpenSettings,
-                            onSwitchLanguage = onSwitchLanguage
-                        )
-                    }
-                    KeyboardPanelMode.CUSTOMIZE_BAR -> {
-                        QuickBarCustomizePanel(
-                            prefs = prefs,
-                            onUpdateQuickBar = onUpdateQuickBar,
-                            onResetQuickBar = onResetQuickBar,
-                            onDone = onCloseSubPanel
-                        )
-                    }
-                    KeyboardPanelMode.CLIPBOARD -> {
-                        ClipboardPanel(
-                            prefs = prefs,
-                            clips = clips,
-                            onBack = onCloseSubPanel,
-                            onPasteClip = onPasteClip,
-                            onTogglePin = onTogglePinClip,
-                            onDeleteClip = onDeleteClip,
-                            onClearUnpinned = onClearUnpinnedClips
-                        )
-                    }
-                    KeyboardPanelMode.EMOJI -> {
-                        EmojiPanel(
-                            prefs = prefs,
-                            onBack = onCloseSubPanel,
-                            onInsertEmoji = onInsertEmoji,
-                            onBackspace = onBackspace
-                        )
-                    }
-                    KeyboardPanelMode.RESIZE -> {
-                        KeyboardResizePanel(
-                            prefs = prefs,
-                            layoutPage = layoutPage,
-                            shiftState = shiftState,
-                            imeActionLabel = imeActionLabel,
-                            onScaleChange = onUpdateScalePercent,
-                            onBottomLiftChange = onUpdateBottomLiftDp,
-                            onReset = onResetResize,
-                            onDone = onCloseSubPanel
-                        )
-                    }
-                    KeyboardPanelMode.TEXT_EDIT -> {
-                        TextEditPanel(
-                            prefs = prefs,
-                            selectionActive = textEditSelectionActive,
-                            onBack = onCloseSubPanel,
-                            onToggleSelection = onToggleTextEditSelection,
-                            onAction = onTextEditAction,
-                            onUndo = onTriggerUndo
-                        )
-                    }
-                    KeyboardPanelMode.QUICK_SEARCH -> {
-                        QuickSearchPanel(
-                            prefs = prefs,
-                            initialQuery = quickSearchInitial,
-                            onBack = onCloseSubPanel,
-                            onInsertSearchLink = onInsertSearchLink,
-                            onOpenInBrowser = onOpenSearchInBrowser
-                        )
-                    }
-                    KeyboardPanelMode.KEYS -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .onSizeChanged {
-                                    if (!((voiceState.isListening || voiceState.isProcessing) && voiceState.isMinimized)) {
-                                        keysHeightPx = it.height
-                                    }
-                                }
-                        ) {
-                            SuggestionStrip(
-                                prefs = prefs,
-                                suggestions = suggestions,
-                                proactiveUndo = proactiveUndo,
-                                recentScreenshot = recentScreenshot,
-                                voiceState = voiceState,
-                                isTyping = isTyping,
-                                onOpenToolsHub = onOpenToolsHub,
-                                onQuickAction = onQuickAction,
-                                onLongPressQuickBar = onOpenCustomizeBar,
-                                onSelectSuggestion = onSelectSuggestion,
-                                onTriggerUndo = onTriggerUndo,
-                                onDismissUndo = onDismissUndo,
-                                onTapScreenshotChip = onTapScreenshotChip,
-                                onStartVoice = onStartVoice,
-                                onFinishVoice = onFinishVoice,
-                                onCancelVoice = onCancelVoice,
-                                onToggleVoiceMinimize = onToggleVoiceMinimize
-                            )
+                }
 
-                            if (!((voiceState.isListening || voiceState.isProcessing) && voiceState.isMinimized)) {
-                                KeyboardGrid(
+                AnimatedContent(
+                    targetState = panelMode,
+                    transitionSpec = {
+                        val enter = fadeIn(tween(240, delayMillis = 50, easing = FastOutSlowInEasing)) +
+                            scaleIn(
+                                initialScale = 0.97f,
+                                animationSpec = tween(280, easing = FastOutSlowInEasing)
+                            ) +
+                            slideInVertically(
+                                animationSpec = tween(280, easing = FastOutSlowInEasing)
+                            ) { it / 24 }
+                        val exit = fadeOut(tween(140, easing = FastOutSlowInEasing))
+                        (enter togetherWith exit).using(
+                            SizeTransform(clip = false) { _, _ -> tween(260, easing = FastOutSlowInEasing) }
+                        )
+                    },
+                    label = "keyboardPanelTransition"
+                ) { mode ->
+                    val lockedModifier = if (
+                        mode == KeyboardPanelMode.KEYS ||
+                        mode == KeyboardPanelMode.VOICE_ONBOARDING ||
+                        mode == KeyboardPanelMode.WRITING_ONBOARDING ||
+                        mode == KeyboardPanelMode.RESIZE
+                    ) Modifier else Modifier.fillMaxWidth().height(panelHeight)
+                    Box(modifier = lockedModifier) {
+                        when (mode) {
+                            KeyboardPanelMode.VOICE_ONBOARDING -> {
+                                NaturalVoiceOnboardingSheet(
+                                    onGetStarted = onVoiceOnboardingGetStarted,
+                                    onDismiss = onCloseSubPanel
+                                )
+                            }
+                            KeyboardPanelMode.WRITING_ONBOARDING -> {
+                                WritingToolsOnboardingCard(
+                                    onContinue = onWritingOnboardingContinue,
+                                    onDismiss = onCloseSubPanel
+                                )
+                            }
+                            KeyboardPanelMode.WRITING_TOOLS -> {
+                                WritingToolsPanel(
+                                    prefs = prefs,
+                                    sourceText = writingSourceText,
+                                    output = writingOutput,
+                                    isLoading = writingLoading,
+                                    selectedAction = writingAction,
+                                    onBack = onCloseSubPanel,
+                                    onRunAction = onRunWritingAction,
+                                    onApplyResult = onApplyWritingResult,
+                                    onUndoApplied = onTriggerUndo
+                                )
+                            }
+                            KeyboardPanelMode.TOOLS_HUB -> {
+                                ToolsHubPanel(
+                                    prefs = prefs,
+                                    onClose = onCloseSubPanel,
+                                    onOpenCustomizeBar = onOpenCustomizeBar,
+                                    onOpenWritingTools = onOpenWritingTools,
+                                    onOpenClipboard = onOpenClipboard,
+                                    onOpenSnippets = onOpenSnippets,
+                                    onOpenResize = onOpenResize,
+                                    onOpenTextEdit = onOpenTextEdit,
+                                    onOpenScanText = onOpenScanText,
+                                    onStartVoice = onStartVoice,
+                                    onOpenEmoji = onOpenEmoji,
+                                    onCycleOneHanded = onCycleOneHanded,
+                                    onToggleIncognito = onToggleIncognito,
+                                    onOpenQuickSearch = onOpenQuickSearch,
+                                    onToggleAppleMode = onToggleAppleMode,
+                                    onOpenSettings = onOpenSettings,
+                                    onSwitchLanguage = onSwitchLanguage
+                                )
+                            }
+                            KeyboardPanelMode.CUSTOMIZE_BAR -> {
+                                QuickBarCustomizePanel(
+                                    prefs = prefs,
+                                    onUpdateQuickBar = onUpdateQuickBar,
+                                    onResetQuickBar = onResetQuickBar,
+                                    onDone = onCloseSubPanel
+                                )
+                            }
+                            KeyboardPanelMode.CLIPBOARD -> {
+                                ClipboardPanel(
+                                    prefs = prefs,
+                                    clips = clips,
+                                    onBack = onCloseSubPanel,
+                                    onPasteClip = onPasteClip,
+                                    onPasteClipOcr = onPasteClipOcr,
+                                    onTogglePin = onTogglePinClip,
+                                    onDeleteClip = onDeleteClip,
+                                    onClearUnpinned = onClearUnpinnedClips
+                                )
+                            }
+                            KeyboardPanelMode.SNIPPETS -> {
+                                val latestClipText = clips.firstOrNull { !it.isImage }?.text.orEmpty()
+                                SnippetsPanel(
+                                    prefs = prefs,
+                                    snippets = snippets,
+                                    latestClipboardText = latestClipText,
+                                    onBack = onCloseSubPanel,
+                                    onInsertSnippet = onInsertSnippet
+                                )
+                            }
+                            KeyboardPanelMode.EMOJI -> {
+                                EmojiPanel(
+                                    prefs = prefs,
+                                    onBack = onCloseSubPanel,
+                                    onInsertEmoji = onInsertEmoji,
+                                    onBackspace = onBackspace
+                                )
+                            }
+                            KeyboardPanelMode.RESIZE -> {
+                                KeyboardResizePanel(
                                     prefs = prefs,
                                     layoutPage = layoutPage,
                                     shiftState = shiftState,
                                     imeActionLabel = imeActionLabel,
-                                    onKeyPress = onKeyPress,
-                                    onCursorMoveSteps = onCursorMoveSteps,
-                                    onDeletePreviousWord = onDeletePreviousWord,
-                                    onSwitchLanguage = onSwitchLanguage,
-                                    onToggleOneHandedSide = onToggleOneHandedSide,
-                                    onExitOneHanded = onExitOneHanded
+                                    onScaleChange = onUpdateScalePercent,
+                                    onBottomLiftChange = onUpdateBottomLiftDp,
+                                    onReset = onResetResize,
+                                    onDone = onCloseSubPanel
                                 )
+                            }
+                            KeyboardPanelMode.TEXT_EDIT -> {
+                                TextEditPanel(
+                                    prefs = prefs,
+                                    selectionActive = textEditSelectionActive,
+                                    onBack = onCloseSubPanel,
+                                    onToggleSelection = onToggleTextEditSelection,
+                                    onAction = onTextEditAction,
+                                    onUndo = onTriggerUndo
+                                )
+                            }
+                            KeyboardPanelMode.QUICK_SEARCH -> {
+                                QuickSearchPanel(
+                                    prefs = prefs,
+                                    initialQuery = quickSearchInitial,
+                                    onBack = onCloseSubPanel,
+                                    onInsertSearchLink = onInsertSearchLink,
+                                    onOpenInBrowser = onOpenSearchInBrowser
+                                )
+                            }
+                            KeyboardPanelMode.KEYS -> {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onSizeChanged {
+                                            if (!((voiceState.isListening || voiceState.isProcessing) && voiceState.isMinimized)) {
+                                                keysHeightPx = it.height
+                                            }
+                                        }
+                                ) {
+                                    SuggestionStrip(
+                                        prefs = prefs,
+                                        suggestions = suggestions,
+                                        proactiveUndo = proactiveUndo,
+                                        recentScreenshot = recentScreenshot,
+                                        otpChipText = otpChipText,
+                                        inlineAutofillViews = inlineAutofillViews,
+                                        voiceState = voiceState,
+                                        isTyping = isTyping,
+                                        onOpenToolsHub = onOpenToolsHub,
+                                        onQuickAction = onQuickAction,
+                                        onLongPressQuickBar = onOpenCustomizeBar,
+                                        onSelectSuggestion = onSelectSuggestion,
+                                        onTriggerUndo = onTriggerUndo,
+                                        onDismissUndo = onDismissUndo,
+                                        onTapScreenshotChip = onTapScreenshotChip,
+                                        onTapScreenshotOcr = onTapScreenshotOcr,
+                                        onDismissScreenshotChip = onDismissScreenshotChip,
+                                        onTapOtpChip = onTapOtpChip,
+                                        onDismissOtpChip = onDismissOtpChip,
+                                        onStartVoice = onStartVoice,
+                                        onFinishVoice = onFinishVoice,
+                                        onCancelVoice = onCancelVoice,
+                                        onToggleVoiceMinimize = onToggleVoiceMinimize
+                                    )
+
+                                    if (!((voiceState.isListening || voiceState.isProcessing) && voiceState.isMinimized)) {
+                                        KeyboardGrid(
+                                            prefs = prefs,
+                                            layoutPage = layoutPage,
+                                            shiftState = shiftState,
+                                            imeActionLabel = imeActionLabel,
+                                            onKeyPress = onKeyPress,
+                                            onSwipeWord = onSwipeWord,
+                                            onCursorMoveSteps = onCursorMoveSteps,
+                                            onDeletePreviousWord = onDeletePreviousWord,
+                                            onSwitchLanguage = onSwitchLanguage,
+                                            onToggleOneHandedSide = onToggleOneHandedSide,
+                                            onExitOneHanded = onExitOneHanded
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
-                }
-            }
 
-            if (prefs.keyboardBottomLiftDp > 0) {
+                if (prefs.keyboardBottomLiftDp > 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(prefs.keyboardBottomLiftDp.dp)
+                    )
+                }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(prefs.keyboardBottomLiftDp.dp)
-                )
-            }
-
-            // Bottom system inset bar holding the borderless, larger, lower-left-shifted dismiss chevron
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(footerHeight)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = 22.dp, top = 4.dp)
-                        .width(52.dp)
-                        .height(40.dp)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(bounded = false, radius = 24.dp),
-                            onClick = {
-                                if (prefs.hapticFeedback) {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                }
-                                onSwitchLanguage()
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
+                        .height(footerHeight)
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Language,
-                        contentDescription = null,
-                        tint = kbColors.keyHintText,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 30.dp, top = 4.dp)
-                        .width(52.dp)
-                        .height(40.dp)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(bounded = false, radius = 24.dp),
-                            onClick = {
-                                if (prefs.hapticFeedback) {
-                                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = 22.dp, top = 4.dp)
+                            .width(52.dp)
+                            .height(40.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(bounded = false, radius = 24.dp),
+                                onClick = {
+                                    if (prefs.hapticFeedback) {
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    }
+                                    onSwitchLanguage()
                                 }
-                                onHideKeyboard()
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = stringResource(R.string.cd_hide_keyboard),
-                        tint = kbColors.keyHintText,
-                        modifier = Modifier.size(28.dp)
-                    )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Language,
+                            contentDescription = stringResource(R.string.cd_switch_language),
+                            tint = kbColors.keyHintText,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 30.dp, top = 4.dp)
+                            .width(52.dp)
+                            .height(40.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(bounded = false, radius = 24.dp),
+                                onClick = {
+                                    if (prefs.hapticFeedback) {
+                                        view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    }
+                                    onHideKeyboard()
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.KeyboardArrowDown,
+                            contentDescription = stringResource(R.string.cd_hide_keyboard),
+                            tint = kbColors.keyHintText,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
             }
         }

@@ -1,6 +1,11 @@
 package com.tapwing.keyboard.ui.keyboard
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.view.HapticFeedbackConstants
+import android.view.View
+import android.view.ViewGroup
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -8,8 +13,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -18,6 +23,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,12 +34,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material.icons.rounded.Tune
@@ -44,9 +51,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -55,12 +66,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tapwing.keyboard.R
 import com.tapwing.keyboard.clipboard.RecentScreenshot
+import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.SuggestionChip
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
 import com.tapwing.keyboard.undo.UndoSnapshot
 import com.tapwing.keyboard.voice.VoiceUiState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SuggestionStrip(
@@ -68,6 +82,8 @@ fun SuggestionStrip(
     suggestions: List<SuggestionChip>,
     proactiveUndo: UndoSnapshot?,
     recentScreenshot: RecentScreenshot?,
+    otpChipText: String?,
+    inlineAutofillViews: List<View> = emptyList(),
     voiceState: VoiceUiState,
     isTyping: Boolean,
     onOpenToolsHub: () -> Unit,
@@ -77,6 +93,10 @@ fun SuggestionStrip(
     onTriggerUndo: () -> Unit,
     onDismissUndo: () -> Unit,
     onTapScreenshotChip: (RecentScreenshot) -> Unit,
+    onTapScreenshotOcr: (RecentScreenshot) -> Unit,
+    onDismissScreenshotChip: () -> Unit,
+    onTapOtpChip: (String) -> Unit,
+    onDismissOtpChip: () -> Unit,
     onStartVoice: () -> Unit,
     onFinishVoice: () -> Unit,
     onCancelVoice: () -> Unit,
@@ -84,16 +104,19 @@ fun SuggestionStrip(
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val view = LocalView.current
-    val de = prefs.activeLocale == "de"
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
 
     val voiceActive = voiceState.isListening || voiceState.isProcessing
     val showUndo = proactiveUndo != null && prefs.proactiveUndo
-    val showShot = !showUndo && recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
-    val showSuggestions = !showUndo && !showShot && suggestions.isNotEmpty() &&
+    val showOtp = !showUndo && !otpChipText.isNullOrBlank() && !isTyping
+    val showShot = !showUndo && !showOtp && recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
+    val showAutofill = !showUndo && !showOtp && !showShot && inlineAutofillViews.isNotEmpty() && !isTyping
+    val showSuggestions = !showUndo && !showOtp && !showShot && !showAutofill && suggestions.isNotEmpty() &&
         (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
-    // 0 = quick bar, 1 = undo / screenshot chip, 2 = Gboard-style suggestion cells
+    // 0 = quick bar, 1 = undo / otp / screenshot chip, 2 = suggestion cells, 3 = inline autofill (Bitwarden, etc.)
     val middleKind = when {
-        showUndo || showShot -> 1
+        showUndo || showOtp || showShot -> 1
+        showAutofill -> 3
         showSuggestions -> 2
         else -> 0
     }
@@ -122,7 +145,6 @@ fun SuggestionStrip(
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left: flat tools-hub button (Gboard style)
                 FlatStripButton(
                     icon = if (prefs.incognitoMode) Icons.Rounded.VisibilityOff else Icons.Rounded.GridView,
                     contentDescription = stringResource(R.string.cd_tools_hub),
@@ -139,6 +161,26 @@ fun SuggestionStrip(
                     label = "stripMiddle"
                 ) { kind ->
                     when (kind) {
+                        3 -> Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            inlineAutofillViews.forEach { autofillView ->
+                                AndroidView(
+                                    factory = {
+                                        (autofillView.parent as? ViewGroup)?.removeView(autofillView)
+                                        autofillView
+                                    },
+                                    update = { v ->
+                                        v.requestLayout()
+                                    },
+                                    modifier = Modifier.height(40.dp)
+                                )
+                            }
+                        }
                         2 -> SuggestionCells(
                             suggestions = suggestions.take(3),
                             onSelect = onSelectSuggestion
@@ -185,11 +227,11 @@ fun SuggestionStrip(
                                         )
                                     }
                                 }
-                            } else if (recentScreenshot != null && showShot) {
+                            } else if (showOtp && !otpChipText.isNullOrBlank()) {
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
-                                    color = kbColors.stripChipSurface,
-                                    modifier = Modifier.clickable { onTapScreenshotChip(recentScreenshot) }
+                                    color = kbColors.actionSurface.copy(alpha = 0.24f),
+                                    modifier = Modifier.clickable { onTapOtpChip(otpChipText) }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -197,20 +239,34 @@ fun SuggestionStrip(
                                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Rounded.Screenshot,
+                                            imageVector = Icons.Rounded.Key,
                                             contentDescription = null,
                                             tint = kbColors.keyText,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(15.dp)
                                         )
                                         Text(
-                                            text = if (de) "Screenshot-Text" else "Scan screenshot",
-                                            color = kbColors.stripChipText,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            maxLines = 1
+                                            text = otpChipText,
+                                            color = kbColors.keyText,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = null,
+                                            tint = kbColors.keyHintText,
+                                            modifier = Modifier
+                                                .size(15.dp)
+                                                .clickable(onClick = onDismissOtpChip)
                                         )
                                     }
                                 }
+                            } else if (recentScreenshot != null && showShot) {
+                                ScreenshotPreviewStripChip(
+                                    shot = recentScreenshot,
+                                    onPasteImage = { onTapScreenshotChip(recentScreenshot) },
+                                    onPasteOcr = { onTapScreenshotOcr(recentScreenshot) },
+                                    onDismiss = onDismissScreenshotChip
+                                )
                             }
                         }
                         else -> QuickBarRow(
@@ -227,7 +283,6 @@ fun SuggestionStrip(
                     }
                 }
 
-                // Right: flat mic button
                 FlatStripButton(
                     icon = Icons.Rounded.Mic,
                     contentDescription = stringResource(R.string.cd_voice_mic),
@@ -235,6 +290,107 @@ fun SuggestionStrip(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ScreenshotPreviewStripChip(
+    shot: RecentScreenshot,
+    onPasteImage: () -> Unit,
+    onPasteOcr: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val kbColors = LocalTapwingKeyboardColors.current
+    val context = LocalContext.current
+    val thumb by produceState<Bitmap?>(initialValue = null, shot.localImagePath, shot.uri) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
+                if (!shot.localImagePath.isNullOrBlank()) {
+                    BitmapFactory.decodeFile(shot.localImagePath, opts)
+                } else {
+                    context.contentResolver.openInputStream(shot.uri)?.use {
+                        BitmapFactory.decodeStream(it, null, opts)
+                    }
+                }
+            }.getOrNull()
+        }
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = kbColors.stripChipSurface,
+            modifier = Modifier.clickable(onClick = onPasteImage)
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 5.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (thumb != null) {
+                    Image(
+                        bitmap = thumb!!.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.Screenshot,
+                        contentDescription = null,
+                        tint = kbColors.keyText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.strip_paste_screenshot),
+                    color = kbColors.stripChipText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+        }
+
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = kbColors.cardAltSurface,
+            modifier = Modifier.clickable(onClick = onPasteOcr)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.DocumentScanner,
+                    contentDescription = null,
+                    tint = kbColors.keyText,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = stringResource(R.string.strip_screenshot_ocr),
+                    color = kbColors.keyText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Icon(
+            imageVector = Icons.Rounded.Close,
+            contentDescription = null,
+            tint = kbColors.keyHintText,
+            modifier = Modifier
+                .size(16.dp)
+                .clickable(onClick = onDismiss)
+        )
     }
 }
 
@@ -341,7 +497,7 @@ private fun QuickBarRow(
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = if (de) "Leiste anpassen" else "Customize bar",
+                        text = stringResource(R.string.strip_customize_bar),
                         color = kbColors.modifierText,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
@@ -389,10 +545,18 @@ private fun VoiceToolbarRow(
         targetValue = if (voiceState.isListening) kbColors.actionSurface else kbColors.modifierSurface,
         label = "voicePulseBg"
     )
+    val timerText = if (voiceState.isLocalWhisper && voiceState.isListening) {
+        val m = voiceState.elapsedSeconds / 60
+        val s = voiceState.elapsedSeconds % 60
+        "%02d:%02d · ".format(m, s)
+    } else {
+        ""
+    }
     val statusText = when {
         voiceState.partialText.isNotBlank() -> voiceState.partialText
-        voiceState.isProcessing -> if (prefs.activeLocale == "de") "Wird bereinigt…" else "Tidying up…"
-        else -> stringResource(R.string.voice_hint_finish)
+        voiceState.isProcessing && voiceState.isLocalWhisper -> stringResource(R.string.voice_processing_local)
+        voiceState.isProcessing -> stringResource(R.string.voice_tidying_up)
+        else -> "$timerText${stringResource(R.string.voice_hint_finish)}"
     }
 
     Row(
@@ -417,6 +581,21 @@ private fun VoiceToolbarRow(
                 tint = kbColors.keyText,
                 modifier = Modifier.size(20.dp)
             )
+        }
+
+        if (voiceState.isLocalWhisper) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = kbColors.actionSurface.copy(alpha = 0.22f)
+            ) {
+                Text(
+                    text = "Local",
+                    color = kbColors.keyText,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
         }
 
         Text(

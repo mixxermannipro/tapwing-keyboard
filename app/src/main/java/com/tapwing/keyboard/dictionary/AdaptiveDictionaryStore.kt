@@ -2,20 +2,27 @@ package com.tapwing.keyboard.dictionary
 
 import android.content.Context
 import androidx.core.content.ContextCompat
+import com.tapwing.keyboard.ai.WritingAction
+import com.tapwing.keyboard.data.KeyboardLocales
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 data class DictionaryStats(
     val customWordCount: Int,
     val shortcutCount: Int,
+    val snippetCount: Int = 0,
     val learnedWordCount: Int,
     val learnedBigramCount: Int,
+    val learnedTrigramCount: Int = 0,
+    val perAppProfileCount: Int = 0,
     val rejectedCount: Int
 )
 
@@ -27,8 +34,9 @@ data class ImportSummary(
 
 /**
  * Persistent custom dictionary & adaptive typing-learning store.
- * Stores user-imported dictionaries, text shortcuts, unigram/bigram frequencies, and
- * rejected autocorrections inside device-protected storage so IME & Settings stay in sync.
+ * Learns unigrams, bigrams, trigrams, recency order, emoji habits, and rejected autocorrections
+ * while strictly separating sentence-start capitalization from mid-sentence casing so words
+ * like "und" are never erroneously capitalized mid-sentence.
  */
 class AdaptiveDictionaryStore(private val storageFile: File?) {
 
@@ -36,15 +44,28 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     private val customWordsLower = linkedMapOf<String, String>()
     private val shortcuts = linkedMapOf<String, String>()
     private val entryLocales = linkedMapOf<String, String>()
+
     private val learnedUnigrams = linkedMapOf<String, Int>()
     private val learnedUnigramsLower = linkedMapOf<String, String>()
+    // Tracks mid-sentence exact casing counts: lowercase -> (exactForm -> count)
+    private val midSentenceCaseCounts = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    // Monotonic order index for recency weighting
+    private val wordRecency = linkedMapOf<String, Long>()
+    private var recencyClock: Long = 0L
+
     private val learnedBigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    private val learnedTrigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    private val learnedEmojis = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    private val perAppUnigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    private val perAppTones = linkedMapOf<String, String>()
+    private val snippets = mutableListOf<TextSnippet>()
     private val rejectedCorrections = linkedSetOf<String>()
 
     private var lastLoadedModMs: Long = -1L
 
     init {
         seedDefaultShortcutsIfEmpty()
+        seedDefaultSnippetsIfEmpty()
         loadFromDisk()
     }
 
@@ -148,32 +169,180 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         word: String,
         previousWord: String?,
         learningEnabled: Boolean,
-        incognito: Boolean
+        incognito: Boolean,
+        previousTwoWord: String? = null,
+        wasSentenceStart: Boolean = false,
+        locale: String = "de",
+        appPackage: String? = null
     ) {
         if (!learningEnabled || incognito) return
         val clean = word.trim()
         if (clean.length < 2 || clean.any { it.isDigit() }) return
 
-        val currentCount = learnedUnigrams[clean] ?: 0
-        learnedUnigrams[clean] = (currentCount + 1).coerceAtMost(10_000)
-        learnedUnigramsLower[clean.lowercase()] = clean
+        val lower = clean.lowercase()
+        val isSingleLeadingCap = clean.length >= 2 &&
+            clean[0].isUpperCase() &&
+            clean.drop(1).all { it.isLowerCase() }
 
-        trimMapToMax(learnedUnigrams, MAX_UNIGRAMS)
+        // If typed at the start of a sentence with simple TitleCase (e.g. "Und", "Ich", "The"),
+        // store its base unigram as lowercase unless it's already an explicitly capitalized custom word
+        // or a known German noun.
+        val storedForm = when {
+            customWordsLower.containsKey(lower) -> customWordsLower[lower]!!
+            wasSentenceStart && isSingleLeadingCap &&
+                !(KeyboardLocales.baseLang(locale) == "de" && lower in LanguageVocabularies.germanCapitalNouns) -> lower
+            else -> clean
+        }
+
+        val existingForm = learnedUnigramsLower[lower]
+        val unigramKey = if (existingForm != null && !wasSentenceStart) {
+            // Keep existing unless mid-sentence usage establishes the new casing
+            existingForm
+        } else if (existingForm != null) {
+            existingForm
+        } else {
+            storedForm
+        }
+
+        val currentCount = learnedUnigrams[unigramKey] ?: 0
+        learnedUnigrams[unigramKey] = (currentCount + 1).coerceAtMost(20_000)
+        learnedUnigramsLower.putIfAbsent(lower, unigramKey)
+        recencyClock++
+        wordRecency[lower] = recencyClock
+
+        if (!wasSentenceStart) {
+            val caseMap = midSentenceCaseCounts.getOrPut(lower) { linkedMapOf() }
+            caseMap[clean] = ((caseMap[clean] ?: 0) + 1).coerceAtMost(10_000)
+            // Update displayed preferred form if this mid-sentence form clearly dominates
+            val dominant = dominantMidSentenceForm(lower)
+            if (dominant != null && dominant != unigramKey) {
+                val movedCount = learnedUnigrams.remove(unigramKey) ?: (currentCount + 1)
+                learnedUnigrams[dominant] = movedCount
+                learnedUnigramsLower[lower] = dominant
+            }
+        }
+
+        trimUnigramsIfNeeded()
 
         val prev = previousWord?.trim()?.lowercase().orEmpty()
         if (prev.length >= 2) {
             val nextMap = learnedBigrams.getOrPut(prev) { linkedMapOf() }
-            nextMap[clean] = ((nextMap[clean] ?: 0) + 1).coerceAtMost(5_000)
-            if (nextMap.size > 25) {
-                val lowest = nextMap.entries.minByOrNull { it.value }?.key
-                if (lowest != null) nextMap.remove(lowest)
+            val nextStored = if (wasSentenceStart && isSingleLeadingCap && lower in LanguageVocabularies.germanNeverAutoCapMidSentence) {
+                lower
+            } else {
+                storedForm
             }
-            if (learnedBigrams.size > MAX_BIGRAM_HEADS) {
-                val oldestKey = learnedBigrams.keys.firstOrNull()
-                if (oldestKey != null) learnedBigrams.remove(oldestKey)
+            nextMap[nextStored] = ((nextMap[nextStored] ?: 0) + 1).coerceAtMost(10_000)
+            trimSubMap(nextMap, MAX_FOLLOWERS_PER_HEAD)
+            trimOuterMap(learnedBigrams, MAX_BIGRAM_HEADS)
+
+            val prev2 = previousTwoWord?.trim()?.lowercase().orEmpty()
+            if (prev2.length >= 2) {
+                val trigramKey = "$prev2 $prev"
+                val triMap = learnedTrigrams.getOrPut(trigramKey) { linkedMapOf() }
+                triMap[nextStored] = ((triMap[nextStored] ?: 0) + 1).coerceAtMost(10_000)
+                trimSubMap(triMap, MAX_TRIGRAM_FOLLOWERS)
+                trimOuterMap(learnedTrigrams, MAX_TRIGRAM_CONTEXTS)
             }
         }
+
+        val cleanPkg = appPackage?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanPkg != null) {
+            val appMap = perAppUnigrams.getOrPut(cleanPkg) { linkedMapOf() }
+            appMap[storedForm] = ((appMap[storedForm] ?: 0) + 1).coerceAtMost(5_000)
+            trimSubMap(appMap, MAX_PER_APP_WORDS)
+            trimOuterMap(perAppUnigrams, MAX_APP_PROFILES)
+        }
         saveToDisk()
+    }
+
+    @Synchronized
+    fun recordAppWritingAction(appPackage: String?, action: WritingAction, learningEnabled: Boolean, incognito: Boolean) {
+        if (!learningEnabled || incognito) return
+        val pkg = appPackage?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        if (action in setOf(WritingAction.PROFESSIONAL, WritingAction.CASUAL, WritingAction.CONCISE, WritingAction.EMOTIVE)) {
+            perAppTones[pkg] = action.name
+            trimOuterMap(perAppTones, MAX_APP_PROFILES)
+            saveToDisk()
+        }
+    }
+
+    @Synchronized
+    fun preferredToneForApp(appPackage: String?): WritingAction? {
+        val pkg = appPackage?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        perAppTones[pkg]?.let { raw ->
+            return runCatching { WritingAction.valueOf(raw) }.getOrNull()
+        }
+        val lowerPkg = pkg.lowercase()
+        return when {
+            lowerPkg.contains("whatsapp") || lowerPkg.contains("telegram") ||
+                lowerPkg.contains("signal") || lowerPkg.contains("discord") ||
+                lowerPkg.contains("instagram") || lowerPkg.contains("messaging") -> WritingAction.CASUAL
+            lowerPkg.contains("gm") || lowerPkg.contains("outlook") ||
+                lowerPkg.contains("office") || lowerPkg.contains("teams") ||
+                lowerPkg.contains("slack") || lowerPkg.contains("linkedin") -> WritingAction.PROFESSIONAL
+            else -> null
+        }
+    }
+
+    @Synchronized
+    fun listSnippets(): List<TextSnippet> = snippets.toList()
+
+    @Synchronized
+    fun addOrUpdateSnippet(trigger: String, title: String, body: String, existingId: String? = null) {
+        val cleanTrigger = trigger.trim().lowercase().let {
+            if (it.startsWith("/")) it else "/$it"
+        }
+        val cleanTitle = title.trim().ifEmpty { cleanTrigger }
+        val cleanBody = body.trim()
+        if (cleanTrigger.length < 2 || cleanBody.isEmpty()) return
+
+        val idx = if (existingId != null) snippets.indexOfFirst { it.id == existingId } else -1
+        val item = TextSnippet(
+            id = existingId ?: UUID.randomUUID().toString(),
+            trigger = cleanTrigger,
+            title = cleanTitle,
+            body = cleanBody
+        )
+        if (idx >= 0) {
+            snippets[idx] = item
+        } else {
+            snippets.removeAll { it.trigger.equals(cleanTrigger, ignoreCase = true) }
+            snippets.add(0, item)
+        }
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun deleteSnippet(id: String) {
+        snippets.removeAll { it.id == id }
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun lookupSnippet(token: String): TextSnippet? {
+        val lower = token.trim().lowercase()
+        if (lower.isEmpty()) return null
+        return snippets.firstOrNull { it.trigger.equals(lower, ignoreCase = true) }
+    }
+
+    @Synchronized
+    fun recordEmojiAfterWord(word: String, emoji: String, learningEnabled: Boolean, incognito: Boolean) {
+        if (!learningEnabled || incognito) return
+        val lower = word.trim().lowercase()
+        val cleanEmoji = emoji.trim()
+        if (lower.length < 2 || cleanEmoji.isEmpty()) return
+        val map = learnedEmojis.getOrPut(lower) { linkedMapOf() }
+        map[cleanEmoji] = ((map[cleanEmoji] ?: 0) + 1).coerceAtMost(500)
+        trimSubMap(map, 6)
+        trimOuterMap(learnedEmojis, 400)
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun preferredEmojiFor(word: String): String? {
+        val lower = word.trim().lowercase()
+        return learnedEmojis[lower]?.maxByOrNull { it.value }?.key
     }
 
     @Synchronized
@@ -181,11 +350,30 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         if (!learningEnabled || incognito) return
         val clean = originalWord.trim()
         if (clean.length < 2) return
-        rejectedCorrections += clean.lowercase()
-        // Also learn the user's intended word immediately so Tapwing respects it next time.
-        customWordsLower.putIfAbsent(clean.lowercase(), clean)
+        val lower = clean.lowercase()
+        rejectedCorrections += lower
+        customWordsLower.putIfAbsent(lower, clean)
         learnedUnigrams[clean] = maxOf(learnedUnigrams[clean] ?: 0, 3)
-        learnedUnigramsLower[clean.lowercase()] = clean
+        learnedUnigramsLower[lower] = clean
+        recencyClock++
+        wordRecency[lower] = recencyClock
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun unrejectCorrection(word: String) {
+        rejectedCorrections.remove(word.trim().lowercase())
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun removeLearnedWord(word: String) {
+        val lower = word.trim().lowercase()
+        val existingKey = learnedUnigramsLower.remove(lower)
+        if (existingKey != null) learnedUnigrams.remove(existingKey)
+        learnedUnigrams.remove(word)
+        midSentenceCaseCounts.remove(lower)
+        wordRecency.remove(lower)
         saveToDisk()
     }
 
@@ -194,38 +382,118 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         val lower = word.lowercase()
         if (lower in rejectedCorrections) return true
         if (customWordsLower.containsKey(lower)) return true
-        return (learnedUnigrams[learnedUnigramsLower[lower]] ?: 0) >= 2
+        val key = learnedUnigramsLower[lower] ?: return false
+        return (learnedUnigrams[key] ?: 0) >= 2
+    }
+
+    /**
+     * Returns an explicit canonical casing for [word] ONLY if it comes from the user's explicit
+     * custom dictionary OR has been consistently typed with that casing mid-sentence.
+     * Never forces uppercase on words that were merely capitalized at sentence starts.
+     */
+    @Synchronized
+    fun canonicalMidSentenceCasingFor(word: String, locale: String): String? {
+        val lower = word.lowercase()
+        customWords[word]?.let { return word }
+        customWordsLower[lower]?.let { custom ->
+            if (custom != word) return custom
+        }
+        if (LanguageVocabularies.isNeverAutoCapitalizeMidSentence(word, locale)) {
+            return null
+        }
+        val dominant = dominantMidSentenceForm(lower)
+        if (dominant != null && dominant != word) {
+            return dominant
+        }
+        return null
+    }
+
+    private fun dominantMidSentenceForm(lower: String): String? {
+        val counts = midSentenceCaseCounts[lower] ?: return null
+        if (counts.isEmpty()) return null
+        val lowerCount = counts[lower] ?: 0
+        val bestUpper = counts.entries
+            .filter { it.key != lower }
+            .maxByOrNull { it.value } ?: return null
+        // Require at least 2 mid-sentence uses and clear preference over lowercase.
+        return if (bestUpper.value >= 2 && bestUpper.value > lowerCount * 2) {
+            bestUpper.key
+        } else {
+            null
+        }
     }
 
     @Synchronized
     fun lookupShortcut(token: String, locale: String): String? {
         val lower = token.trim().lowercase()
-        if (lower == "/datum" || lower == "/date") {
-            val pattern = if (locale.startsWith("de")) "dd.MM.yyyy" else "yyyy-MM-dd"
-            return SimpleDateFormat(pattern, Locale.getDefault()).format(Date())
+        val spec = KeyboardLocales.specFor(locale)
+        val cal = Calendar.getInstance()
+        return when (lower) {
+            "/datum", "/date" -> SimpleDateFormat(spec.datePattern, Locale.getDefault()).format(Date())
+            "/zeit", "/time" -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            "/woche", "/week" -> {
+                val wk = cal.get(Calendar.WEEK_OF_YEAR)
+                if (spec.baseLanguage == "de") "KW $wk" else "Week $wk"
+            }
+            "/monat", "/month" -> SimpleDateFormat("MMMM", Locale.forLanguageTag(spec.bcp47Tag)).format(Date())
+            "/jahr", "/year" -> SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
+            else -> shortcuts[lower]
         }
-        if (lower == "/zeit" || lower == "/time") {
-            return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        }
-        return shortcuts[lower]
     }
 
     @Synchronized
-    fun rankedPrefixCandidates(prefix: String, limit: Int = 5): List<String> {
+    fun rankedPrefixCandidates(
+        prefix: String,
+        limit: Int = 5,
+        previousWord: String? = null,
+        previousTwoWord: String? = null,
+        atSentenceStart: Boolean = false,
+        appPackage: String? = null
+    ): List<String> {
         val lower = prefix.lowercase()
         if (lower.isEmpty()) return emptyList()
-        val scored = linkedMapOf<String, Int>()
+        val scored = linkedMapOf<String, Double>()
+
+        val prevLower = previousWord?.trim()?.lowercase().orEmpty()
+        val prev2Lower = previousTwoWord?.trim()?.lowercase().orEmpty()
+        val bigramMap = if (prevLower.isNotEmpty()) learnedBigrams[prevLower] else null
+        val trigramMap = if (prevLower.isNotEmpty() && prev2Lower.isNotEmpty()) {
+            learnedTrigrams["$prev2Lower $prevLower"]
+        } else null
+        val appMap = appPackage?.trim()?.takeIf { it.isNotEmpty() }?.let { perAppUnigrams[it] }
+
+        fun addScore(word: String, baseScore: Double) {
+            val cleanWord = if (!atSentenceStart &&
+                word.firstOrNull()?.isUpperCase() == true &&
+                prefix.firstOrNull()?.isLowerCase() == true &&
+                word.lowercase() in LanguageVocabularies.germanNeverAutoCapMidSentence
+            ) {
+                word.lowercase()
+            } else {
+                word
+            }
+            if (!cleanWord.lowercase().startsWith(lower) || cleanWord == prefix) return
+            val recencyBonus = ((wordRecency[cleanWord.lowercase()] ?: 0L).toDouble() / maxOf(1L, recencyClock)) * 180.0
+            val biBoost = (bigramMap?.get(cleanWord) ?: bigramMap?.get(cleanWord.lowercase()) ?: 0) * 400.0
+            val triBoost = (trigramMap?.get(cleanWord) ?: trigramMap?.get(cleanWord.lowercase()) ?: 0) * 750.0
+            val appBoost = (appMap?.get(cleanWord) ?: appMap?.get(cleanWord.lowercase()) ?: 0) * 260.0
+            val total = baseScore + recencyBonus + biBoost + triBoost + appBoost
+            scored[cleanWord] = maxOf(scored[cleanWord] ?: 0.0, total)
+        }
 
         customWords.forEach { (word, weight) ->
-            if (word.lowercase().startsWith(lower) && word != prefix) {
-                scored[word] = maxOf(scored[word] ?: 0, 1_000 + weight)
-            }
+            addScore(word, 1_000.0 + weight)
         }
         learnedUnigrams.forEach { (word, count) ->
-            if (word.lowercase().startsWith(lower) && word != prefix) {
-                scored[word] = maxOf(scored[word] ?: 0, 500 + count * 10)
-            }
+            addScore(word, 500.0 + count * 15.0)
         }
+        appMap?.forEach { (word, count) ->
+            addScore(word, 650.0 + count * 30.0)
+        }
+        bigramMap?.forEach { (word, count) ->
+            addScore(word, 700.0 + count * 20.0)
+        }
+
         return scored.entries
             .sortedByDescending { it.value }
             .take(limit)
@@ -241,11 +509,38 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     }
 
     @Synchronized
-    fun predictNextWords(previousWord: String, limit: Int = 3): List<String> {
+    fun wordScore(word: String): Int {
+        val custom = customWords[word] ?: customWords[customWordsLower[word.lowercase()]] ?: 0
+        val learned = learnedUnigrams[word] ?: learnedUnigrams[learnedUnigramsLower[word.lowercase()]] ?: 0
+        val recency = ((wordRecency[word.lowercase()] ?: 0L) * 20 / maxOf(1L, recencyClock)).toInt()
+        return custom * 2 + learned * 5 + recency
+    }
+
+    @Synchronized
+    fun predictNextWords(
+        previousWord: String,
+        limit: Int = 3,
+        previousTwoWord: String? = null,
+        appPackage: String? = null
+    ): List<String> {
         val prevLower = previousWord.trim().lowercase()
         if (prevLower.isEmpty()) return emptyList()
-        val map = learnedBigrams[prevLower] ?: return emptyList()
-        return map.entries
+        val combined = linkedMapOf<String, Int>()
+        val appMap = appPackage?.trim()?.takeIf { it.isNotEmpty() }?.let { perAppUnigrams[it] }
+
+        val prev2Lower = previousTwoWord?.trim()?.lowercase().orEmpty()
+        if (prev2Lower.isNotEmpty()) {
+            learnedTrigrams["$prev2Lower $prevLower"]?.forEach { (word, count) ->
+                val appBoost = (appMap?.get(word) ?: 0) * 2
+                combined[word] = (combined[word] ?: 0) + count * 3 + appBoost
+            }
+        }
+        learnedBigrams[prevLower]?.forEach { (word, count) ->
+            val appBoost = (appMap?.get(word) ?: 0) * 2
+            combined[word] = (combined[word] ?: 0) + count + appBoost
+        }
+
+        return combined.entries
             .sortedByDescending { it.value }
             .take(limit)
             .map { it.key }
@@ -254,6 +549,13 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     @Synchronized
     fun listCustomWords(): List<Pair<String, Int>> =
         customWords.entries.sortedByDescending { it.value }.map { it.key to it.value }
+
+    @Synchronized
+    fun listTopLearnedWords(limit: Int = 40): List<Pair<String, Int>> =
+        learnedUnigrams.entries.sortedByDescending { it.value }.take(limit).map { it.key to it.value }
+
+    @Synchronized
+    fun listRejectedCorrections(): List<String> = rejectedCorrections.sorted()
 
     @Synchronized
     fun listShortcuts(): List<Pair<String, String>> =
@@ -291,7 +593,13 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     fun clearLearnedData() {
         learnedUnigrams.clear()
         learnedUnigramsLower.clear()
+        midSentenceCaseCounts.clear()
+        wordRecency.clear()
         learnedBigrams.clear()
+        learnedTrigrams.clear()
+        learnedEmojis.clear()
+        perAppUnigrams.clear()
+        perAppTones.clear()
         rejectedCorrections.clear()
         saveToDisk()
     }
@@ -308,11 +616,15 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     @Synchronized
     fun stats(): DictionaryStats {
         val bigramPairs = learnedBigrams.values.sumOf { it.size }
+        val trigramPairs = learnedTrigrams.values.sumOf { it.size }
         return DictionaryStats(
             customWordCount = customWords.size,
             shortcutCount = shortcuts.size,
+            snippetCount = snippets.size,
             learnedWordCount = learnedUnigrams.size,
             learnedBigramCount = bigramPairs,
+            learnedTrigramCount = trigramPairs,
+            perAppProfileCount = perAppUnigrams.size,
             rejectedCount = rejectedCorrections.size
         )
     }
@@ -327,13 +639,51 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         }
     }
 
-    private fun trimMapToMax(map: MutableMap<String, Int>, maxSize: Int) {
-        if (map.size <= maxSize) return
-        val toRemove = map.entries.sortedBy { it.value }.take(map.size - maxSize).map { it.key }
-        toRemove.forEach { key ->
-            map.remove(key)
-            learnedUnigramsLower.remove(key.lowercase())
+    private fun seedDefaultSnippetsIfEmpty() {
+        if (snippets.isEmpty()) {
+            snippets += TextSnippet(
+                id = "default_sig",
+                trigger = "/sig",
+                title = "Signatur",
+                body = "Viele Grüße\n{NAME}\n{EMAIL}"
+            )
+            snippets += TextSnippet(
+                id = "default_termin",
+                trigger = "/termin",
+                title = "Termin-Vorschlag",
+                body = "Hallo,\nwie wäre es am {WOCHENTAG}, {DATUM} um {ZEIT} Uhr?\nViele Grüße\n{NAME}"
+            )
+            snippets += TextSnippet(
+                id = "default_meeting_en",
+                trigger = "/meet",
+                title = "Meeting Reply (EN)",
+                body = "Hi,\nLet's connect on {DATE} ({WEEK}) at {TIME}.\nBest,\n{NAME}"
+            )
         }
+    }
+
+    private fun trimUnigramsIfNeeded() {
+        if (learnedUnigrams.size <= MAX_UNIGRAMS) return
+        val toRemove = learnedUnigrams.entries.sortedBy { it.value }.take(learnedUnigrams.size - MAX_UNIGRAMS).map { it.key }
+        toRemove.forEach { key ->
+            learnedUnigrams.remove(key)
+            val lower = key.lowercase()
+            learnedUnigramsLower.remove(lower)
+            midSentenceCaseCounts.remove(lower)
+            wordRecency.remove(lower)
+        }
+    }
+
+    private fun trimSubMap(map: MutableMap<String, Int>, maxSize: Int) {
+        if (map.size <= maxSize) return
+        val lowest = map.entries.minByOrNull { it.value }?.key
+        if (lowest != null) map.remove(lowest)
+    }
+
+    private fun <V> trimOuterMap(map: MutableMap<String, V>, maxSize: Int) {
+        if (map.size <= maxSize) return
+        val oldestKey = map.keys.firstOrNull()
+        if (oldestKey != null) map.remove(oldestKey)
     }
 
     private fun loadFromDisk() {
@@ -368,16 +718,92 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                 }
             }
 
+            midSentenceCaseCounts.clear()
+            root.optJSONObject("midSentenceCases")?.let { obj ->
+                obj.keys().forEach { lower ->
+                    val sub = obj.optJSONObject(lower) ?: return@forEach
+                    val map = linkedMapOf<String, Int>()
+                    sub.keys().forEach { form -> map[form] = sub.optInt(form, 1) }
+                    if (map.isNotEmpty()) midSentenceCaseCounts[lower] = map
+                }
+            }
+
+            wordRecency.clear()
+            recencyClock = root.optLong("recencyClock", 0L)
+            root.optJSONObject("wordRecency")?.let { obj ->
+                obj.keys().forEach { k ->
+                    val v = obj.optLong(k, 0L)
+                    if (v > 0L) {
+                        wordRecency[k] = v
+                        if (v > recencyClock) recencyClock = v
+                    }
+                }
+            }
+
             learnedBigrams.clear()
             root.optJSONObject("learnedBigrams")?.let { obj ->
                 obj.keys().forEach { prev ->
                     val sub = obj.optJSONObject(prev) ?: return@forEach
                     val map = linkedMapOf<String, Int>()
-                    sub.keys().forEach { next ->
-                        map[next] = sub.optInt(next, 1)
-                    }
+                    sub.keys().forEach { next -> map[next] = sub.optInt(next, 1) }
                     if (map.isNotEmpty()) learnedBigrams[prev] = map
                 }
+            }
+
+            learnedTrigrams.clear()
+            root.optJSONObject("learnedTrigrams")?.let { obj ->
+                obj.keys().forEach { ctx ->
+                    val sub = obj.optJSONObject(ctx) ?: return@forEach
+                    val map = linkedMapOf<String, Int>()
+                    sub.keys().forEach { next -> map[next] = sub.optInt(next, 1) }
+                    if (map.isNotEmpty()) learnedTrigrams[ctx] = map
+                }
+            }
+
+            learnedEmojis.clear()
+            root.optJSONObject("learnedEmojis")?.let { obj ->
+                obj.keys().forEach { word ->
+                    val sub = obj.optJSONObject(word) ?: return@forEach
+                    val map = linkedMapOf<String, Int>()
+                    sub.keys().forEach { emoji -> map[emoji] = sub.optInt(emoji, 1) }
+                    if (map.isNotEmpty()) learnedEmojis[word] = map
+                }
+            }
+
+            perAppUnigrams.clear()
+            root.optJSONObject("perAppUnigrams")?.let { obj ->
+                obj.keys().forEach { pkg ->
+                    val sub = obj.optJSONObject(pkg) ?: return@forEach
+                    val map = linkedMapOf<String, Int>()
+                    sub.keys().forEach { w -> map[w] = sub.optInt(w, 1) }
+                    if (map.isNotEmpty()) perAppUnigrams[pkg] = map
+                }
+            }
+
+            perAppTones.clear()
+            root.optJSONObject("perAppTones")?.let { obj ->
+                obj.keys().forEach { pkg ->
+                    val tone = obj.optString(pkg, "").trim()
+                    if (tone.isNotEmpty()) perAppTones[pkg] = tone
+                }
+            }
+
+            root.optJSONArray("snippets")?.let { arr ->
+                snippets.clear()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val trig = o.optString("trigger", "").trim()
+                    val body = o.optString("body", "")
+                    if (trig.isNotEmpty() && body.isNotEmpty()) {
+                        snippets += TextSnippet(
+                            id = o.optString("id", UUID.randomUUID().toString()),
+                            trigger = trig,
+                            title = o.optString("title", trig),
+                            body = body
+                        )
+                    }
+                }
+                if (snippets.isEmpty()) seedDefaultSnippetsIfEmpty()
             }
 
             entryLocales.clear()
@@ -417,10 +843,45 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             root.put("learnedUnigrams", JSONObject().apply {
                 learnedUnigrams.forEach { (k, v) -> put(k, v) }
             })
+            root.put("midSentenceCases", JSONObject().apply {
+                midSentenceCaseCounts.forEach { (lower, sub) ->
+                    put(lower, JSONObject().apply { sub.forEach { (f, c) -> put(f, c) } })
+                }
+            })
+            root.put("recencyClock", recencyClock)
+            root.put("wordRecency", JSONObject().apply {
+                wordRecency.forEach { (k, v) -> put(k, v) }
+            })
             root.put("learnedBigrams", JSONObject().apply {
                 learnedBigrams.forEach { (prev, sub) ->
-                    put(prev, JSONObject().apply {
-                        sub.forEach { (next, count) -> put(next, count) }
+                    put(prev, JSONObject().apply { sub.forEach { (next, count) -> put(next, count) } })
+                }
+            })
+            root.put("learnedTrigrams", JSONObject().apply {
+                learnedTrigrams.forEach { (ctx, sub) ->
+                    put(ctx, JSONObject().apply { sub.forEach { (next, count) -> put(next, count) } })
+                }
+            })
+            root.put("learnedEmojis", JSONObject().apply {
+                learnedEmojis.forEach { (w, sub) ->
+                    put(w, JSONObject().apply { sub.forEach { (e, c) -> put(e, c) } })
+                }
+            })
+            root.put("perAppUnigrams", JSONObject().apply {
+                perAppUnigrams.forEach { (pkg, sub) ->
+                    put(pkg, JSONObject().apply { sub.forEach { (w, c) -> put(w, c) } })
+                }
+            })
+            root.put("perAppTones", JSONObject().apply {
+                perAppTones.forEach { (pkg, tone) -> put(pkg, tone) }
+            })
+            root.put("snippets", JSONArray().apply {
+                snippets.forEach { s ->
+                    put(JSONObject().apply {
+                        put("id", s.id)
+                        put("trigger", s.trigger)
+                        put("title", s.title)
+                        put("body", s.body)
                     })
                 }
             })
@@ -433,8 +894,13 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     }
 
     companion object {
-        private const val MAX_UNIGRAMS = 2_500
-        private const val MAX_BIGRAM_HEADS = 1_200
+        private const val MAX_UNIGRAMS = 8_000
+        private const val MAX_BIGRAM_HEADS = 3_000
+        private const val MAX_FOLLOWERS_PER_HEAD = 30
+        private const val MAX_TRIGRAM_CONTEXTS = 2_000
+        private const val MAX_TRIGRAM_FOLLOWERS = 15
+        private const val MAX_APP_PROFILES = 40
+        private const val MAX_PER_APP_WORDS = 200
 
         fun createForContext(context: Context): AdaptiveDictionaryStore {
             val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
