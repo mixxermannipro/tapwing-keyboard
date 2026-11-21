@@ -78,4 +78,52 @@ class NaturalVoiceCleanerTest {
             NaturalVoiceCleaner.clean("Wir treffen uns morgen im Büro. Ich meine es ernst.", "de")
         )
     }
+
+    @Test
+    fun handlesRamblerSelfCorrectionsNumbersBulletsAndStutters() {
+        assertEquals(
+            "Bitte überweise 65 € bis Freitag.",
+            NaturalVoiceCleaner.clean("bitte überweise 50 € nein warte 65 € bis Freitag", "de")
+        )
+        assertEquals(
+            "Let's meet at 2 PM today.",
+            NaturalVoiceCleaner.clean("um let's meet at 3 PM actually make that 2 PM today", "en")
+        )
+        assertEquals(
+            "Das ist sehr sehr gut.",
+            NaturalVoiceCleaner.clean("das das ist sehr sehr gut", "de")
+        )
+        assertEquals(
+            "Einkaufsliste:\n• Milch\n• Brot",
+            NaturalVoiceCleaner.clean("einkaufsliste doppelpunkt stichpunkt milch stichpunkt brot", "de")
+        )
+    }
+
+    @Test
+    fun detectsExtendedRamblerVoiceEditingCommands() {
+        assertEquals(
+            VoiceCommandResult.DeleteLastSentence,
+            NaturalVoiceCleaner.parseCommandOrClean("lösche den letzten Satz.", "de")
+        )
+        assertEquals(
+            VoiceCommandResult.DeleteLastSentence,
+            NaturalVoiceCleaner.parseCommandOrClean("scratch that", "en")
+        )
+        assertEquals(
+            VoiceCommandResult.ClearAll,
+            NaturalVoiceCleaner.parseCommandOrClean("alles löschen", "de")
+        )
+        assertEquals(
+            VoiceCommandResult.UndoLast,
+            NaturalVoiceCleaner.parseCommandOrClean("rückgängig", "de")
+        )
+        assertEquals(
+            VoiceCommandResult.RewriteAction(WritingAction.SUMMARIZE),
+            NaturalVoiceCleaner.parseCommandOrClean("fasse das zusammen", "de")
+        )
+        assertEquals(
+            VoiceCommandResult.RewriteAction(WritingAction.REPHRASE),
+            NaturalVoiceCleaner.parseCommandOrClean("rephrase that", "en")
+        )
+    }
 }
