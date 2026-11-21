@@ -1260,14 +1260,32 @@ fun SnippetsPanel(
 @Composable
 fun EmojiPanel(
     prefs: TapwingPrefs,
+    recentEmojis: List<String> = emptyList(),
     onBack: () -> Unit,
     onInsertEmoji: (String) -> Unit,
     onBackspace: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
-    var selectedCategoryId by remember { mutableStateOf(EmojiCatalog.categories.first().id) }
-    val activeCategory = remember(selectedCategoryId) {
-        EmojiCatalog.categories.firstOrNull { it.id == selectedCategoryId } ?: EmojiCatalog.categories.first()
+    val allCategories = remember(recentEmojis) {
+        if (recentEmojis.isNotEmpty()) {
+            listOf(
+                com.tapwing.keyboard.emoji.EmojiCategory(
+                    id = "recent",
+                    icon = "🕒",
+                    titleDe = "Zuletzt",
+                    titleEn = "Recent",
+                    emojis = recentEmojis.map { it to "" }
+                )
+            ) + EmojiCatalog.categories
+        } else {
+            EmojiCatalog.categories
+        }
+    }
+    var selectedCategoryId by remember(recentEmojis.isNotEmpty()) {
+        mutableStateOf(allCategories.first().id)
+    }
+    val activeCategory = remember(selectedCategoryId, allCategories) {
+        allCategories.firstOrNull { it.id == selectedCategoryId } ?: allCategories.first()
     }
 
     Column(
@@ -1289,7 +1307,7 @@ fun EmojiPanel(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                EmojiCatalog.categories.forEach { cat ->
+                allCategories.forEach { cat ->
                     val selected = cat.id == activeCategory.id
                     Surface(
                         shape = RoundedCornerShape(14.dp),

@@ -71,6 +71,8 @@ enum class AiProviderType {
     GEMINI_NANO,
     GROQ_API,
     GEMINI_API,
+    OPENROUTER_API,
+    XAI_API,
     OPENAI_COMPATIBLE
 }
 
@@ -90,7 +92,7 @@ data class TapwingPrefs(
     val showNumberRow: Boolean = true,
     val showGermanUmlautKeys: Boolean = false,
     val showSpacebarLanguageLabel: Boolean = true,
-    val enterKeyAlwaysNewline: Boolean = true,
+    val enterKeyAlwaysNewline: Boolean = false,
     val roundedExpressiveKeys: Boolean = true,
     val showKeyBorders: Boolean = false,
     val keyboardHeight: KeyboardHeightMode = KeyboardHeightMode.NORMAL,
@@ -141,8 +143,18 @@ data class TapwingPrefs(
     val aiWritingToolsEnabled: Boolean = true,
     val aiSupportAllKeyboards: Boolean = true,
     val aiProvider: AiProviderType = AiProviderType.LOCAL_RULES,
-    val aiModel: String = "gemini-2.5-flash",
+    val aiModel: String = "gemini-3.8-flash",
     val aiCustomEndpoint: String = "",
+    val aiFallbackProvider: AiProviderType = AiProviderType.LOCAL_RULES,
+    val aiFallbackModel: String = "",
+    val dictationProvider: AiProviderType = AiProviderType.GROQ_API,
+    val dictationModel: String = "whisper-large-v3-turbo",
+    val dictationFallbackProvider: AiProviderType = AiProviderType.LOCAL_RULES,
+    val dictationFallbackModel: String = "",
+    val cleanupProvider: AiProviderType = AiProviderType.LOCAL_RULES,
+    val cleanupModel: String = "",
+    val cleanupFallbackProvider: AiProviderType = AiProviderType.LOCAL_RULES,
+    val cleanupFallbackModel: String = "",
     val aiOnboardingSeen: Boolean = false,
 
     val clipboardEnabled: Boolean = true,
@@ -227,6 +239,16 @@ class TapwingPreferencesRepository(context: Context) {
         val AI_PROVIDER = stringPreferencesKey("ai_provider")
         val AI_MODEL = stringPreferencesKey("ai_model")
         val AI_CUSTOM_ENDPOINT = stringPreferencesKey("ai_custom_endpoint")
+        val AI_FALLBACK_PROVIDER = stringPreferencesKey("ai_fallback_provider")
+        val AI_FALLBACK_MODEL = stringPreferencesKey("ai_fallback_model")
+        val DICTATION_PROVIDER = stringPreferencesKey("dictation_provider")
+        val DICTATION_MODEL = stringPreferencesKey("dictation_model")
+        val DICTATION_FALLBACK_PROVIDER = stringPreferencesKey("dictation_fallback_provider")
+        val DICTATION_FALLBACK_MODEL = stringPreferencesKey("dictation_fallback_model")
+        val CLEANUP_PROVIDER = stringPreferencesKey("cleanup_provider")
+        val CLEANUP_MODEL = stringPreferencesKey("cleanup_model")
+        val CLEANUP_FALLBACK_PROVIDER = stringPreferencesKey("cleanup_fallback_provider")
+        val CLEANUP_FALLBACK_MODEL = stringPreferencesKey("cleanup_fallback_model")
         val AI_ONBOARDING_SEEN = booleanPreferencesKey("ai_onboarding_seen")
 
         val CLIPBOARD_ENABLED = booleanPreferencesKey("clipboard_enabled")
@@ -280,7 +302,7 @@ class TapwingPreferencesRepository(context: Context) {
             showNumberRow = p[Keys.SHOW_NUMBER_ROW] ?: true,
             showGermanUmlautKeys = p[Keys.SHOW_GERMAN_UMLAUTS] ?: false,
             showSpacebarLanguageLabel = p[Keys.SHOW_SPACEBAR_LABEL] ?: true,
-            enterKeyAlwaysNewline = p[Keys.ENTER_KEY_ALWAYS_NEWLINE] ?: true,
+            enterKeyAlwaysNewline = p[Keys.ENTER_KEY_ALWAYS_NEWLINE] ?: false,
             roundedExpressiveKeys = p[Keys.ROUNDED_EXPRESSIVE_KEYS] ?: true,
             showKeyBorders = p[Keys.SHOW_KEY_BORDERS] ?: false,
             keyboardHeight = parseEnum(p[Keys.KEYBOARD_HEIGHT], KeyboardHeightMode.NORMAL),
@@ -331,8 +353,27 @@ class TapwingPreferencesRepository(context: Context) {
             aiWritingToolsEnabled = p[Keys.AI_WRITING_TOOLS_ENABLED] ?: true,
             aiSupportAllKeyboards = p[Keys.AI_SUPPORT_ALL_KEYBOARDS] ?: true,
             aiProvider = parseEnum(p[Keys.AI_PROVIDER], AiProviderType.LOCAL_RULES),
-            aiModel = p[Keys.AI_MODEL] ?: "gemini-2.5-flash",
+            aiModel = p[Keys.AI_MODEL] ?: "gemini-3.8-flash",
             aiCustomEndpoint = p[Keys.AI_CUSTOM_ENDPOINT] ?: "",
+            aiFallbackProvider = parseEnum(p[Keys.AI_FALLBACK_PROVIDER], AiProviderType.LOCAL_RULES),
+            aiFallbackModel = p[Keys.AI_FALLBACK_MODEL] ?: "",
+            dictationProvider = p[Keys.DICTATION_PROVIDER]?.let { parseEnum(it, AiProviderType.GROQ_API) }
+                ?: run {
+                    val legacyAi = parseEnum(p[Keys.AI_PROVIDER], AiProviderType.LOCAL_RULES)
+                    if (legacyAi == AiProviderType.GEMINI_API || legacyAi == AiProviderType.OPENAI_COMPATIBLE) {
+                        legacyAi
+                    } else {
+                        AiProviderType.GROQ_API
+                    }
+                },
+            dictationModel = p[Keys.DICTATION_MODEL] ?: "whisper-large-v3-turbo",
+            dictationFallbackProvider = parseEnum(p[Keys.DICTATION_FALLBACK_PROVIDER], AiProviderType.LOCAL_RULES),
+            dictationFallbackModel = p[Keys.DICTATION_FALLBACK_MODEL] ?: "",
+            cleanupProvider = p[Keys.CLEANUP_PROVIDER]?.let { parseEnum(it, AiProviderType.LOCAL_RULES) }
+                ?: parseEnum(p[Keys.AI_PROVIDER], AiProviderType.LOCAL_RULES),
+            cleanupModel = p[Keys.CLEANUP_MODEL] ?: (p[Keys.AI_MODEL] ?: ""),
+            cleanupFallbackProvider = parseEnum(p[Keys.CLEANUP_FALLBACK_PROVIDER], AiProviderType.LOCAL_RULES),
+            cleanupFallbackModel = p[Keys.CLEANUP_FALLBACK_MODEL] ?: "",
             aiOnboardingSeen = p[Keys.AI_ONBOARDING_SEEN] ?: false,
 
             clipboardEnabled = p[Keys.CLIPBOARD_ENABLED] ?: true,
@@ -407,6 +448,16 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.AI_PROVIDER] = next.aiProvider.name
         mutable[Keys.AI_MODEL] = next.aiModel
         mutable[Keys.AI_CUSTOM_ENDPOINT] = next.aiCustomEndpoint
+        mutable[Keys.AI_FALLBACK_PROVIDER] = next.aiFallbackProvider.name
+        mutable[Keys.AI_FALLBACK_MODEL] = next.aiFallbackModel
+        mutable[Keys.DICTATION_PROVIDER] = next.dictationProvider.name
+        mutable[Keys.DICTATION_MODEL] = next.dictationModel
+        mutable[Keys.DICTATION_FALLBACK_PROVIDER] = next.dictationFallbackProvider.name
+        mutable[Keys.DICTATION_FALLBACK_MODEL] = next.dictationFallbackModel
+        mutable[Keys.CLEANUP_PROVIDER] = next.cleanupProvider.name
+        mutable[Keys.CLEANUP_MODEL] = next.cleanupModel
+        mutable[Keys.CLEANUP_FALLBACK_PROVIDER] = next.cleanupFallbackProvider.name
+        mutable[Keys.CLEANUP_FALLBACK_MODEL] = next.cleanupFallbackModel
         mutable[Keys.AI_ONBOARDING_SEEN] = next.aiOnboardingSeen
         mutable[Keys.CLIPBOARD_ENABLED] = next.clipboardEnabled
         mutable[Keys.CLIPBOARD_RETENTION] = next.clipboardRetention.name

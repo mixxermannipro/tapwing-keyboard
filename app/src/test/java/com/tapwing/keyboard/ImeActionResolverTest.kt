@@ -30,7 +30,7 @@ class ImeActionResolverTest {
     }
 
     @Test
-    fun alwaysNewlineKeepsSearchAndNextInSingleLineNavigationFields() {
+    fun alwaysNewlineKeepsSearchGoAndNextInSingleLineNavigationFields() {
         val searchRes = ImeActionResolver.resolve(
             imeOptions = EditorInfo.IME_ACTION_SEARCH,
             inputType = InputType.TYPE_CLASS_TEXT,
@@ -38,6 +38,14 @@ class ImeActionResolverTest {
         )
         assertEquals(KeyActionLabel.SEARCH, searchRes.label)
         assertFalse(searchRes.insertNewlineDirectly)
+
+        val goRes = ImeActionResolver.resolve(
+            imeOptions = EditorInfo.IME_ACTION_GO,
+            inputType = InputType.TYPE_CLASS_TEXT,
+            alwaysNewline = true
+        )
+        assertEquals(KeyActionLabel.GO, goRes.label)
+        assertFalse(goRes.insertNewlineDirectly)
 
         val nextRes = ImeActionResolver.resolve(
             imeOptions = EditorInfo.IME_ACTION_NEXT,
@@ -49,25 +57,68 @@ class ImeActionResolverTest {
     }
 
     @Test
-    fun alwaysNewlinePrefersEnterInMultilineEvenWithSearchAction() {
-        val multilineSearch = ImeActionResolver.resolve(
-            imeOptions = EditorInfo.IME_ACTION_SEARCH,
+    fun whatsappChatUsesEnterParagraphWhileWhatsappSearchExecutesSearch() {
+        val chatRes = ImeActionResolver.resolve(
+            imeOptions = EditorInfo.IME_ACTION_SEND,
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE,
-            alwaysNewline = true
+            alwaysNewline = false,
+            packageName = "com.whatsapp"
         )
-        assertEquals(KeyActionLabel.ENTER, multilineSearch.label)
-        assertTrue(multilineSearch.insertNewlineDirectly)
+        assertEquals(KeyActionLabel.ENTER, chatRes.label)
+        assertTrue(chatRes.insertNewlineDirectly)
+
+        val chatSingleSend = ImeActionResolver.resolve(
+            imeOptions = EditorInfo.IME_ACTION_SEND,
+            inputType = InputType.TYPE_CLASS_TEXT,
+            alwaysNewline = false,
+            packageName = "com.whatsapp"
+        )
+        assertEquals(KeyActionLabel.ENTER, chatSingleSend.label)
+        assertTrue(chatSingleSend.insertNewlineDirectly)
+
+        val searchRes = ImeActionResolver.resolve(
+            imeOptions = EditorInfo.IME_ACTION_SEARCH,
+            inputType = InputType.TYPE_CLASS_TEXT,
+            alwaysNewline = false,
+            packageName = "com.whatsapp"
+        )
+        assertEquals(KeyActionLabel.SEARCH, searchRes.label)
+        assertFalse(searchRes.insertNewlineDirectly)
+        assertTrue(searchRes.sendEnterKeyFallback)
     }
 
     @Test
-    fun dynamicModeRespectsEditorImeActionWhenAlwaysNewlineIsOff() {
-        val sendRes = ImeActionResolver.resolve(
-            imeOptions = EditorInfo.IME_ACTION_SEND,
+    fun browserUrlBarAndGoogleSearchExecuteGoAndSearch() {
+        val chromeUrl = ImeActionResolver.resolve(
+            imeOptions = EditorInfo.IME_ACTION_NONE,
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
+            alwaysNewline = false,
+            packageName = "com.android.chrome"
+        )
+        assertEquals(KeyActionLabel.GO, chromeUrl.label)
+        assertFalse(chromeUrl.insertNewlineDirectly)
+        assertTrue(chromeUrl.sendEnterKeyFallback)
+
+        val googleSearch = ImeActionResolver.resolve(
+            imeOptions = EditorInfo.IME_ACTION_UNSPECIFIED,
+            inputType = InputType.TYPE_CLASS_TEXT,
+            alwaysNewline = false,
+            packageName = "com.google.android.googlequicksearchbox"
+        )
+        assertEquals(KeyActionLabel.SEARCH, googleSearch.label)
+        assertFalse(googleSearch.insertNewlineDirectly)
+        assertTrue(googleSearch.sendEnterKeyFallback)
+    }
+
+    @Test
+    fun dynamicModeRespectsFormNextDoneAndMultilineEmailBody() {
+        val nextRes = ImeActionResolver.resolve(
+            imeOptions = EditorInfo.IME_ACTION_NEXT,
             inputType = InputType.TYPE_CLASS_TEXT,
             alwaysNewline = false
         )
-        assertEquals(KeyActionLabel.SEND, sendRes.label)
-        assertFalse(sendRes.insertNewlineDirectly)
+        assertEquals(KeyActionLabel.NEXT, nextRes.label)
+        assertFalse(nextRes.insertNewlineDirectly)
 
         val doneRes = ImeActionResolver.resolve(
             imeOptions = EditorInfo.IME_ACTION_DONE,
@@ -76,6 +127,15 @@ class ImeActionResolverTest {
         )
         assertEquals(KeyActionLabel.DONE, doneRes.label)
         assertFalse(doneRes.insertNewlineDirectly)
+
+        val multilineEmail = ImeActionResolver.resolve(
+            imeOptions = EditorInfo.IME_ACTION_NONE,
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE,
+            alwaysNewline = false,
+            packageName = "com.google.android.gm"
+        )
+        assertEquals(KeyActionLabel.ENTER, multilineEmail.label)
+        assertTrue(multilineEmail.insertNewlineDirectly)
     }
 
     @Test

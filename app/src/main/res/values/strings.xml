@@ -78,7 +78,7 @@
     <string name="tools_edit_bar">Edit bar</string>
 
     <!-- Settings Titles & Sections -->
-    <string name="settings_subtitle">Privacy-first AI keyboard · v2.0</string>
+    <string name="settings_subtitle">Privacy-first AI keyboard · v2.4</string>
     <string name="settings_search_placeholder">Search settings</string>
     <string name="settings_test_placeholder">Test keyboard here…</string>
     <string name="nav_appearance">Theme &amp; Size</string>
@@ -87,7 +87,8 @@
     <string name="nav_dictionary">Dictionary &amp; Learning</string>
     <string name="nav_corrections">Typing &amp; Autocorrect</string>
     <string name="nav_voice">Dictation</string>
-    <string name="nav_writing_tools">Writing tools</string>
+    <string name="nav_writing_tools">AI Models &amp; Routing</string>
+    <string name="nav_api_keys">API Keys Vault</string>
     <string name="nav_clipboard">Clipboard &amp; Screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">About Tapwing</string>

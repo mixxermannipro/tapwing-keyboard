@@ -61,6 +61,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -188,6 +189,30 @@ fun SuggestionStrip(
                     onClick = onOpenToolsHub
                 )
 
+                if (showAutofill) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        inlineAutofillViews.forEach { autofillView ->
+                            key(autofillView) {
+                                AndroidView(
+                                    factory = {
+                                        (autofillView.parent as? ViewGroup)?.removeView(autofillView)
+                                        autofillView
+                                    },
+                                    update = { v ->
+                                        v.requestLayout()
+                                    },
+                                    modifier = Modifier.height(38.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
                 AnimatedContent(
                     targetState = middleKind,
                     modifier = Modifier.weight(1f),
@@ -239,26 +264,6 @@ fun SuggestionStrip(
                                     contentDescription = stringResource(R.string.clipboard_dismiss_suggestion),
                                     hapticEnabled = prefs.hapticFeedback,
                                     onClick = { onDismissClipboard(clipboardTimestamp) }
-                                )
-                            }
-                        }
-                        3 -> Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            inlineAutofillViews.forEach { autofillView ->
-                                AndroidView(
-                                    factory = {
-                                        (autofillView.parent as? ViewGroup)?.removeView(autofillView)
-                                        autofillView
-                                    },
-                                    update = { v ->
-                                        v.requestLayout()
-                                    },
-                                    modifier = Modifier.height(38.dp)
                                 )
                             }
                         }
@@ -390,11 +395,13 @@ fun SuggestionStrip(
                         )
                     }
                 }
+                }
 
                 FlatStripButton(
                     icon = Icons.Rounded.Mic,
                     contentDescription = stringResource(R.string.cd_voice_mic),
                     hapticEnabled = prefs.hapticFeedback,
+                    filled = true,
                     onClick = onStartVoice
                 )
             }
@@ -519,14 +526,18 @@ private fun FlatStripButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
     hapticEnabled: Boolean,
+    filled: Boolean = false,
     onClick: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val view = LocalView.current
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(36.dp)
             .clip(CircleShape)
+            .then(
+                if (filled) Modifier.background(kbColors.modifierSurface) else Modifier
+            )
             .clickable {
                 view.tapHaptic(hapticEnabled)
                 onClick()
@@ -537,7 +548,7 @@ private fun FlatStripButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = kbColors.modifierText,
-            modifier = Modifier.size(21.dp)
+            modifier = Modifier.size(20.dp)
         )
     }
 }

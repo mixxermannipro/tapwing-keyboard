@@ -24,6 +24,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
@@ -57,6 +58,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Download
@@ -64,14 +66,18 @@ import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.EmojiEmotions
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Spellcheck
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -79,9 +85,11 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -131,6 +139,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import com.tapwing.keyboard.R
+import com.tapwing.keyboard.ai.AiModelCatalog
 import com.tapwing.keyboard.ai.CleanupPromptBuilder
 import com.tapwing.keyboard.ai.CloudAiClient
 import com.tapwing.keyboard.ai.CloudAiResult
@@ -186,6 +195,7 @@ enum class SettingsRoute {
     CORRECTIONS,
     VOICE,
     WRITING_TOOLS,
+    API_KEYS,
     CLIPBOARD,
     EMOJI,
     STATS,
@@ -286,6 +296,7 @@ fun TapwingSettingsApp(
                     SettingsRoute.CORRECTIONS -> stringResource(R.string.nav_corrections)
                     SettingsRoute.VOICE -> stringResource(R.string.nav_voice)
                     SettingsRoute.WRITING_TOOLS -> stringResource(R.string.nav_writing_tools)
+                    SettingsRoute.API_KEYS -> stringResource(R.string.nav_api_keys)
                     SettingsRoute.CLIPBOARD -> stringResource(R.string.nav_clipboard)
                     SettingsRoute.EMOJI -> stringResource(R.string.nav_emoji)
                     SettingsRoute.STATS -> if (de) "Tastatur-Statistik" else "Typing Statistics"
@@ -359,7 +370,7 @@ fun TapwingSettingsApp(
                         de = de,
                         imeEnabled = imeEnabled,
                         imeSelected = imeSelected,
-
+                        savedKeyCount = secureKeyStorage.configuredCloudProviders().size,
 
                         searchQuery = searchQuery,
                         onSearchQueryChange = { searchQuery = it },
@@ -408,9 +419,23 @@ fun TapwingSettingsApp(
                     SettingsRoute.VOICE -> VoiceSettingsScreen(
                         prefs, de, modelManager, secureKeyStorage,
                         onOpenWritingTools = { navigateTo(SettingsRoute.WRITING_TOOLS) },
+                        onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
                         onUpdatePrefs = onUpdatePrefs
                     )
-                    SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(prefs, de, secureKeyStorage, modelManager, onUpdatePrefs)
+                    SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(
+                        prefs = prefs,
+                        de = de,
+                        secureKeyStorage = secureKeyStorage,
+                        modelManager = modelManager,
+                        onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
+                        onUpdatePrefs = onUpdatePrefs
+                    )
+                    SettingsRoute.API_KEYS -> ApiKeysVaultScreen(
+                        prefs = prefs,
+                        de = de,
+                        secureKeyStorage = secureKeyStorage,
+                        onUpdatePrefs = onUpdatePrefs
+                    )
                     SettingsRoute.CLIPBOARD -> ClipboardSettingsScreen(prefs, de, onUpdatePrefs)
                     SettingsRoute.EMOJI -> EmojiSettingsScreen(prefs, de, onUpdatePrefs)
                     SettingsRoute.STATS -> TypingStatsScreen(
@@ -463,6 +488,7 @@ private fun HomeSettingsScreen(
     de: Boolean,
     imeEnabled: Boolean,
     imeSelected: Boolean,
+    savedKeyCount: Int,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     testInputText: String,
@@ -541,14 +567,24 @@ private fun HomeSettingsScreen(
             title = stringResource(R.string.nav_writing_tools),
             icon = Icons.Rounded.AutoAwesome,
             badgeColor = Color(0xFF5856D6),
-            keywords = "ki ai groq gemini nano openai prompt",
+            keywords = "ki ai groq gemini nano openai grok openrouter prompt modell fallback",
             status = when (prefs.aiProvider) {
                 AiProviderType.LOCAL_RULES -> "Offline"
-                AiProviderType.GEMINI_NANO -> "Gemini Nano"
+                AiProviderType.GEMINI_NANO -> "Nano"
                 AiProviderType.GROQ_API -> "Groq"
                 AiProviderType.GEMINI_API -> "Gemini"
+                AiProviderType.OPENROUTER_API -> "OpenRouter"
+                AiProviderType.XAI_API -> "Grok"
                 AiProviderType.OPENAI_COMPATIBLE -> "OpenAI"
             }
+        ),
+        HomeNavItem(
+            route = SettingsRoute.API_KEYS,
+            title = stringResource(R.string.nav_api_keys),
+            icon = Icons.Rounded.Key,
+            badgeColor = Color(0xFFFF375F),
+            keywords = "api key schlüssel tresor vault gemini groq grok xai openrouter openai kopieren",
+            status = if (savedKeyCount > 0) "$savedKeyCount" else (if (de) "Leer" else "None")
         )
     )
 
@@ -586,8 +622,9 @@ private fun HomeSettingsScreen(
 
     val rows = intelligenceItems + toolsItems + appearanceItems
     val primaryRoutes = listOf(
-        SettingsRoute.VOICE, SettingsRoute.WRITING_TOOLS, SettingsRoute.CLIPBOARD,
-        SettingsRoute.APPEARANCE, SettingsRoute.LANGUAGES, SettingsRoute.CORRECTIONS
+        SettingsRoute.VOICE, SettingsRoute.WRITING_TOOLS, SettingsRoute.API_KEYS,
+        SettingsRoute.CLIPBOARD, SettingsRoute.APPEARANCE, SettingsRoute.LANGUAGES,
+        SettingsRoute.CORRECTIONS
     )
     val primary = primaryRoutes.map { route -> rows.filterIsInstance<HomeNavItem>().first { it.route == route } }
     val extra = rows.filterNot { it in primary }
@@ -2030,8 +2067,8 @@ private fun CorrectionsScreen(
                     ) { v -> onUpdatePrefs { it.copy(enterKeyAlwaysNewline = v) } }
                 }
                 AppleSectionFooter(
-                    if (de) "Zeigt in Chats immer das Zeilenumbruch-Symbol (↵) an und fügt beim Tippen eine neue Zeile ein, statt versehentlich abzuschicken."
-                    else "Shows the newline symbol (↵) in chat fields and inserts a line break instead of accidentally sending."
+                    if (de) "Aus (Empfohlen): Passt die Taste automatisch an — Suchen/Go im Browser, Zeilenumbruch in Chats mit Senden-Button (z. B. WhatsApp). Ein: erzwingt immer neue Zeile."
+                    else "Off (Recommended): Adapts automatically — Search/Go in browsers, newline in chats with a Send button (e.g. WhatsApp). On: always inserts newline."
                 )
             }
         }
@@ -2131,6 +2168,7 @@ private fun VoiceSettingsScreen(
     modelManager: LocalModelManager,
     secureKeyStorage: SecureKeyStorage,
     onOpenWritingTools: () -> Unit,
+    onOpenApiKeys: () -> Unit,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
@@ -2166,10 +2204,11 @@ private fun VoiceSettingsScreen(
     var diagReport by remember { mutableStateOf<String?>(null) }
 
     val useLiveCloud = prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE
-    val dictationProvider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
-        ?.takeIf { !useLiveCloud || it == CloudSpeechProvider.GEMINI }
-    val keySaved = remember(dictationProvider) {
-        dictationProvider != null && secureKeyStorage.readDictationKey(dictationProvider.name).isNotBlank()
+    val activeDictProviderType = if (useLiveCloud) AiProviderType.GEMINI_API else prefs.dictationProvider
+    val dictationProvider = CloudSpeechProvider.from(activeDictProviderType, prefs.aiCustomEndpoint)
+    val keySaved = remember(activeDictProviderType) {
+        secureKeyStorage.hasKey(activeDictProviderType) ||
+            (dictationProvider != null && secureKeyStorage.readDictationKey(dictationProvider.name).isNotBlank())
     }
     val localAndroidAvailable = remember(context) { TapwingVoiceController.isOnDeviceSpeechAvailable(context) }
     val installedWhisper = remember(modelStates, prefs.selectedWhisperModelId) {
@@ -2387,17 +2426,19 @@ private fun VoiceSettingsScreen(
                     AppleSectionHeader(if (de) "Cloud einrichten" else "Cloud setup")
                     AppleGroupedSurface {
                         MinimalValueRow(
-                            if (de) "Sprachmodell" else "Speech model",
-                            if (useLiveCloud) "Gemini Live" else when (dictationProvider) {
-                                CloudSpeechProvider.GEMINI -> "Gemini Flash-Lite"
-                                CloudSpeechProvider.GROQ -> "Groq Whisper Turbo"
-                                CloudSpeechProvider.OPENAI -> "OpenAI Transcribe"
-                                null -> if (de) "Anbieter wählen" else "Choose provider"
-                            }
+                            if (de) "Diktat-Anbieter" else "Dictation provider",
+                            if (useLiveCloud) "Gemini Live (${prefs.dictationModel.ifBlank { CloudDictation.GEMINI_MODEL }})"
+                            else "${AiModelCatalog.displayName(prefs.dictationProvider, de)} (${prefs.dictationModel.ifBlank { AiModelCatalog.defaultAudioModelFor(prefs.dictationProvider) }})"
                         )
                         AppleHairlineDivider(startIndent = 16.dp)
                         MinimalActionRow(
-                            if (de) "Schlüssel in Schreibhilfe prüfen" else "Check key in Writing tools",
+                            if (de) "API-Schlüssel-Tresor öffnen" else "Open API Keys Vault",
+                            MaterialTheme.colorScheme.primary,
+                            onClick = onOpenApiKeys
+                        )
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalActionRow(
+                            if (de) "Diktat- & Bereinigungsmodelle wählen" else "Choose dictation & cleanup models",
                             MaterialTheme.colorScheme.primary,
                             onClick = onOpenWritingTools
                         )
@@ -2681,13 +2722,7 @@ private fun VoiceSettingsScreen(
                     AppleHairlineDivider(startIndent = 16.dp)
                     MinimalValueRow(
                         if (de) "Aktive KI-Bereinigung" else "Active cleanup AI",
-                        when (prefs.aiProvider) {
-                            AiProviderType.LOCAL_RULES -> if (de) "On-Device Regeln" else "Local Rules"
-                            AiProviderType.GEMINI_NANO -> "Gemini Nano (AICore)"
-                            AiProviderType.GROQ_API -> "Groq Blitz-Cloud"
-                            AiProviderType.GEMINI_API -> "Gemini API"
-                            AiProviderType.OPENAI_COMPATIBLE -> "OpenAI API"
-                        }
+                        "${AiModelCatalog.displayName(prefs.cleanupProvider, de)}${if (prefs.cleanupModel.isNotBlank()) " · ${prefs.cleanupModel}" else ""}"
                     )
                     AppleHairlineDivider(startIndent = 16.dp)
                     Row(
@@ -2819,38 +2854,41 @@ private fun WritingToolsSettingsScreen(
     de: Boolean,
     secureKeyStorage: SecureKeyStorage,
     @Suppress("UNUSED_PARAMETER") modelManager: LocalModelManager,
+    onOpenApiKeys: () -> Unit,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var apiKeyInput by remember { mutableStateOf("") }
-    var hasSavedKey by remember { mutableStateOf(secureKeyStorage.hasApiKey()) }
-    var showKeyHelp by rememberSaveable { mutableStateOf(false) }
-    var testStatus by remember { mutableStateOf<String?>(null) }
-    var testing by remember { mutableStateOf(false) }
-    var advanced by rememberSaveable { mutableStateOf(false) }
     var nanoStatus by remember { mutableStateOf<NanoAvailability?>(null) }
     var nanoDownloading by remember { mutableStateOf(false) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    val savedCount = remember(prefs) { secureKeyStorage.configuredCloudProviders().size }
 
-    LaunchedEffect(prefs.aiProvider, prefs.activeLocale) {
+    LaunchedEffect(prefs.aiProvider, prefs.cleanupProvider, prefs.activeLocale) {
         nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
     }
 
-    val recommendedModel = when (prefs.aiProvider) {
-        AiProviderType.GROQ_API -> CloudAiClient.DEFAULT_GROQ_MODEL
-        AiProviderType.GEMINI_API -> CloudDictation.GEMINI_MODEL
-        AiProviderType.OPENAI_COMPATIBLE -> "gpt-4o-mini"
-        else -> ""
-    }
-
-    if (showKeyHelp && recommendedModel.isNotEmpty()) {
-        ApiKeyHelpDialog(
-            providerType = prefs.aiProvider,
-            de = de,
-            onDismiss = { showKeyHelp = false }
-        )
-    }
+    val allTextProviders = listOf(
+        AiProviderType.LOCAL_RULES,
+        AiProviderType.GEMINI_NANO,
+        AiProviderType.GEMINI_API,
+        AiProviderType.GROQ_API,
+        AiProviderType.OPENROUTER_API,
+        AiProviderType.XAI_API,
+        AiProviderType.OPENAI_COMPATIBLE
+    )
+    val allAudioProviders = listOf(
+        AiProviderType.GROQ_API,
+        AiProviderType.GEMINI_API,
+        AiProviderType.OPENAI_COMPATIBLE
+    )
+    val audioFallbackProviders = listOf(
+        AiProviderType.LOCAL_RULES,
+        AiProviderType.GROQ_API,
+        AiProviderType.GEMINI_API,
+        AiProviderType.OPENAI_COMPATIBLE
+    )
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
@@ -2862,48 +2900,115 @@ private fun WritingToolsSettingsScreen(
                 MinimalToggleRow(if (de) "KI-Schreibhilfe" else "AI Writing Tools", prefs.aiWritingToolsEnabled) { v ->
                     onUpdatePrefs { it.copy(aiWritingToolsEnabled = v) }
                 }
+                AppleHairlineDivider(startIndent = 16.dp)
+                MinimalNavRow(
+                    icon = Icons.Rounded.Key,
+                    badgeColor = Color(0xFFFF375F),
+                    title = if (de) "API-Schlüssel-Tresor" else "API Keys Vault",
+                    value = if (savedCount > 0) (if (de) "$savedCount aktiv" else "$savedCount active")
+                    else (if (de) "Einrichten" else "Set up"),
+                    onClick = onOpenApiKeys
+                )
             }
         }
 
+        // 1. Writing Assistant (KI-Schreibhilfe)
         item {
-            Column {
-                AppleSectionHeader(if (de) "Text glätten & umschreiben" else "Text cleanup & rewriting")
-                AppleGroupedSurface {
-                    val orderedProviders = listOf(
-                        AiProviderType.GROQ_API,
-                        AiProviderType.GEMINI_API,
-                        AiProviderType.GEMINI_NANO,
-                        AiProviderType.LOCAL_RULES,
-                        AiProviderType.OPENAI_COMPATIBLE
-                    )
-                    orderedProviders.forEachIndexed { index, provider ->
-                        if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
-                        val (title, description) = when (provider) {
-                            AiProviderType.GROQ_API -> if (de) {
-                                "Groq Blitz-Cloud (Empfohlen)" to "Extrem schnelle KI-Glättung (~0,2 Sek.) & Whisper Turbo. Kostenloser Schlüssel unter console.groq.com."
-                            } else "Groq Fast Cloud (Recommended)" to "Ultra-fast AI cleanup (~0.2s) & Whisper Turbo. Free API key at console.groq.com."
-                            AiProviderType.GEMINI_API -> if (de) {
-                                "Google Gemini" to "Ideal zusammen mit Gemini Live. Kostenloses Kontingent mit Google-Schlüssel."
-                            } else "Google Gemini" to "Great alongside Gemini Live. Free tier available with your Google API key."
-                            AiProviderType.GEMINI_NANO -> if (de) {
-                                "Gemini Nano (Google AICore)" to "Läuft direkt auf dem Gerät ohne Cloud (nur für unterstützte Pixel/Flagships mit AICore)."
-                            } else "Gemini Nano (Google AICore)" to "Runs privately on-device via Google AICore (supported Pixel & flagship devices only)."
-                            AiProviderType.LOCAL_RULES -> if (de) {
-                                "Offline-Regeln (Sofort)" to "Entfernt Füllwörter, Korrekturen & setzt Satzzeichen in < 1 ms — ohne Internet."
-                            } else "Offline Rules (Instant)" to "Removes fillers, self-corrections & adds punctuation in < 1ms — completely offline."
-                            AiProviderType.OPENAI_COMPATIBLE -> if (de) {
-                                "OpenAI / Eigener Endpunkt" to "Schreibhilfe und Cloud-Diktat mit eigenem OpenAI- oder kompatiblem Schlüssel."
-                            } else "OpenAI / Custom endpoint" to "Writing tools and cloud dictation with an OpenAI or compatible API key."
-                        }
-                        VoiceChoice(title, description, selected = prefs.aiProvider == provider) {
-                            onUpdatePrefs { it.copy(aiProvider = provider) }
-                        }
-                    }
-                }
-            }
+            TaskRoutingSection(
+                title = if (de) "1. KI-Schreibhilfe (Text-Aktionen)" else "1. AI Writing Assistant",
+                footer = if (de) {
+                    "Wähle Anbieter, Free-Account-Modell oder eigenen Modellnamen für Umformulieren, Korrigieren & Übersetzen — plus optionalen Fallback."
+                } else {
+                    "Mix any provider, free-tier model, or custom model ID for rewriting & proofreading — plus an automatic fallback."
+                },
+                de = de,
+                isAudioTask = false,
+                primaryProvider = prefs.aiProvider,
+                primaryModel = prefs.aiModel,
+                fallbackProvider = prefs.aiFallbackProvider,
+                fallbackModel = prefs.aiFallbackModel,
+                primaryOptions = allTextProviders,
+                fallbackOptions = allTextProviders,
+                secureKeyStorage = secureKeyStorage,
+                onSelectPrimaryProvider = { prov ->
+                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
+                    onUpdatePrefs { it.copy(aiProvider = prov, aiModel = defaultModel) }
+                },
+                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(aiModel = m) } },
+                onSelectFallbackProvider = { prov ->
+                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
+                    onUpdatePrefs { it.copy(aiFallbackProvider = prov, aiFallbackModel = defaultModel) }
+                },
+                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(aiFallbackModel = m) } },
+                onOpenApiKeys = onOpenApiKeys
+            )
         }
 
-        if (prefs.aiProvider == AiProviderType.GEMINI_NANO) item {
+        // 2. Dictation Cleanup (Bereinigung nach Diktat)
+        item {
+            TaskRoutingSection(
+                title = if (de) "2. Diktat-Bereinigung" else "2. Dictation Cleanup",
+                footer = if (de) {
+                    "Unabhängig vom Diktat-Anbieter: z. B. Gemini für Diktat, Groq Llama 3.1 / Grok für die Glättung."
+                } else {
+                    "Independent from your speech provider: e.g. Gemini for speech, Groq Llama 3.1 / Grok for text cleanup."
+                },
+                de = de,
+                isAudioTask = false,
+                primaryProvider = prefs.cleanupProvider,
+                primaryModel = prefs.cleanupModel,
+                fallbackProvider = prefs.cleanupFallbackProvider,
+                fallbackModel = prefs.cleanupFallbackModel,
+                primaryOptions = allTextProviders,
+                fallbackOptions = allTextProviders,
+                secureKeyStorage = secureKeyStorage,
+                onSelectPrimaryProvider = { prov ->
+                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
+                    onUpdatePrefs { it.copy(cleanupProvider = prov, cleanupModel = defaultModel) }
+                },
+                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(cleanupModel = m) } },
+                onSelectFallbackProvider = { prov ->
+                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
+                    onUpdatePrefs { it.copy(cleanupFallbackProvider = prov, cleanupFallbackModel = defaultModel) }
+                },
+                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(cleanupFallbackModel = m) } },
+                onOpenApiKeys = onOpenApiKeys
+            )
+        }
+
+        // 3. Cloud Speech-to-Text (Diktat)
+        item {
+            TaskRoutingSection(
+                title = if (de) "3. Cloud-Diktat (Sprache → Text)" else "3. Cloud Dictation (Speech → Text)",
+                footer = if (de) {
+                    "Greift in den Diktat-Modi „Cloud“ & „Gemini Live“. Mit Fallback wechselt Tapwing bei Fehlern automatisch auf den zweiten Dienst."
+                } else {
+                    "Used by Cloud & Gemini Live dictation modes. With a fallback configured, Tapwing switches seamlessly on errors."
+                },
+                de = de,
+                isAudioTask = true,
+                primaryProvider = prefs.dictationProvider,
+                primaryModel = prefs.dictationModel,
+                fallbackProvider = prefs.dictationFallbackProvider,
+                fallbackModel = prefs.dictationFallbackModel,
+                primaryOptions = allAudioProviders,
+                fallbackOptions = audioFallbackProviders,
+                secureKeyStorage = secureKeyStorage,
+                onSelectPrimaryProvider = { prov ->
+                    val defaultModel = AiModelCatalog.defaultAudioModelFor(prov)
+                    onUpdatePrefs { it.copy(dictationProvider = prov, dictationModel = defaultModel) }
+                },
+                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(dictationModel = m) } },
+                onSelectFallbackProvider = { prov ->
+                    val defaultModel = AiModelCatalog.defaultAudioModelFor(prov)
+                    onUpdatePrefs { it.copy(dictationFallbackProvider = prov, dictationFallbackModel = defaultModel) }
+                },
+                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(dictationFallbackModel = m) } },
+                onOpenApiKeys = onOpenApiKeys
+            )
+        }
+
+        if (prefs.aiProvider == AiProviderType.GEMINI_NANO || prefs.cleanupProvider == AiProviderType.GEMINI_NANO) item {
             Column {
                 AppleSectionHeader(if (de) "Geräte-Status (Google AICore)" else "Device status (Google AICore)")
                 AppleGroupedSurface {
@@ -2932,147 +3037,6 @@ private fun WritingToolsSettingsScreen(
                         }
                     }
                 }
-                AppleSectionFooter(
-                    if (de) "Wenn Google AICore auf deinem Smartphone nicht vorinstalliert ist, nutzt Tapwing automatisch die schnellen Offline-Regeln."
-                    else "If Google AICore is not present on your device, Tapwing automatically falls back to instant offline rules."
-                )
-            }
-        }
-
-        if (recommendedModel.isNotEmpty()) item {
-            Column {
-                AppleSectionHeader(if (de) "API-Schlüssel" else "API key")
-                AppleGroupedSurface {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        if (prefs.aiModel != recommendedModel) {
-                            FilledTonalButton(onClick = { onUpdatePrefs { it.copy(aiModel = recommendedModel) } }) {
-                                Text(if (de) "Empfohlenes Schreibmodell nutzen" else "Use recommended writing model")
-                            }
-                        }
-                        if (advanced) {
-                            AppleInlineField(
-                                value = prefs.aiModel,
-                                onValueChange = { model -> onUpdatePrefs { it.copy(aiModel = model) } },
-                                placeholder = if (de) "Modell für die Schreibhilfe" else "Model for Writing Tools"
-                            )
-                            if (prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE) {
-                                AppleInlineField(
-                                    value = prefs.aiCustomEndpoint,
-                                    onValueChange = { endpoint -> onUpdatePrefs { it.copy(aiCustomEndpoint = endpoint) } },
-                                    placeholder = "https://api.openai.com/v1/chat/completions"
-                                )
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f)) {
-                                AppleInlineField(
-                                    value = apiKeyInput,
-                                    onValueChange = { apiKeyInput = it },
-                                    placeholder = if (de) "API-Schlüssel einfügen" else "Paste your API key",
-                                    isPassword = true
-                                )
-                            }
-                            IconButton(onClick = { showKeyHelp = true }) {
-                                Icon(
-                                    Icons.Rounded.Info,
-                                    contentDescription = if (de) "Wo bekomme ich einen API-Schlüssel?" else "How do I get an API key?",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    val provider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
-                                    if (!SecureKeyStorage.isValidApiKey(apiKeyInput)) {
-                                        testStatus = if (de) "Der Schlüssel enthält Leerzeichen oder ungültige Zeichen. Kopiere ihn erneut."
-                                                     else "The key contains spaces or unsupported characters. Copy it again."
-                                    } else if (runCatching {
-                                        secureKeyStorage.saveApiKey(apiKeyInput, dictationProvider = provider?.name)
-                                    }.isSuccess) {
-                                        hasSavedKey = secureKeyStorage.hasApiKey()
-                                        apiKeyInput = ""
-                                        testStatus = if (de) "Schlüssel auf dem Gerät gespeichert." else "Key saved on this device."
-                                    } else {
-                                        testStatus = if (de) "Der Schlüssel konnte gerade nicht gespeichert werden."
-                                                     else "The key could not be saved right now."
-                                    }
-                                },
-                                enabled = apiKeyInput.isNotBlank(),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (de) "Speichern" else "Save", fontSize = 13.sp)
-                            }
-                            FilledTonalButton(
-                                onClick = {
-                                    secureKeyStorage.clearApiKey()
-                                    hasSavedKey = false
-                                    testStatus = if (de) "API-Key gelöscht." else "Cleared."
-                                },
-                                enabled = hasSavedKey,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (de) "Entfernen" else "Clear", fontSize = 13.sp)
-                            }
-                        }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !testing) {
-                                testing = true
-                                testStatus = null
-                                scope.launch {
-                                    val res = CloudAiClient.testConnection(
-                                        provider = prefs.aiProvider,
-                                        apiKey = secureKeyStorage.readApiKey(),
-                                        model = prefs.aiModel,
-                                        customEndpoint = prefs.aiCustomEndpoint,
-                                        locale = prefs.activeLocale
-                                    )
-                                    testing = false
-                                    testStatus = when (res) {
-                                        is CloudAiResult.Success -> "${res.providerLabel}: OK (${res.text})"
-                                        is CloudAiResult.Failure -> res.message
-                                    }
-                                }
-                            }
-                            .padding(horizontal = 16.dp, vertical = 13.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (testing) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(
-                            text = if (de) "Verbindung testen" else "Test connection",
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    if (testStatus != null) {
-                        AppleHairlineDivider(startIndent = 16.dp)
-                        Text(
-                            text = testStatus!!,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                        )
-                    }
-                }
-                AppleSectionFooter(
-                    if (de) "Empfohlen für die Schreibhilfe: $recommendedModel. Der Anbieter berechnet die Nutzung über dein eigenes Konto."
-                    else "Recommended for Writing Tools: $recommendedModel. The provider bills usage through your own account."
-                )
             }
         }
 
@@ -3094,74 +3058,471 @@ private fun WritingToolsSettingsScreen(
 }
 
 @Composable
-private fun ApiKeyHelpDialog(providerType: AiProviderType, de: Boolean, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val provider = when (providerType) {
-        AiProviderType.GROQ_API -> "Groq"
-        AiProviderType.GEMINI_API -> "Google Gemini"
-        else -> "OpenAI"
+private fun TaskRoutingSection(
+    title: String,
+    footer: String,
+    de: Boolean,
+    isAudioTask: Boolean,
+    primaryProvider: AiProviderType,
+    primaryModel: String,
+    fallbackProvider: AiProviderType,
+    fallbackModel: String,
+    primaryOptions: List<AiProviderType>,
+    fallbackOptions: List<AiProviderType>,
+    secureKeyStorage: SecureKeyStorage,
+    onSelectPrimaryProvider: (AiProviderType) -> Unit,
+    onPrimaryModelChange: (String) -> Unit,
+    onSelectFallbackProvider: (AiProviderType) -> Unit,
+    onFallbackModelChange: (String) -> Unit,
+    onOpenApiKeys: () -> Unit
+) {
+    val primaryPresets = if (isAudioTask) {
+        AiModelCatalog.audioModelsFor(primaryProvider)
+    } else {
+        AiModelCatalog.textModelsFor(primaryProvider)
     }
-    val keyPage = when (providerType) {
-        AiProviderType.GROQ_API -> "https://console.groq.com/keys"
-        AiProviderType.GEMINI_API -> "https://aistudio.google.com/apikey"
-        else -> "https://platform.openai.com/api-keys"
+    val fallbackPresets = if (isAudioTask) {
+        AiModelCatalog.audioModelsFor(fallbackProvider)
+    } else {
+        AiModelCatalog.textModelsFor(fallbackProvider)
     }
-    val steps = when {
-        providerType == AiProviderType.GROQ_API && de -> listOf(
-            "Öffne console.groq.com/keys und melde dich kostenlos an.",
-            "Tippe auf „Create API Key“ und kopiere den Schlüssel.",
-            "Füge den Schlüssel in Tapwing ein und tippe auf „Speichern“."
-        )
-        providerType == AiProviderType.GROQ_API -> listOf(
-            "Open console.groq.com/keys and sign in for free.",
-            "Click Create API Key and copy the generated key.",
-            "Paste the key in Tapwing and tap Save."
-        )
-        providerType == AiProviderType.GEMINI_API && de -> listOf(
-            "Öffne die Schlüsselseite von Google AI Studio und melde dich mit deinem Google-Konto an.",
-            "Tippe auf „Create API key“ (API-Schlüssel erstellen). Wähle ein Projekt oder erstelle eines.",
-            "Kopiere den Schlüssel. Halte das Schlüsselfeld in Tapwing gedrückt, wähle „Einfügen“ und tippe auf „Speichern“."
-        )
-        providerType == AiProviderType.GEMINI_API -> listOf(
-            "Open the Google AI Studio key page and sign in with your Google account.",
-            "Choose Create API key. Select a project or create one.",
-            "Copy the key. Touch and hold Tapwing’s key field, choose Paste, then tap Save."
-        )
-        de -> listOf(
-            "Öffne die Schlüsselseite der OpenAI API-Plattform und melde dich an.",
-            "Wähle ein Projekt und tippe auf „Create new secret key“ (neuen Schlüssel erstellen).",
-            "Kopiere den angezeigten Schlüssel sofort. Halte das Schlüsselfeld in Tapwing gedrückt, wähle „Einfügen“ und tippe auf „Speichern“."
-        )
-        else -> listOf(
-            "Open the OpenAI API platform's key page and sign in.",
-            "Select a project and choose Create new secret key.",
-            "Copy the key now. Touch and hold Tapwing’s key field, choose Paste, then tap Save."
-        )
+    var showFallback by rememberSaveable(title) {
+        mutableStateOf(fallbackProvider != AiProviderType.LOCAL_RULES)
     }
-    val cost = when {
-        providerType == AiProviderType.GROQ_API && de -> "Groq bietet ein großzügiges kostenloses Kontingent mit extrem schneller Antwortzeit (~0,2 Sek.)."
-        providerType == AiProviderType.GROQ_API -> "Groq offers a generous free tier with ultra-fast LPU inference (~0.2s)."
-        providerType == AiProviderType.GEMINI_API && de -> "Gemini 3.5 Transcribe Live und Flash-Lite haben ein kostenloses Kontingent."
-        providerType == AiProviderType.GEMINI_API -> "Gemini 3.5 Transcribe Live and Flash-Lite have a free quota."
-        de -> "Die OpenAI-API wird getrennt von einem ChatGPT-Abo abgerechnet. Richte bei Bedarf die Abrechnung auf der API-Plattform ein."
-        else -> "OpenAI API billing is separate from a ChatGPT subscription. Enable billing on the API platform if needed."
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (de) "API-Schlüssel für $provider" else "API key for $provider") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                steps.forEachIndexed { index, step -> Text("${index + 1}. $step") }
-                Text(cost, style = MaterialTheme.typography.bodySmall)
+
+    Column {
+        AppleSectionHeader(title)
+        AppleGroupedSurface {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = if (de) "Primärer Anbieter" else "Primary provider",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    primaryOptions.forEach { prov ->
+                        val hasKey = prov == AiProviderType.LOCAL_RULES ||
+                            prov == AiProviderType.GEMINI_NANO ||
+                            secureKeyStorage.hasKey(prov)
+                        FilterChip(
+                            selected = primaryProvider == prov,
+                            onClick = { onSelectPrimaryProvider(prov) },
+                            label = {
+                                Text(
+                                    text = if (hasKey) AiModelCatalog.displayName(prov, de)
+                                    else "${AiModelCatalog.displayName(prov, de)} · 🔑",
+                                    fontSize = 12.sp
+                                )
+                            }
+                        )
+                    }
+                }
+
+                if (primaryProvider in SecureKeyStorage.CLOUD_PROVIDERS && !secureKeyStorage.hasKey(primaryProvider)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f))
+                            .clickable(onClick = onOpenApiKeys)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (de) "Noch kein API-Key für ${AiModelCatalog.displayName(primaryProvider, true)} gespeichert"
+                            else "No API key saved for ${AiModelCatalog.displayName(primaryProvider, false)}",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = if (de) "Tresor →" else "Vault →",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                if (primaryPresets.isNotEmpty() || primaryProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
+                    Text(
+                        text = if (de) "Modell wählen (Free-Account & Empfohlen) oder frei eintippen"
+                        else "Pick a free-tier / recommended model or type any ID",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (primaryPresets.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            primaryPresets.forEach { spec ->
+                                val tag = if (spec.isFreeTier) "FREE · " else ""
+                                FilterChip(
+                                    selected = primaryModel.trim() == spec.id,
+                                    onClick = { onPrimaryModelChange(spec.id) },
+                                    label = { Text("$tag${spec.label}", fontSize = 12.sp) }
+                                )
+                            }
+                        }
+                        val activeSpec = primaryPresets.firstOrNull { it.id == primaryModel.trim() }
+                        if (activeSpec != null) {
+                            Text(
+                                text = if (de) activeSpec.noteDe else activeSpec.noteEn,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    AppleInlineField(
+                        value = primaryModel,
+                        onValueChange = onPrimaryModelChange,
+                        placeholder = if (de) "Modell-ID (z. B. gemini-3.8-flash)" else "Model ID (e.g. gemini-3.8-flash)"
+                    )
+                }
+
+                AppleHairlineDivider(startIndent = 0.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showFallback = !showFallback }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (de) {
+                            "Fallback: ${AiModelCatalog.displayName(fallbackProvider, true)}"
+                        } else {
+                            "Fallback: ${AiModelCatalog.displayName(fallbackProvider, false)}"
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Icon(
+                        imageVector = if (showFallback) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (showFallback) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        fallbackOptions.forEach { prov ->
+                            FilterChip(
+                                selected = fallbackProvider == prov,
+                                onClick = { onSelectFallbackProvider(prov) },
+                                label = { Text(AiModelCatalog.displayName(prov, de), fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                    if (fallbackPresets.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            fallbackPresets.forEach { spec ->
+                                FilterChip(
+                                    selected = fallbackModel.trim() == spec.id,
+                                    onClick = { onFallbackModelChange(spec.id) },
+                                    label = { Text(spec.label, fontSize = 12.sp) }
+                                )
+                            }
+                        }
+                    }
+                    if (fallbackProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
+                        AppleInlineField(
+                            value = fallbackModel,
+                            onValueChange = onFallbackModelChange,
+                            placeholder = if (de) "Fallback-Modell-ID (optional)" else "Fallback model ID (optional)"
+                        )
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(keyPage))) }
-            }) { Text(if (de) "Schlüsselseite öffnen" else "Open key page") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(if (de) "Schließen" else "Close") } }
-    )
+        }
+        AppleSectionFooter(footer)
+    }
+}
+
+@Composable
+private fun ApiKeysVaultScreen(
+    prefs: TapwingPrefs,
+    de: Boolean,
+    secureKeyStorage: SecureKeyStorage,
+    onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var vaultRevision by remember { mutableIntStateOf(0) }
+    var globalNotice by remember { mutableStateOf<String?>(null) }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        if (globalNotice != null) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Text(
+                        text = globalNotice!!,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                }
+            }
+        }
+
+        item {
+            AppleSectionFooter(
+                if (de) {
+                    "Alle Schlüssel liegen Hardware-verschlüsselt im Android Keystore. Du kannst Anbieter beliebig mischen (z. B. Gemini fürs Diktat + Groq/Grok für Text) und Schlüssel jederzeit anzeigen, kopieren oder testen."
+                } else {
+                    "All API keys are encrypted via hardware Android Keystore. Mix providers freely across dictation, cleanup, and writing tools, or view, copy, and test keys anytime."
+                }
+            )
+        }
+
+        SecureKeyStorage.CLOUD_PROVIDERS.forEach { provider ->
+            item(key = "${provider.name}_$vaultRevision") {
+                var savedKey by remember(vaultRevision) { mutableStateOf(secureKeyStorage.readKey(provider)) }
+                var keyInput by remember { mutableStateOf("") }
+                var revealKey by remember { mutableStateOf(false) }
+                var testing by remember { mutableStateOf(false) }
+                var testResult by remember { mutableStateOf<String?>(null) }
+
+                val isFreeProvider = provider in setOf(
+                    AiProviderType.GEMINI_API,
+                    AiProviderType.GROQ_API,
+                    AiProviderType.OPENROUTER_API
+                )
+                val signupUrl = AiModelCatalog.signupUrl(provider)
+
+                Column {
+                    AppleSectionHeader(
+                        text = AiModelCatalog.displayName(provider, de),
+                        trailingActionText = if (signupUrl.isNotEmpty()) (if (de) "Key holen ↗" else "Get key ↗") else null,
+                        onTrailingAction = if (signupUrl.isNotEmpty()) {
+                            { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(signupUrl))) } }
+                        } else null
+                    )
+                    AppleGroupedSurface {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (savedKey.isNotBlank()) {
+                                        if (de) "Gespeichert ✓" else "Saved ✓"
+                                    } else {
+                                        if (de) "Nicht hinterlegt" else "Not configured"
+                                    },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (savedKey.isNotBlank()) Color(0xFF34C759)
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (isFreeProvider) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                    ) {
+                                        Text(
+                                            text = "Free Tier",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = AiModelCatalog.freeTierSummary(provider, de),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            if (savedKey.isNotBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (revealKey) savedKey else secureKeyStorage.maskedPreview(provider),
+                                            fontSize = 13.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(
+                                            onClick = { revealKey = !revealKey },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (revealKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                                contentDescription = if (de) "Anzeigen" else "Reveal",
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                context.getSystemService(ClipboardManager::class.java)
+                                                    ?.setPrimaryClip(ClipData.newPlainText("Tapwing API Key", savedKey))
+                                                globalNotice = if (de) {
+                                                    "${AiModelCatalog.displayName(provider, true)}-Schlüssel kopiert"
+                                                } else {
+                                                    "Copied ${AiModelCatalog.displayName(provider, false)} key"
+                                                }
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.ContentCopy,
+                                                contentDescription = if (de) "Kopieren" else "Copy",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                secureKeyStorage.deleteKey(provider)
+                                                savedKey = ""
+                                                revealKey = false
+                                                testResult = if (de) "Schlüssel entfernt." else "Key removed."
+                                                vaultRevision++
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.DeleteOutline,
+                                                contentDescription = if (de) "Löschen" else "Delete",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (provider == AiProviderType.OPENAI_COMPATIBLE) {
+                                AppleInlineField(
+                                    value = prefs.aiCustomEndpoint,
+                                    onValueChange = { ep -> onUpdatePrefs { it.copy(aiCustomEndpoint = ep) } },
+                                    placeholder = "https://api.openai.com/v1/chat/completions"
+                                )
+                            }
+
+                            AppleInlineField(
+                                value = keyInput,
+                                onValueChange = { keyInput = it },
+                                placeholder = if (savedKey.isNotBlank()) {
+                                    if (de) "Neuen Schlüssel einfügen zum Ersetzen" else "Paste new key to replace"
+                                } else {
+                                    if (de) "API-Schlüssel einfügen" else "Paste API key"
+                                },
+                                isPassword = true
+                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        if (!SecureKeyStorage.isValidApiKey(keyInput)) {
+                                            testResult = if (de) "Ungültige Zeichen oder Leerzeichen im Schlüssel."
+                                            else "Invalid characters or spaces in key."
+                                        } else {
+                                            secureKeyStorage.saveKey(provider, keyInput)
+                                            savedKey = secureKeyStorage.readKey(provider)
+                                            keyInput = ""
+                                            testResult = if (de) "Sicher im Tresor gespeichert." else "Saved securely in vault."
+                                            vaultRevision++
+                                        }
+                                    },
+                                    enabled = keyInput.isNotBlank(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(if (de) "Speichern" else "Save", fontSize = 13.sp)
+                                }
+                                FilledTonalButton(
+                                    onClick = {
+                                        val keyToTest = savedKey
+                                        if (keyToTest.isBlank()) return@FilledTonalButton
+                                        testing = true
+                                        testResult = null
+                                        scope.launch {
+                                            val modelToTest = when (provider) {
+                                                prefs.aiProvider -> prefs.aiModel
+                                                prefs.cleanupProvider -> prefs.cleanupModel
+                                                else -> AiModelCatalog.defaultTextModelFor(provider)
+                                            }.ifBlank { AiModelCatalog.defaultTextModelFor(provider) }
+                                            val res = CloudAiClient.testConnection(
+                                                provider = provider,
+                                                apiKey = keyToTest,
+                                                model = modelToTest,
+                                                customEndpoint = prefs.aiCustomEndpoint,
+                                                locale = prefs.activeLocale
+                                            )
+                                            testing = false
+                                            testResult = when (res) {
+                                                is CloudAiResult.Success -> "✓ ${res.providerLabel}: ${res.text}"
+                                                is CloudAiResult.Failure -> "✗ ${res.message}"
+                                            }
+                                        }
+                                    },
+                                    enabled = savedKey.isNotBlank() && !testing,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    if (testing) {
+                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Text(if (de) "Testen" else "Test", fontSize = 13.sp)
+                                    }
+                                }
+                            }
+
+                            if (testResult != null) {
+                                Text(
+                                    text = testResult!!,
+                                    fontSize = 12.sp,
+                                    color = if (testResult!!.startsWith("✗")) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -80,6 +80,7 @@ fun TapwingKeyboardRoot(
     onDismissClipboard: (Long) -> Unit,
     inlineAutofillViews: List<View> = emptyList(),
     snippets: List<TextSnippet> = emptyList(),
+    recentEmojis: List<String> = emptyList(),
     voiceState: VoiceUiState,
     writingSourceText: String,
     writingOutput: WritingToolsOutput?,
@@ -295,6 +296,7 @@ fun TapwingKeyboardRoot(
                             KeyboardPanelMode.EMOJI -> {
                                 EmojiPanel(
                                     prefs = prefs,
+                                    recentEmojis = recentEmojis,
                                     onBack = onCloseSubPanel,
                                     onInsertEmoji = onInsertEmoji,
                                     onBackspace = onBackspace

@@ -77,4 +77,23 @@ class SuggestionEngineTest {
         assertTrue(SuggestionEngine.suggestionsFor("Ich bi", "de").none { it.isNextWord })
         assertTrue(SuggestionEngine.suggestionsFor("Ich bin. ", "de").none { it.text == "gleich" })
     }
+
+    @Test
+    fun keyboardProximityRanksAdjacentKeyTyposHigherThanDistantTypos() {
+        val adjDist = SuggestionEngine.weightedKeyboardDistance("hsllo", "hallo", "de")
+        val farDist = SuggestionEngine.weightedKeyboardDistance("hpllo", "hallo", "de")
+        assertTrue("Expected adjacent s<->a distance ($adjDist) < distant p<->a ($farDist)", adjDist < farDist)
+
+        val chips = SuggestionEngine.suggestionsFor("hsllo", "de", includeEmoji = false)
+        assertTrue(chips.any { it.text.equals("hallo", ignoreCase = true) })
+    }
+
+    @Test
+    fun matchesGermanUmlautWordsFromAsciiTyping() {
+        val uberChips = SuggestionEngine.suggestionsFor("uber", "de", includeEmoji = false)
+        assertTrue(uberChips.any { it.text == "über" })
+
+        val fuerChips = SuggestionEngine.suggestionsFor("fuer", "de", includeEmoji = false)
+        assertTrue(fuerChips.any { it.text == "für" })
+    }
 }

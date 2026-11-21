@@ -44,7 +44,7 @@ class ClipboardStore(
         maxUnpinnedItems: Int = 100
     ) {
         val text = rawText.trim()
-        if (text.isEmpty() || isApiKey(text)) return
+        if (text.isEmpty()) return
 
         val now = clockMs()
         val existingPinned = _items.value.firstOrNull { !it.isImage && it.text == text && it.pinned }
@@ -182,7 +182,7 @@ class ClipboardStore(
                 val imgPath = obj.optString("imagePath", "").takeIf { it.isNotBlank() }
                 if (imgPath != null && !File(imgPath).isFile) continue
                 val text = obj.getString("text")
-                if (imgPath == null && isApiKey(text)) continue
+                if (text.isBlank() && imgPath == null) continue
                 list += ClipboardClip(
                     id = obj.getString("id"),
                     text = text,

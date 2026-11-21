@@ -154,9 +154,17 @@ object SuggestionEngine {
 
         val lower = currentWord.lowercase()
         val knownByUser = dictionaryStore?.isKnownWord(currentWord) == true
+        val personalFix = dictionaryStore?.preferredCorrectionFor(currentWord)
+        if (personalFix != null && personalFix != currentWord) {
+            results += SuggestionChip(
+                text = preserveLeadingCase(currentWord, personalFix),
+                isCorrection = true,
+                replaceCharCount = currentWord.length
+            )
+        }
         val typoMap = LanguageVocabularies.typoMapFor(locale)
         val exactTypo = if (knownByUser) null else typoMap[lower]
-        if (exactTypo != null && exactTypo != currentWord) {
+        if (exactTypo != null && exactTypo != currentWord && results.none { it.text.equals(exactTypo, ignoreCase = false) }) {
             val cased = preserveLeadingCase(currentWord, exactTypo)
             results += SuggestionChip(
                 text = cased,
@@ -213,14 +221,26 @@ object SuggestionEngine {
             }
         }
 
-        // Active language stock vocabulary + 50k offline pack prefix completions
+        // Active language stock vocabulary + 50k offline pack prefix completions + umlaut-insensitive matching
         val vocab = LanguageVocabularies.vocabularyFor(locale)
         val packPrefixes = offlinePack?.prefixMatches(lower, limit = 6).orEmpty()
+        val normLower = normalizeForUmlautMatch(lower, baseLocale)
+        val umlautMatches = if (baseLocale == "de" && lower.length >= 3) {
+            (vocab + offlinePack?.topSwipePool?.take(4_000).orEmpty())
+                .asSequence()
+                .filter { cand ->
+                    val cl = cand.lowercase()
+                    cl != lower && (cl.contains('ä') || cl.contains('ö') || cl.contains('ü') || cl.contains('ß')) &&
+                        normalizeForUmlautMatch(cl, "de").startsWith(normLower)
+                }
+                .take(4)
+                .toList()
+        } else emptyList()
         val prefixMatches = (vocab
             .asSequence()
             .filter { it.lowercase().startsWith(lower) && it != currentWord }
             .take(5)
-            .toList() + packPrefixes).distinct()
+            .toList() + packPrefixes + umlautMatches).distinct()
 
         for (match in prefixMatches) {
             if (results.size >= 3) break
@@ -266,7 +286,7 @@ object SuggestionEngine {
             }
         }
 
-        // Fuzzy Damerau-Levenshtein matching (handles transpositions like "udn"->"und" with dist 1)
+        // Keyboard-proximity weighted Damerau-Levenshtein matching
         if (results.size < 3 && lower.length >= 3 && !knownByUser && offlinePack?.contains(lower) != true) {
             val customFuzzyPool = dictionaryStore?.allKnownVocabularyWords().orEmpty()
             val packPool = offlinePack?.topSwipePool?.take(4_000).orEmpty()
@@ -279,12 +299,12 @@ object SuggestionEngine {
                 .asSequence()
                 .filter { kotlin.math.abs(it.length - lower.length) <= 2 }
                 .map { word ->
-                    val dist = damerauLevenshtein(lower, word.lowercase())
+                    val dist = weightedKeyboardDistance(lower, word.lowercase(), locale)
                     val personalBoost = dictionaryStore?.wordScore(word) ?: 0
                     Triple(word, dist, personalBoost)
                 }
-                .filter { (word, dist, _) -> dist in 1..2 && word != currentWord }
-                .sortedWith(compareBy<Triple<String, Int, Int>> { it.second }.thenByDescending { it.third })
+                .filter { (word, dist, _) -> dist > 0.0 && dist <= 2.15 && word != currentWord }
+                .sortedWith(compareBy<Triple<String, Double, Int>> { it.second }.thenByDescending { it.third })
                 .take(4)
                 .toList()
 
@@ -327,6 +347,11 @@ object SuggestionEngine {
             return canonical
         }
 
+        val personalCorrection = dictionaryStore?.preferredCorrectionFor(word)
+        if (personalCorrection != null && personalCorrection != word) {
+            return preserveLeadingCase(word, personalCorrection)
+        }
+
         val typoMap = LanguageVocabularies.typoMapFor(locale)
         val mapped = typoMap[lower]
         if (mapped != null) {
@@ -357,13 +382,15 @@ object SuggestionEngine {
             return null
         }
 
-        // Check high-confidence single-edit transposition/typo in user's learned words (>= 3 uses)
+        // Check high-confidence keyboard-proximity / transposition typo in user's learned words (>= 3 uses)
         if (word.length >= 4 && dictionaryStore != null && !atSentenceStart) {
             val learnedMatch = dictionaryStore.allKnownVocabularyWords()
                 .asSequence()
                 .filter { kotlin.math.abs(it.length - word.length) <= 1 && dictionaryStore.wordScore(it) >= 15 }
-                .filter { damerauLevenshtein(lower, it.lowercase()) == 1 }
-                .maxByOrNull { dictionaryStore.wordScore(it) }
+                .map { it to weightedKeyboardDistance(lower, it.lowercase(), locale) }
+                .filter { (_, dist) -> dist > 0.0 && dist <= 0.85 }
+                .minWithOrNull(compareBy<Pair<String, Double>> { it.second }.thenByDescending { dictionaryStore.wordScore(it.first) })
+                ?.first
             if (learnedMatch != null && !learnedMatch.equals(word, ignoreCase = true)) {
                 return adjustCandidateCase(word, learnedMatch, locale, atSentenceStart, dictionaryStore)
             }
@@ -527,6 +554,94 @@ object SuggestionEngine {
         } else {
             target
         }
+    }
+
+    fun normalizeForUmlautMatch(raw: String, baseLocale: String): String {
+        val folded = raw.lowercase()
+            .replace("ä", "a")
+            .replace("ö", "o")
+            .replace("ü", "u")
+            .replace("ß", "ss")
+        return if (baseLocale == "de") {
+            folded
+                .replace("ae", "a")
+                .replace("oe", "o")
+                .replace("ue", "u")
+        } else {
+            folded
+        }
+    }
+
+    private fun keyGridCoords(locale: String): Map<Char, Pair<Float, Float>> {
+        val baseLang = KeyboardLocales.baseLang(locale)
+        val top = if (baseLang == "de") "qwertzuiop" else "qwertyuiop"
+        val mid = "asdfghjkl"
+        val bot = if (baseLang == "de") "yxcvbnm" else "zxcvbnm"
+        val coords = HashMap<Char, Pair<Float, Float>>(32)
+        top.forEachIndexed { idx, ch -> coords[ch] = idx.toFloat() to 0f }
+        mid.forEachIndexed { idx, ch -> coords[ch] = (idx + 0.5f) to 1f }
+        bot.forEachIndexed { idx, ch -> coords[ch] = (idx + 1.5f) to 2f }
+        coords['ä'] = coords['a'] ?: (0.5f to 1f)
+        coords['ö'] = coords['o'] ?: (8f to 0f)
+        coords['ü'] = coords['u'] ?: (6f to 0f)
+        coords['ß'] = coords['s'] ?: (1.5f to 1f)
+        return coords
+    }
+
+    private val umlautPairs = setOf(
+        'a' to 'ä', 'ä' to 'a',
+        'o' to 'ö', 'ö' to 'o',
+        'u' to 'ü', 'ü' to 'u',
+        's' to 'ß', 'ß' to 's',
+        'c' to 'ç', 'ç' to 'c',
+        'n' to 'ñ', 'ñ' to 'n'
+    )
+
+    fun weightedKeyboardDistance(a: String, b: String, locale: String = "de"): Double {
+        if (a == b) return 0.0
+        val n = a.length
+        val m = b.length
+        if (kotlin.math.abs(n - m) > 2) return 99.0
+        val coords = keyGridCoords(locale)
+        val d = Array(n + 1) { DoubleArray(m + 1) }
+        for (i in 0..n) d[i][0] = i.toDouble()
+        for (j in 0..m) d[0][j] = j.toDouble()
+        for (i in 1..n) {
+            for (j in 1..m) {
+                val ca = a[i - 1]
+                val cb = b[j - 1]
+                val subCost = when {
+                    ca == cb -> 0.0
+                    (ca to cb) in umlautPairs -> 0.25
+                    else -> {
+                        val pa = coords[ca]
+                        val pb = coords[cb]
+                        if (pa != null && pb != null) {
+                            val dx = pa.first - pb.first
+                            val dy = pa.second - pb.second
+                            val euclid = kotlin.math.hypot(dx.toDouble(), dy.toDouble())
+                            when {
+                                euclid <= 1.25 -> 0.45
+                                euclid <= 1.85 -> 0.55
+                                else -> 1.1
+                            }
+                        } else {
+                            1.0
+                        }
+                    }
+                }
+                var best = minOf(
+                    d[i - 1][j] + 1.0,
+                    d[i][j - 1] + 1.0,
+                    d[i - 1][j - 1] + subCost
+                )
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
+                    best = minOf(best, d[i - 2][j - 2] + 0.65)
+                }
+                d[i][j] = best
+            }
+        }
+        return d[n][m]
     }
 
     /**

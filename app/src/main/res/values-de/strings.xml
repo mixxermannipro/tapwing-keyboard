@@ -78,7 +78,7 @@
     <string name="tools_edit_bar">Leiste</string>
 
     <!-- Einstellungen -->
-    <string name="settings_subtitle">Offline-KI-Tastatur · v2.0</string>
+    <string name="settings_subtitle">Datenschutz-KI-Tastatur · v2.4</string>
     <string name="settings_search_placeholder">Einstellungen suchen</string>
     <string name="settings_test_placeholder">Hier Tastatur testen…</string>
     <string name="nav_appearance">Design &amp; Größe</string>
@@ -87,7 +87,8 @@
     <string name="nav_dictionary">Wörterbuch &amp; Lernen</string>
     <string name="nav_corrections">Tippen &amp; Autokorrektur</string>
     <string name="nav_voice">Diktat</string>
-    <string name="nav_writing_tools">Schreibhilfe</string>
+    <string name="nav_writing_tools">KI-Modelle &amp; Routing</string>
+    <string name="nav_api_keys">API-Schlüssel-Tresor</string>
     <string name="nav_clipboard">Zwischenablage &amp; Screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Über Tapwing</string>

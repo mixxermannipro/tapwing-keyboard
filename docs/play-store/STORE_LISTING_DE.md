@@ -49,13 +49,14 @@ DATENSCHUTZ IM FOKUS
 Tippen, Lernen, Wörterbücher, Zwischenablage und Kamera-OCR arbeiten direkt auf deinem Gerät. Keine Werbung, keine Analyse-Tracker, volle Kontrolle.
 ```
 
-## Versionshinweise (`v1.2.0` — max. 500 Zeichen)
+## Versionshinweise (`v2.4.0` — max. 500 Zeichen)
 ```text
-Neu in Tapwing 1.2.0:
-• Kompatibler .zip-Wörterbuch-Import & -Export (inkl. tab-getrennter Wörter und Textkürzel)
-• Minimalistisches Einstellungsmenü mit sauberer Zurückwisch-Navigation über alle Ebenen
-• Frei anpassbare & sortierbare Schnellleiste direkt in der Tastatur und in den Einstellungen
-• Privacy-First Foto-OCR über die System-Auswahl ohne pauschale Galerie-Berechtigung
+Neu in Tapwing 2.4.0:
+• Neues Kapsel-Design mit zentrierten Zweitbelegungen & flüssigem Layout-Wechsel ohne Hänger
+• Kontext-intelligente Taste unten rechts (Suchen im Browser, Absatz in Chats mit Senden-Button)
+• Lückenlose Zwischenablage & 1:1 Inline-Autofill-Chips (z. B. Bitwarden)
+• API-Schlüssel-Tresor: Anbieter mischen (Gemini, Groq, OpenRouter, Grok, OpenAI) mit Free-Account-Modellen & Fallback
+• 500+ vielfältige Emojis + intelligenteres Lernen & Vorhersagen pro App
 ```
 
 ## Store-Kategorie & Tags

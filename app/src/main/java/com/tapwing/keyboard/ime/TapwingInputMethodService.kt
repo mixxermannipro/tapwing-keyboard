@@ -51,6 +51,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.tapwing.keyboard.R
+import com.tapwing.keyboard.ai.AiModelCatalog
 import com.tapwing.keyboard.ai.LocalInferenceEngine
 import com.tapwing.keyboard.ai.LocalModelManager
 import com.tapwing.keyboard.ai.WritingAction
@@ -61,12 +62,14 @@ import com.tapwing.keyboard.clipboard.ClipboardStore
 import com.tapwing.keyboard.clipboard.RecentScreenshot
 import com.tapwing.keyboard.clipboard.ScreenshotMonitor
 import com.tapwing.keyboard.data.AiProviderType
+import com.tapwing.keyboard.data.DarkModePreference
 import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import com.tapwing.keyboard.data.TapwingPrefs
+import com.tapwing.keyboard.data.ThemeMode
 import com.tapwing.keyboard.data.TypingStatsStore
 import com.tapwing.keyboard.data.VoiceDictationMode
 import com.tapwing.keyboard.data.VoiceEngineMode
@@ -150,7 +153,9 @@ class TapwingInputMethodService :
     private var inlineAutofillViews by mutableStateOf<List<View>>(emptyList())
     private var inlineRequestGeneration = 0
     private var snippetsSnapshot by mutableStateOf<List<TextSnippet>>(emptyList())
+    private var recentEmojisSnapshot by mutableStateOf<List<String>>(emptyList())
     private var currentTargetPackage: String = ""
+    private var lastSyncedClipKey: String = ""
 
     private var writingSourceText by mutableStateOf("")
     private var writingOutput by mutableStateOf<WritingToolsOutput?>(null)
@@ -184,18 +189,30 @@ class TapwingInputMethodService :
     private var lastWordBeforeEmoji: String = ""
 
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
-        if (!clipboardAllowed()) return@OnPrimaryClipChangedListener
-        val clip = getSystemService(ClipboardManager::class.java)?.primaryClip
-        if (inputViewActive) updatePasteSuggestion(clip)
-        if (clip == null || clip.itemCount == 0 || clip.description.isSensitive()) {
-            return@OnPrimaryClipChangedListener
-        }
+        syncSystemClipboard(updateStrip = inputViewActive)
+    }
 
-        val item = clip.getItemAt(0)
-        val isImage = clip.description.hasMimeType("image/*") && item.uri != null
+    private fun syncSystemClipboard(updateStrip: Boolean = true) {
+        if (!currentPrefs.clipboardEnabled || currentPrefs.incognitoMode) return
+        val clip = runCatching {
+            getSystemService(ClipboardManager::class.java)?.primaryClip
+        }.getOrNull()
+        if (updateStrip && inputViewActive) updatePasteSuggestion(clip)
+        if (clip == null || clip.itemCount == 0) return
+
+        val firstItem = clip.getItemAt(0)
+        val firstDigest = firstItem.uri?.toString()
+            ?: firstItem.text?.toString()?.hashCode()?.toString()
+            ?: firstItem.coerceToText(this)?.toString()?.hashCode()?.toString()
+            ?: "0"
+        val clipKey = "${clip.description.timestamp}_${clip.itemCount}_$firstDigest"
+        if (clipKey == lastSyncedClipKey) return
+        lastSyncedClipKey = clipKey
+
+        val isImage = clip.description.hasMimeType("image/*") && firstItem.uri != null
         if (isImage) {
-            val uri = item.uri!!
-            if (ScreenshotMonitor.isSelfCopiedEvent(uri)) return@OnPrimaryClipChangedListener
+            val uri = firstItem.uri!!
+            if (ScreenshotMonitor.isSelfCopiedEvent(uri)) return
             serviceScope.launch {
                 val localFile = ScreenshotMonitor.cacheImageLocally(this@TapwingInputMethodService, uri)
                 if (localFile != null) {
@@ -227,11 +244,16 @@ class TapwingInputMethodService :
                     }
                 }
             }
-            return@OnPrimaryClipChangedListener
+            return
         }
 
-        val text = item.coerceToText(this)?.toString().orEmpty()
-        if (text.isNotBlank() && SuggestionEngine.extractOtpFromClipboard(text) == null) {
+        val parts = (0 until clip.itemCount).mapNotNull { idx ->
+            val item = clip.getItemAt(idx)
+            val raw = item.text?.toString() ?: item.coerceToText(this)?.toString()
+            raw?.trim()?.takeIf { it.isNotEmpty() }
+        }
+        val text = parts.joinToString("\n")
+        if (text.isNotBlank()) {
             clipboardStore.addClip(
                 rawText = text,
                 retention = currentPrefs.clipboardRetention,
@@ -241,14 +263,14 @@ class TapwingInputMethodService :
     }
 
     private fun clipboardAllowed() =
-        prefsLoaded && currentPrefs.clipboardEnabled && !currentPrefs.incognitoMode && !privateEditor
+        currentPrefs.clipboardEnabled && !currentPrefs.incognitoMode && !privateEditor
 
     private fun ClipDescription.isSensitive() =
         extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
 
     private fun updatePasteSuggestion(
         clip: android.content.ClipData? = if (clipboardAllowed()) {
-            getSystemService(ClipboardManager::class.java)?.primaryClip
+            runCatching { getSystemService(ClipboardManager::class.java)?.primaryClip }.getOrNull()
         } else null
     ) {
         pasteExpiryJob?.cancel()
@@ -258,8 +280,9 @@ class TapwingInputMethodService :
             clip.description.timestamp != dismissedCopyTimestamp
         ) {
             val timestamp = clip.description.timestamp
-            clip.getItemAt(0).text?.toString()
-                ?.takeIf { it.isNotBlank() && !ClipboardStore.isApiKey(it) }?.let { text ->
+            val item = clip.getItemAt(0)
+            val rawText = item.text?.toString() ?: item.coerceToText(this)?.toString()
+            rawText?.takeIf { it.isNotBlank() }?.let { text ->
                 val code = SuggestionEngine.extractOtpFromClipboard(text)
                 when {
                     code == null -> CopiedText(text, timestamp, verificationCode = false)
@@ -324,6 +347,7 @@ class TapwingInputMethodService :
         writingToolsEngine = WritingToolsEngine(secureKeyStorage, dictionaryStore, modelManager, this)
         clipboardStore = ClipboardStore.createForContext(this)
         snippetsSnapshot = dictionaryStore.listSnippets()
+        recentEmojisSnapshot = dictionaryStore.listRecentEmojis()
         voiceController = TapwingVoiceController(
             context = this,
             modelManager = modelManager,
@@ -340,7 +364,8 @@ class TapwingInputMethodService :
                     val resolved = ImeActionResolver.resolve(
                         imeOptions = currentEditorInfo?.imeOptions ?: 0,
                         inputType = currentEditorInfo?.inputType ?: 0,
-                        alwaysNewline = prefs.enterKeyAlwaysNewline
+                        alwaysNewline = prefs.enterKeyAlwaysNewline,
+                        packageName = currentEditorInfo?.packageName.orEmpty()
                     )
                     resolvedImeAction = resolved
                     imeActionLabel = resolved.label
@@ -398,6 +423,7 @@ class TapwingInputMethodService :
                     onDismissClipboard = ::dismissPasteSuggestion,
                     inlineAutofillViews = inlineAutofillViews,
                     snippets = snippetsSnapshot,
+                    recentEmojis = recentEmojisSnapshot,
                     voiceState = voiceUiState,
                     writingSourceText = writingSourceText,
                     writingOutput = writingOutput,
@@ -438,7 +464,10 @@ class TapwingInputMethodService :
                     },
                     onRunWritingAction = ::runWritingAction,
                     onApplyWritingResult = ::applyWritingToolsResult,
-                    onOpenClipboard = { panelMode = KeyboardPanelMode.CLIPBOARD },
+                    onOpenClipboard = {
+                        syncSystemClipboard(updateStrip = false)
+                        panelMode = KeyboardPanelMode.CLIPBOARD
+                    },
                     onOpenSnippets = {
                         snippetsSnapshot = dictionaryStore.listSnippets()
                         panelMode = KeyboardPanelMode.SNIPPETS
@@ -489,6 +518,12 @@ class TapwingInputMethodService :
                                 incognito = currentPrefs.incognitoMode
                             )
                         }
+                        dictionaryStore.recordRecentEmoji(
+                            emoji = emoji,
+                            learningEnabled = currentPrefs.learningEnabled,
+                            incognito = currentPrefs.incognitoMode
+                        )
+                        recentEmojisSnapshot = dictionaryStore.listRecentEmojis()
                         currentInputConnection?.commitText(emoji, 1)
                         pendingSmartUndoPair = null
                         pendingSuggestionTrailingSpace = false
@@ -564,6 +599,7 @@ class TapwingInputMethodService :
 
         dictionaryStore.reloadIfModifiedOnDisk()
         snippetsSnapshot = dictionaryStore.listSnippets()
+        recentEmojisSnapshot = dictionaryStore.listRecentEmojis()
         offlinePackManager.refreshStates()
         offlinePackManager.preloadLocaleAsync(currentPrefs.activeLocale)
         modelManager.refreshStates()
@@ -576,7 +612,7 @@ class TapwingInputMethodService :
         currentTargetPackage = info?.packageName.orEmpty()
         privateEditor = isPrivateEditor(info)
         inputViewActive = true
-        updatePasteSuggestion()
+        syncSystemClipboard(updateStrip = true)
         val variation = (info?.inputType ?: 0) and InputType.TYPE_MASK_VARIATION
         isEmailField = variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS ||
             variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
@@ -599,6 +635,11 @@ class TapwingInputMethodService :
         )
     }
 
+    override fun onWindowShown() {
+        super.onWindowShown()
+        syncSystemClipboard(updateStrip = inputViewActive)
+    }
+
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         inputViewActive = false
@@ -607,6 +648,16 @@ class TapwingInputMethodService :
         if (finishingInput) clearAutofillSuggestions()
         cancelVoice(keepRotationResume = !finishingInput)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+    }
+
+    private fun isKeyboardDark(): Boolean {
+        val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        return when (currentPrefs.darkMode) {
+            DarkModePreference.SYSTEM -> systemDark || currentPrefs.themeMode == ThemeMode.AMOLED_DARK
+            DarkModePreference.LIGHT -> false
+            DarkModePreference.DARK -> true
+        }
     }
 
     // ViewStyle.BaseBuilder carries a library restriction annotation in androidx.autofill 1.3.0
@@ -618,38 +669,68 @@ class TapwingInputMethodService :
             return null
         }
         val density = resources.displayMetrics.density
-        val minW = (48f * density).toInt()
+        val minW = (44f * density).toInt()
         val minH = (36f * density).toInt()
-        val maxW = (280f * density).toInt()
-        val maxH = (44f * density).toInt()
+        val maxW = (260f * density).toInt()
+        val maxH = (40f * density).toInt()
 
-        val chipBg = android.graphics.Color.valueOf(0xFF2B2F3A.toInt()).toArgb()
-        val textColor = android.graphics.Color.valueOf(0xFFF3F5FA.toInt()).toArgb()
+        val iconMinW = (36f * density).toInt()
+        val iconMaxW = (44f * density).toInt()
+
+        val dark = isKeyboardDark()
+        val chipDrawable = if (dark) R.drawable.bg_autofill_chip_dark else R.drawable.bg_autofill_chip_light
+        val titleColor = if (dark) 0xFFF1F3F4.toInt() else 0xFF1F1F1F.toInt()
+        val subtitleColor = if (dark) 0xFF9AA0A6.toInt() else 0xFF5F6368.toInt()
+        val padH = (12f * density).toInt()
+        val padV = (4f * density).toInt()
+        val marginH = (3f * density).toInt()
+        val marginV = (2f * density).toInt()
 
         val style = InlineSuggestionUi.newStyleBuilder()
             .setChipStyle(
                 ViewStyle.Builder()
-                    .setBackground(Icon.createWithResource(this, R.drawable.bg_autofill_chip))
-                    .setBackgroundColor(chipBg)
-                    .setPadding((10f * density).toInt(), (4f * density).toInt(), (10f * density).toInt(), (4f * density).toInt())
+                    .setBackground(Icon.createWithResource(this, chipDrawable))
+                    .setPadding(padH, padV, padH, padV)
+                    .setLayoutMargin(marginH, marginV, marginH, marginV)
                     .build()
             )
             .setTitleStyle(
                 TextViewStyle.Builder()
-                    .setTextColor(textColor)
+                    .setTextColor(titleColor)
                     .setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                     .build()
             )
             .setSubtitleStyle(
                 TextViewStyle.Builder()
-                    .setTextColor(0xFFB4BAC8.toInt())
+                    .setTextColor(subtitleColor)
                     .setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
                     .build()
             )
             .setStartIconStyle(
                 ImageViewStyle.Builder()
-                    .setMaxWidth((18f * density).toInt())
-                    .setMaxHeight((18f * density).toInt())
+                    .setMaxWidth((20f * density).toInt())
+                    .setMaxHeight((20f * density).toInt())
+                    .setLayoutMargin(0, 0, (6f * density).toInt(), 0)
+                    .build()
+            )
+            .setEndIconStyle(
+                ImageViewStyle.Builder()
+                    .setMaxWidth((16f * density).toInt())
+                    .setMaxHeight((16f * density).toInt())
+                    .setLayoutMargin((6f * density).toInt(), 0, 0, 0)
+                    .build()
+            )
+            .setSingleIconChipStyle(
+                ViewStyle.Builder()
+                    .setBackground(Icon.createWithResource(this, chipDrawable))
+                    .setPadding((8f * density).toInt(), padV, (8f * density).toInt(), padV)
+                    .setLayoutMargin(marginH, marginV, marginH, marginV)
+                    .build()
+            )
+            .setSingleIconChipIconStyle(
+                ImageViewStyle.Builder()
+                    .setMaxWidth((20f * density).toInt())
+                    .setMaxHeight((20f * density).toInt())
                     .build()
             )
             .build()
@@ -658,12 +739,15 @@ class TapwingInputMethodService :
             .addStyle(style)
             .build()
 
-        val spec = InlinePresentationSpec.Builder(Size(minW, minH), Size(maxW, maxH))
+        val chipSpec = InlinePresentationSpec.Builder(Size(minW, minH), Size(maxW, maxH))
+            .setStyle(stylesBundle)
+            .build()
+        val pinnedSpec = InlinePresentationSpec.Builder(Size(iconMinW, minH), Size(iconMaxW, maxH))
             .setStyle(stylesBundle)
             .build()
 
-        return InlineSuggestionsRequest.Builder(listOf(spec))
-            .setMaxSuggestionCount(4)
+        return InlineSuggestionsRequest.Builder(listOf(chipSpec, pinnedSpec))
+            .setMaxSuggestionCount(6)
             .setSupportedLocales(LocaleList.getDefault())
             .build()
     }
@@ -677,17 +761,25 @@ class TapwingInputMethodService :
     override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
         clearAutofillSuggestions()
         if (!currentPrefs.inlineAutofillEnabled || currentInputConnection == null) return false
-        val suggestions = response.inlineSuggestions.take(4)
+        val suggestions = response.inlineSuggestions
+            .take(6)
+            .sortedBy { it.info.isPinned }
         if (suggestions.isEmpty()) return false
 
         val generation = inlineRequestGeneration
         val density = resources.displayMetrics.density
-        val size = Size(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, (40f * density).toInt())
+        val chipHeightPx = (38f * density).toInt()
         val executor = ContextCompat.getMainExecutor(this)
         val rendered = arrayOfNulls<View>(suggestions.size)
         suggestions.forEachIndexed { index, suggestion ->
+            val size = if (suggestion.info.isPinned) {
+                Size(chipHeightPx, chipHeightPx)
+            } else {
+                Size(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, chipHeightPx)
+            }
             suggestion.inflate(this, size, executor) { view ->
                 if (generation == inlineRequestGeneration && currentPrefs.inlineAutofillEnabled && view != null) {
+                    view.setZOrderedOnTop(false)
                     rendered[index] = view
                     inlineAutofillViews = rendered.filterNotNull()
                 }
@@ -757,7 +849,8 @@ class TapwingInputMethodService :
         ImeActionResolver.resolve(
             imeOptions = info?.imeOptions ?: 0,
             inputType = info?.inputType ?: 0,
-            alwaysNewline = currentPrefs.enterKeyAlwaysNewline
+            alwaysNewline = currentPrefs.enterKeyAlwaysNewline,
+            packageName = info?.packageName.orEmpty()
         )
 
     private fun secondaryLocales(): List<String> {
@@ -781,13 +874,22 @@ class TapwingInputMethodService :
             }
             KeyActionType.BACKSPACE -> handleBackspace()
             KeyActionType.SYMBOLS_TOGGLE -> {
+                ic.finishComposingText()
+                pendingSmartUndoPair = null
+                pendingSuggestionTrailingSpace = false
                 layoutPage = if (layoutPage == KeyboardLayoutPage.LETTERS) {
                     KeyboardLayoutPage.SYMBOLS
                 } else {
                     KeyboardLayoutPage.LETTERS
                 }
+                if (layoutPage == KeyboardLayoutPage.LETTERS) {
+                    refreshContextAndSuggestions()
+                }
             }
             KeyActionType.SYMBOLS_EXT_TOGGLE -> {
+                ic.finishComposingText()
+                pendingSmartUndoPair = null
+                pendingSuggestionTrailingSpace = false
                 layoutPage = if (layoutPage == KeyboardLayoutPage.SYMBOLS_EXT) {
                     KeyboardLayoutPage.SYMBOLS
                 } else {
@@ -806,8 +908,17 @@ class TapwingInputMethodService :
                 learnCompletedTrailingWord()
                 if (resolvedImeAction.insertNewlineDirectly) {
                     ic.commitText("\n", 1)
-                } else if (!sendDefaultEditorAction(true)) {
-                    ic.commitText("\n", 1)
+                } else {
+                    val performed = (resolvedImeAction.editorActionId != EditorInfo.IME_ACTION_UNSPECIFIED &&
+                        ic.performEditorAction(resolvedImeAction.editorActionId)) ||
+                        sendDefaultEditorAction(true)
+                    if (!performed) {
+                        if (resolvedImeAction.sendEnterKeyFallback) {
+                            sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+                        } else {
+                            ic.commitText("\n", 1)
+                        }
+                    }
                 }
                 refreshContextAndSuggestions()
             }
@@ -1136,6 +1247,15 @@ class TapwingInputMethodService :
             )
         }
 
+        if (before.isNotEmpty() && chip.isCorrection) {
+            dictionaryStore.recordChosenCorrection(
+                mistypedWord = before,
+                chosenWord = chip.text,
+                learningEnabled = currentPrefs.learningEnabled,
+                incognito = currentPrefs.incognitoMode
+            )
+        }
+
         if (before.isNotEmpty() && (chip.isCorrection || chip.isShortcut)) {
             val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
             undoManager.record(
@@ -1272,39 +1392,52 @@ class TapwingInputMethodService :
             .joinToString(", ")
             .takeIf { it.isNotEmpty() }
 
-        val cloud = if (prefs.voiceEngine == VoiceEngineMode.CLOUD) {
-            val provider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
-            provider?.let {
-                val key = secureKeyStorage.readDictationKey(it.name)
-                if (key.isBlank()) null else CloudDictation(
-                    provider = it,
-                    apiKey = key,
-                    natural = natural,
-                    removeFillers = prefs.voiceRemoveFillers,
-                    autoPunctuate = prefs.voiceAutoPunctuate,
-                    customVocabulary = customVocab
-                )
+        fun buildCloudDictation(providerType: AiProviderType, modelId: String): CloudDictation? {
+            val speechProv = CloudSpeechProvider.from(providerType, prefs.aiCustomEndpoint) ?: return null
+            val key = secureKeyStorage.readKey(providerType).ifBlank {
+                secureKeyStorage.readDictationKey(speechProv.name)
             }
+            if (key.isBlank()) return null
+            val effectiveModel = modelId.trim().ifEmpty { AiModelCatalog.defaultAudioModelFor(providerType) }
+            return CloudDictation(
+                provider = speechProv,
+                apiKey = key,
+                natural = natural,
+                removeFillers = prefs.voiceRemoveFillers,
+                autoPunctuate = prefs.voiceAutoPunctuate,
+                customVocabulary = customVocab,
+                model = effectiveModel
+            )
+        }
+
+        val cloud = if (prefs.voiceEngine == VoiceEngineMode.CLOUD) {
+            buildCloudDictation(prefs.dictationProvider, prefs.dictationModel)
         } else null
         val geminiKey = if (prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE) {
-            secureKeyStorage.readDictationKey(CloudSpeechProvider.GEMINI.name)
+            secureKeyStorage.readKey(AiProviderType.GEMINI_API)
+                .ifBlank { secureKeyStorage.readDictationKey(CloudSpeechProvider.GEMINI.name) }
                 .takeIf(SecureKeyStorage::isValidApiKey)
         } else null
-        val live = if (geminiKey != null && prefs.aiProvider == AiProviderType.GEMINI_API) {
+        val live = if (geminiKey != null && prefs.dictationProvider == AiProviderType.GEMINI_API) {
             GeminiLiveConfig(
                 apiKey = geminiKey,
                 smartFormatting = natural && prefs.voiceRemoveFillers && prefs.voiceAutoPunctuate,
                 languageCode = KeyboardLocales.specFor(prefs.activeLocale).bcp47Tag.takeIf { prefs.voiceStrictLanguageLock }
             )
         } else null
-        val fallbackCloud = if (live != null) {
+        val explicitFallbackCloud = buildCloudDictation(
+            prefs.dictationFallbackProvider,
+            prefs.dictationFallbackModel
+        )
+        val fallbackCloud = explicitFallbackCloud ?: if (live != null) {
             CloudDictation(
                 provider = CloudSpeechProvider.GEMINI,
                 apiKey = geminiKey!!,
                 natural = natural,
                 removeFillers = prefs.voiceRemoveFillers,
                 autoPunctuate = prefs.voiceAutoPunctuate,
-                customVocabulary = customVocab
+                customVocabulary = customVocab,
+                model = prefs.dictationModel.trim().ifEmpty { CloudDictation.GEMINI_MODEL }
             )
         } else null
         voiceController.startListening(
@@ -1345,9 +1478,15 @@ class TapwingInputMethodService :
             dictionaryStore = dictionaryStore.takeUnless { prefs.incognitoMode }
         )
         val generation = voiceEditGeneration
-        val processingPrefs = if (prefs.incognitoMode && prefs.aiProvider in setOf(
-            AiProviderType.GROQ_API, AiProviderType.GEMINI_API, AiProviderType.OPENAI_COMPATIBLE
-        )) prefs.copy(aiProvider = AiProviderType.LOCAL_RULES) else prefs
+        val cloudSet = com.tapwing.keyboard.ai.WritingToolsEngine.CLOUD_PROVIDERS
+        val processingPrefs = if (prefs.incognitoMode) {
+            prefs.copy(
+                aiProvider = if (prefs.aiProvider in cloudSet) AiProviderType.LOCAL_RULES else prefs.aiProvider,
+                aiFallbackProvider = if (prefs.aiFallbackProvider in cloudSet) AiProviderType.LOCAL_RULES else prefs.aiFallbackProvider,
+                cleanupProvider = if (prefs.cleanupProvider in cloudSet) AiProviderType.LOCAL_RULES else prefs.cleanupProvider,
+                cleanupFallbackProvider = if (prefs.cleanupFallbackProvider in cloudSet) AiProviderType.LOCAL_RULES else prefs.cleanupFallbackProvider
+            )
+        } else prefs
 
         when (parsed) {
             VoiceCommandResult.DeleteLastWord -> deletePreviousWord()
@@ -1380,8 +1519,10 @@ class TapwingInputMethodService :
             }
             is VoiceCommandResult.Text -> {
                 val fallback = if (alreadyFormatted) raw else parsed.cleanedText
+                val noAiCleanup = processingPrefs.cleanupProvider == AiProviderType.LOCAL_RULES &&
+                    processingPrefs.cleanupFallbackProvider == AiProviderType.LOCAL_RULES
                 if (!prefs.voiceAiPolish ||
-                    processingPrefs.aiProvider == AiProviderType.LOCAL_RULES ||
+                    noAiCleanup ||
                     alreadyFormatted ||
                     WritingToolsEngine.shouldSkipCloudPolish(raw, fallback)
                 ) {
@@ -1409,6 +1550,13 @@ class TapwingInputMethodService :
         val inserted = commitTextWithSpaceSafety(text) ?: return
         voiceController.recordInsertionTiming()
         statsStore.recordVoiceDictation(text.length, prefs.incognitoMode)
+        dictionaryStore.recordTextBatch(
+            text = text,
+            learningEnabled = prefs.learningEnabled,
+            incognito = prefs.incognitoMode,
+            locale = prefs.activeLocale,
+            appPackage = if (prefs.perAppLearningEnabled) currentTargetPackage else null
+        )
         undoManager.record(
             beforeText = "",
             afterText = inserted,
@@ -1757,7 +1905,10 @@ class TapwingInputMethodService :
     private fun handleQuickBarAction(action: QuickBarAction) {
         when (action) {
             QuickBarAction.WRITING_TOOLS -> openWritingTools()
-            QuickBarAction.CLIPBOARD -> panelMode = KeyboardPanelMode.CLIPBOARD
+            QuickBarAction.CLIPBOARD -> {
+                syncSystemClipboard(updateStrip = false)
+                panelMode = KeyboardPanelMode.CLIPBOARD
+            }
             QuickBarAction.TEXT_EDIT -> panelMode = KeyboardPanelMode.TEXT_EDIT
             QuickBarAction.SCAN_TEXT -> launchScanTextActivity()
             QuickBarAction.SETTINGS -> launchSettingsActivity()
