@@ -52,7 +52,8 @@ class WavAudioRecorder {
         onReady: () -> Unit = {},
         onPcm: ((ByteArray, Int) -> Unit)? = null,
         canScheduleChunk: (() -> Boolean)? = null,
-        onSpeechChunk: ((File) -> Unit)? = null
+        onSpeechChunk: ((File) -> Unit)? = null,
+        skipFinalTrim: Boolean = false
     ): Boolean {
         if (current != null) return false
         val capture = Capture(outputFile)
@@ -63,7 +64,7 @@ class WavAudioRecorder {
                     if (!capture.stop) {
                         capture.result = record(
                             capture, onReady, onRmsDb, onElapsedSeconds,
-                            onPcm, canScheduleChunk, onSpeechChunk
+                            onPcm, canScheduleChunk, onSpeechChunk, skipFinalTrim
                         )
                     }
                 }
@@ -83,7 +84,8 @@ class WavAudioRecorder {
         onElapsedSeconds: (Int) -> Unit,
         onPcm: ((ByteArray, Int) -> Unit)?,
         canScheduleChunk: (() -> Boolean)?,
-        onSpeechChunk: ((File) -> Unit)?
+        onSpeechChunk: ((File) -> Unit)?,
+        skipFinalTrim: Boolean
     ): WavRecordingResult {
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         check(minBuffer > 0)
@@ -113,6 +115,7 @@ class WavAudioRecorder {
                 var firstActivity = -1L
                 var lastActivityEnd = 0L
                 var reportedSeconds = 0
+                val vad = AdaptiveSpeechDetector()
                 val boundaries = onSpeechChunk?.let { SpeechChunkBoundaries() }
 
                 while (!capture.stop) {
@@ -130,7 +133,9 @@ class WavAudioRecorder {
                     peak = maxOf(peak, framePeak)
                     val byteCount = read * 2
                     val rms = sqrt(sumSquares / read).coerceAtLeast(1.0)
-                    if (rms >= 48) {
+                    val voiced = vad.observe(rms)
+                    val hasSignal = vad.hasSignal(framePeak)
+                    if (voiced) {
                         if (firstActivity < 0) firstActivity = totalBytes
                         lastActivityEnd = totalBytes + byteCount
                     }
@@ -138,8 +143,8 @@ class WavAudioRecorder {
                     wav.write(bytes, 0, byteCount)
                     totalBytes += byteCount
                     boundaries?.observe(
-                        totalBytes, voiced = rms >= 48, decoderReady = canScheduleChunk?.invoke() == true,
-                        hasSignal = framePeak >= 35
+                        totalBytes, voiced = voiced, decoderReady = canScheduleChunk?.invoke() == true,
+                        hasSignal = hasSignal
                     )?.let { range -> onSpeechChunk?.invoke(copySpeechChunk(wav, capture.file, range)) }
 
                     val db = (20.0 * log10(rms / 32768.0)).toFloat()
@@ -153,10 +158,10 @@ class WavAudioRecorder {
                 boundaries?.tail(totalBytes)?.let { range ->
                     onSpeechChunk?.invoke(copySpeechChunk(wav, capture.file, range))
                 }
-                val usedBytes = if (firstActivity >= 0) {
+                val usedBytes = if (!skipFinalTrim && firstActivity >= 0 && totalBytes <= MAX_TRIM_BYTES) {
                     trimQuietEdges(wav, totalBytes, firstActivity, lastActivityEnd)
                 } else totalBytes
-                writeWavHeader(wav, usedBytes)
+                WavHeaderUtil.writeWavHeader(wav, usedBytes)
                 WavRecordingResult(capture.file, usedBytes * 1_000 / PCM_BYTES_PER_SECOND, peak)
             }
         } finally {
@@ -174,7 +179,7 @@ class WavAudioRecorder {
             source.seek(WAV_HEADER_BYTES + range.first)
             RandomAccessFile(part, "rw").use { target ->
                 var remaining = range.last - range.first + 1
-                writeWavHeader(target, remaining)
+                WavHeaderUtil.writeWavHeader(target, remaining)
                 val buffer = ByteArray(16_384)
                 while (remaining > 0) {
                     val count = minOf(remaining, buffer.size.toLong()).toInt()
@@ -250,10 +255,33 @@ class WavAudioRecorder {
         return null
     }
 
-    private fun writeWavHeader(raf: RandomAccessFile, pcmBytes: Long) {
+    private fun writeShortLE(buf: ByteArray, offset: Int, v: Int) {
+        buf[offset] = (v and 0xFF).toByte()
+        buf[offset + 1] = ((v shr 8) and 0xFF).toByte()
+    }
+
+    companion object {
+        private const val TAG = "TapwingVoice"
+        const val SAMPLE_RATE = 16_000
+        private const val PCM_BYTES_PER_SECOND = SAMPLE_RATE * 2L
+        private const val EDGE_PADDING_BYTES = PCM_BYTES_PER_SECOND * 3 / 10
+        private const val MAX_TRIM_BYTES = PCM_BYTES_PER_SECOND * 45L
+        private const val WAV_HEADER_BYTES = 44
+        private const val READ_CHUNK_SAMPLES = SAMPLE_RATE / 12 // ~83ms per read
+        private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
+        private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
+    }
+}
+
+internal object WavHeaderUtil {
+    const val HEADER_BYTES = 44
+    const val SAMPLE_RATE = 16_000
+    const val PCM_BYTES_PER_SECOND = SAMPLE_RATE * 2L
+
+    fun buildHeader(pcmBytes: Long): ByteArray {
         val totalDataLen = pcmBytes + 36
         val byteRate = SAMPLE_RATE * 1 * 16 / 8
-        val header = ByteArray(44)
+        val header = ByteArray(HEADER_BYTES)
         header[0] = 'R'.code.toByte(); header[1] = 'I'.code.toByte()
         header[2] = 'F'.code.toByte(); header[3] = 'F'.code.toByte()
         writeIntLE(header, 4, totalDataLen.toInt())
@@ -271,8 +299,12 @@ class WavAudioRecorder {
         header[36] = 'd'.code.toByte(); header[37] = 'a'.code.toByte()
         header[38] = 't'.code.toByte(); header[39] = 'a'.code.toByte()
         writeIntLE(header, 40, pcmBytes.toInt())
+        return header
+    }
+
+    fun writeWavHeader(raf: RandomAccessFile, pcmBytes: Long) {
         raf.seek(0)
-        raf.write(header)
+        raf.write(buildHeader(pcmBytes))
     }
 
     private fun writeIntLE(buf: ByteArray, offset: Int, v: Int) {
@@ -286,15 +318,47 @@ class WavAudioRecorder {
         buf[offset] = (v and 0xFF).toByte()
         buf[offset + 1] = ((v shr 8) and 0xFF).toByte()
     }
+}
 
-    companion object {
-        private const val TAG = "TapwingVoice"
-        const val SAMPLE_RATE = 16_000
-        private const val PCM_BYTES_PER_SECOND = SAMPLE_RATE * 2L
-        private const val EDGE_PADDING_BYTES = PCM_BYTES_PER_SECOND * 3 / 10
-        private const val WAV_HEADER_BYTES = 44
-        private const val READ_CHUNK_SAMPLES = SAMPLE_RATE / 12 // ~83ms per read
-        private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
-        private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
+/**
+ * Splits long 16 kHz mono WAV recordings into clean standalone WAV chunk files
+ * so cloud APIs and batch decoders process unlimited-length speech reliably.
+ */
+internal object WavChunker {
+    fun splitIfNeeded(wavFile: File, maxChunkSeconds: Int = 45): List<File> {
+        val maxPcmBytes = maxChunkSeconds.coerceAtLeast(1) * WavHeaderUtil.PCM_BYTES_PER_SECOND
+        val fileLen = wavFile.length()
+        if (fileLen <= WavHeaderUtil.HEADER_BYTES) return listOf(wavFile)
+        val totalPcmBytes = fileLen - WavHeaderUtil.HEADER_BYTES
+        if (totalPcmBytes <= maxPcmBytes) return listOf(wavFile)
+
+        val chunks = mutableListOf<File>()
+        try {
+            RandomAccessFile(wavFile, "r").use { src ->
+                src.seek(WavHeaderUtil.HEADER_BYTES.toLong())
+                var remaining = totalPcmBytes
+                val buffer = ByteArray(16_384)
+                while (remaining > 0) {
+                    val partSize = minOf(remaining, maxPcmBytes)
+                    val part = File.createTempFile("tapwing_cloud_chunk_", ".wav", wavFile.parentFile)
+                    chunks += part
+                    RandomAccessFile(part, "rw").use { dst ->
+                        dst.write(WavHeaderUtil.buildHeader(partSize))
+                        var leftInPart = partSize
+                        while (leftInPart > 0) {
+                            val toRead = minOf(leftInPart, buffer.size.toLong()).toInt()
+                            src.readFully(buffer, 0, toRead)
+                            dst.write(buffer, 0, toRead)
+                            leftInPart -= toRead
+                        }
+                    }
+                    remaining -= partSize
+                }
+            }
+            return chunks
+        } catch (ex: Exception) {
+            chunks.forEach { it.delete() }
+            throw ex
+        }
     }
 }
