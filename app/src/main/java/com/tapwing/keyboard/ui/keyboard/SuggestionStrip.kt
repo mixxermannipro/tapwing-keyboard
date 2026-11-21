@@ -118,12 +118,14 @@ fun SuggestionStrip(
     val voiceActive = voiceState.isListening || voiceState.isProcessing
     val showVoiceError = !voiceActive && !voiceState.errorMessage.isNullOrBlank()
     val showAutofill = !showVoiceError && inlineAutofillViews.isNotEmpty()
-    val showUndo = !showVoiceError && !showAutofill && proactiveUndo != null && prefs.proactiveUndo
+    val showNextWords = suggestions.any { it.isNextWord }
+    val undoAvailable = proactiveUndo != null && prefs.proactiveUndo
+    val showUndo = !showVoiceError && !showAutofill && undoAvailable && !showNextWords
     val showClipboard = !showVoiceError && !showAutofill && !showUndo && !clipboardPreview.isNullOrBlank()
     val showShot = !showClipboard && !showVoiceError && !showUndo && !showAutofill &&
         recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
     val showSuggestions = !showVoiceError && !showUndo && !showShot && !showAutofill && suggestions.isNotEmpty() &&
-        (isTyping || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
+        (isTyping || showNextWords || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
     val middleKind = when {
         showVoiceError || showUndo || showShot -> 1
         showClipboard -> 4
@@ -232,10 +234,18 @@ fun SuggestionStrip(
                                 )
                             }
                         }
-                        2 -> SuggestionCells(
-                            suggestions = suggestions.take(3),
-                            onSelect = onSelectSuggestion
-                        )
+                        2 -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) {
+                                SuggestionCells(suggestions = suggestions.take(3), onSelect = onSelectSuggestion)
+                            }
+                            if (showNextWords && undoAvailable) {
+                                FlatStripButton(
+                                    icon = Icons.AutoMirrored.Rounded.Undo,
+                                    contentDescription = proactiveUndo?.label ?: stringResource(R.string.btn_undo),
+                                    onClick = onTriggerUndo
+                                )
+                            }
+                        }
                         1 -> Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -469,7 +479,7 @@ private fun FlatStripButton(
     }
 }
 
-/** Gboard-style: up to three equal-width text cells separated by thin dividers. */
+/** Stable, equal-width candidates with a distinct surface for inline actions. */
 @Composable
 private fun SuggestionCells(
     suggestions: List<SuggestionChip>,
@@ -477,18 +487,11 @@ private fun SuggestionCells(
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     Row(
-        modifier = Modifier.fillMaxWidth().height(48.dp),
+        modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        suggestions.forEachIndexed { index, chip ->
-            if (index > 0) {
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(22.dp)
-                        .background(kbColors.keyBorder)
-                )
-            }
+        suggestions.forEach { chip ->
             val isEmphasized = chip.isCorrection || chip.isGrammarFix || chip.isShortcut || chip.isMath
             val label = when {
                 chip.isShortcut -> "⚡ ${chip.text}"
@@ -499,8 +502,9 @@ private fun SuggestionCells(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { onSelect(chip) },
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isEmphasized) kbColors.actionSurface.copy(alpha = 0.20f) else kbColors.keySurface.copy(alpha = 0.60f))
+                    .clickable(role = Role.Button) { onSelect(chip) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(

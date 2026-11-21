@@ -44,7 +44,7 @@ class ClipboardStore(
         maxUnpinnedItems: Int = 100
     ) {
         val text = rawText.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty() || isApiKey(text)) return
 
         val now = clockMs()
         val existingPinned = _items.value.firstOrNull { !it.isImage && it.text == text && it.pinned }
@@ -181,9 +181,11 @@ class ClipboardStore(
                 val obj = arr.getJSONObject(i)
                 val imgPath = obj.optString("imagePath", "").takeIf { it.isNotBlank() }
                 if (imgPath != null && !File(imgPath).isFile) continue
+                val text = obj.getString("text")
+                if (imgPath == null && isApiKey(text)) continue
                 list += ClipboardClip(
                     id = obj.getString("id"),
-                    text = obj.getString("text"),
+                    text = text,
                     timestampMs = obj.getLong("ts"),
                     pinned = obj.optBoolean("pinned", false),
                     imagePath = imgPath,
@@ -218,6 +220,12 @@ class ClipboardStore(
     }
 
     companion object {
+        // Keep recognizable keys off the keyboard and out of clipboard history.
+        private val apiKeyPattern = Regex("""(?:AIza[0-9A-Za-z_-]{35}|AQ\.[0-9A-Za-z_.-]{24,}|sk-[0-9A-Za-z_-]{24,})""")
+
+        internal fun isApiKey(text: String): Boolean = apiKeyPattern.matches(text.trim())
+
+
         fun createForContext(context: Context): ClipboardStore {
             val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
                 ?: context.applicationContext

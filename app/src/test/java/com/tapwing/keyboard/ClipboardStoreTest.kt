@@ -8,6 +8,16 @@ import org.junit.Test
 class ClipboardStoreTest {
 
     @Test
+    fun leavesApiKeysOutOfClipboardHistory() {
+        val store = ClipboardStore(storageFile = null)
+        store.addClip("AIza" + "x".repeat(35))
+        store.addClip("AQ." + "x".repeat(40))
+        store.addClip("sk-proj-" + "x".repeat(40))
+        store.addClip("A normal sentence")
+        assertEquals(listOf("A normal sentence"), store.items.value.map { it.text })
+    }
+
+    @Test
     fun enforcesMax100UnpinnedAndPreservesPinned() {
         var now = 1_000_000L
         val store = ClipboardStore(storageFile = null, clockMs = { now })

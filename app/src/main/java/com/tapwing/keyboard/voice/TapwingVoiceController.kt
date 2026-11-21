@@ -8,7 +8,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.util.Log
 import android.speech.RecognitionListener
+import android.speech.RecognitionSupport
+import android.speech.RecognitionSupportCallback
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
@@ -55,6 +59,11 @@ internal class TapwingVoiceController(
     private val wavRecorder = WavAudioRecorder()
 
     private var recognizer: SpeechRecognizer? = null
+    private var supportRecognizer: SpeechRecognizer? = null
+    private var checkedLanguageTag: String? = null
+    private var checkedLanguageAt = 0L
+    private var readyLanguageTag: String? = null
+    private var useOfflineAndroidSession = false
     private var pausedAtMs: Long = 0L
     private var wasListeningBeforeConfigChange: Boolean = false
     private var activeLocale: String = "de"
@@ -62,6 +71,11 @@ internal class TapwingVoiceController(
     private var activeWhisperModelId: String = "whisper-small-q5_1"
     private var activeWhisperFile: File? = null
     private var activeCloud: CloudDictation? = null
+    private var activeLive: GeminiLiveDictation? = null
+    private var activeIncremental: IncrementalWhisper? = null
+    private var stopStartedAt = 0L
+    private var lastPartialChangedAt = 0L
+    private var segmentSpeechEnded = false
     private var activeStrictLanguage = true
     private var activeOfflineOnly = false
     private var activeFormatting = true
@@ -89,6 +103,38 @@ internal class TapwingVoiceController(
                 }
             }
         }
+    }
+
+    fun prepareOfflineSpeech(locale: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || !isOnDeviceSpeechAvailable(context)) return
+        val tag = KeyboardLocales.specFor(locale).bcp47Tag
+        val now = SystemClock.elapsedRealtime()
+        if (checkedLanguageTag == tag && now - checkedLanguageAt < 60_000L) return
+        checkedLanguageTag = tag
+        checkedLanguageAt = now
+        supportRecognizer?.destroy()
+        supportRecognizer = null
+        val checker = runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(context) }.getOrNull() ?: return
+        supportRecognizer = checker
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
+            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        fun finish(installed: Boolean) {
+            if (supportRecognizer !== checker) return
+            supportRecognizer = null
+            readyLanguageTag = tag.takeIf { installed }
+            checker.destroy()
+        }
+        runCatching {
+            checker.checkRecognitionSupport(intent, context.mainExecutor, object : RecognitionSupportCallback {
+                override fun onSupportResult(support: RecognitionSupport) {
+                    finish(support.installedOnDeviceLanguages.any { it.replace('_', '-').equals(tag, ignoreCase = true) })
+                }
+
+                override fun onError(error: Int) = finish(installed = false)
+            })
+        }.onFailure { finish(installed = false) }
     }
 
     fun hasAudioPermission(): Boolean {
@@ -151,7 +197,8 @@ internal class TapwingVoiceController(
         offlineOnly: Boolean,
         whisperModelId: String,
         formatText: Boolean,
-        cloud: CloudDictation? = null
+        cloud: CloudDictation? = null,
+        live: GeminiLiveConfig? = null
     ) {
         if (sessionActive || _state.value.isProcessing) return
         activeLocale = locale
@@ -160,12 +207,23 @@ internal class TapwingVoiceController(
         activeStrictLanguage = strictLanguageLock
         activeFormatting = formatText
         activeOfflineOnly = offlineOnly
+        stopStartedAt = 0L
+        lastPartialChangedAt = 0L
 
         if (!hasAudioPermission()) {
             onNeedAudioPermission()
             return
         }
         val de = KeyboardLocales.baseLang(locale) == "de"
+        if (engineMode == VoiceEngineMode.GEMINI_LIVE) {
+            if (offlineOnly || live == null) {
+                showError(if (de) "Speichere für Gemini Live einen Google-API-Schlüssel"
+                          else "Save a Google API key for Gemini Live")
+            } else {
+                startAudioCapture(locale, modelFile = null, cloud = null, liveConfig = live)
+            }
+            return
+        }
         if (engineMode == VoiceEngineMode.CLOUD) {
             if (cloud == null) {
                 showError(if (de) "Cloud-Diktat braucht einen Gemini- oder OpenAI-Schlüssel"
@@ -173,6 +231,12 @@ internal class TapwingVoiceController(
             } else {
                 startAudioCapture(locale, modelFile = null, cloud = cloud)
             }
+            return
+        }
+        if (engineMode == VoiceEngineMode.AUTO_LOCAL_FIRST && strictLanguageLock &&
+            readyLanguageTag == KeyboardLocales.specFor(locale).bcp47Tag
+        ) {
+            startSystemSpeechSession(locale, strictLanguageLock, onDevice = true)
             return
         }
         if (engineMode == VoiceEngineMode.LOCAL_WHISPER || engineMode == VoiceEngineMode.AUTO_LOCAL_FIRST) {
@@ -186,13 +250,14 @@ internal class TapwingVoiceController(
                 return
             }
         }
-        val available = if (offlineOnly || engineMode == VoiceEngineMode.ON_DEVICE_SPEECH) {
+        val onDevice = offlineOnly || engineMode == VoiceEngineMode.ON_DEVICE_SPEECH
+        val available = if (onDevice) {
             isOnDeviceSpeechAvailable(context)
         } else {
             SpeechRecognizer.isRecognitionAvailable(context)
         }
         if (available) {
-            startSystemSpeechSession(locale, strictLanguageLock)
+            startSystemSpeechSession(locale, strictLanguageLock, onDevice)
         } else {
             showError(if (de) "Android-Diktat fehlt. Lade ein Offline-Sprachmodell"
                       else "Android dictation unavailable. Download an offline model")
@@ -203,7 +268,9 @@ internal class TapwingVoiceController(
         _state.value = VoiceUiState(errorMessage = message)
     }
 
-    private fun startAudioCapture(locale: String, modelFile: File?, cloud: CloudDictation?) {
+    private fun startAudioCapture(
+        locale: String, modelFile: File?, cloud: CloudDictation?, liveConfig: GeminiLiveConfig? = null
+    ) {
         sessionGeneration++
         val generation = sessionGeneration
         sessionActive = true
@@ -212,9 +279,36 @@ internal class TapwingVoiceController(
         activeWhisperFile = modelFile
         activeCloud = cloud
         val de = KeyboardLocales.baseLang(locale) == "de"
+        fun preview(text: String) {
+            if (generation == sessionGeneration && _state.value.isListening) {
+                _state.value = _state.value.copy(partialText = text)
+            }
+        }
+        val live = liveConfig?.let { config ->
+            GeminiLiveDictation(
+                config = config,
+                onPreview = { text -> mainHandler.post { preview(text) } },
+                onFailure = { mainHandler.post {
+                    if (generation == sessionGeneration && sessionActive && !stopRequested) {
+                        wavRecorder.cancelAndDelete()
+                        finishSession()
+                        showError(if (de) "Gemini Live ist nicht erreichbar. Prüfe Netz und Schlüssel."
+                                  else "Gemini Live is unavailable. Check your connection and key.")
+                    }
+                } }
+            )
+        }
+        val incremental = if (modelFile != null && activeStrictLanguage) {
+            IncrementalWhisper(controllerScope, modelFile, KeyboardLocales.baseLang(locale), ::preview)
+        } else null
+        activeLive = live
+        activeIncremental = incremental
         val wavFile = File(context.cacheDir, "tapwing_voice_${java.util.UUID.randomUUID()}.wav")
         val started = wavRecorder.start(
             outputFile = wavFile,
+            onPcm = live?.let { it::offerPcm },
+            canScheduleChunk = incremental?.let { it::canSchedule },
+            onSpeechChunk = incremental?.let { it::offer },
             onReady = { mainHandler.post {
                 if (generation == sessionGeneration && _state.value.isListening) {
                     _state.value = _state.value.copy(processingLabel = null)
@@ -247,16 +341,17 @@ internal class TapwingVoiceController(
         _state.value = VoiceUiState(
             isListening = true,
             isLocalWhisper = modelFile != null,
-            isCloud = cloud != null,
+            isCloud = cloud != null || live != null,
             processingLabel = if (de) "Mikrofon startet …" else "Starting microphone…",
             activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag
         )
-        if (modelFile != null) {
+        if (modelFile != null && incremental == null) {
             controllerScope.launch { LocalInferenceEngine.warmWhisper(modelFile) }
         }
     }
 
-    private fun startSystemSpeechSession(locale: String, strictLanguageLock: Boolean) {
+    private fun startSystemSpeechSession(locale: String, strictLanguageLock: Boolean, onDevice: Boolean) {
+        useOfflineAndroidSession = onDevice
         sessionGeneration++
         sessionActive = true
         stopRequested = false
@@ -269,7 +364,7 @@ internal class TapwingVoiceController(
         mainHandler.removeCallbacksAndMessages(null)
         _state.value = VoiceUiState(
             isListening = true,
-            isAndroidOffline = activeOfflineOnly || activeEngineMode == VoiceEngineMode.ON_DEVICE_SPEECH,
+            isAndroidOffline = onDevice,
             activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag
         )
         startSegment(locale, strictLanguageLock)
@@ -279,7 +374,7 @@ internal class TapwingVoiceController(
         destroyRecognizerLocked()
         val generation = sessionGeneration
         val languageTag = KeyboardLocales.specFor(locale).bcp47Tag
-        val localRecognizer = activeOfflineOnly || activeEngineMode == VoiceEngineMode.ON_DEVICE_SPEECH
+        val localRecognizer = useOfflineAndroidSession
         val sr = runCatching {
             if (localRecognizer && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 SpeechRecognizer.createOnDeviceSpeechRecognizer(context.applicationContext)
@@ -293,6 +388,7 @@ internal class TapwingVoiceController(
         }
         recognizer = sr
         segmentPartial = ""
+        segmentSpeechEnded = false
 
         fun isCurrent() = generation == sessionGeneration && sessionActive && recognizer === sr
 
@@ -307,7 +403,9 @@ internal class TapwingVoiceController(
                 )
             }
 
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() {
+                if (isCurrent()) segmentSpeechEnded = false
+            }
 
             override fun onRmsChanged(rmsdB: Float) {
                 if (!isCurrent()) return
@@ -318,6 +416,7 @@ internal class TapwingVoiceController(
 
             override fun onEndOfSpeech() {
                 if (!isCurrent()) return
+                segmentSpeechEnded = true
                 if (stopRequested) {
                     _state.value = _state.value.copy(isListening = false, isProcessing = true)
                 }
@@ -364,6 +463,7 @@ internal class TapwingVoiceController(
                 val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = matches?.firstOrNull().orEmpty()
                 if (text.isNotEmpty()) {
+                    if (segmentPartial != text) lastPartialChangedAt = SystemClock.elapsedRealtime()
                     segmentPartial = text
                     _state.value = _state.value.copy(partialText = joinText(accumulated.toString(), text))
                 }
@@ -439,6 +539,10 @@ internal class TapwingVoiceController(
         usingLocalAudioCapture = false
         activeWhisperFile = null
         activeCloud = null
+        activeLive?.close()
+        activeLive = null
+        activeIncremental?.cancel()
+        activeIncremental = null
         mainHandler.removeCallbacksAndMessages(null)
         destroyRecognizerLocked()
     }
@@ -457,6 +561,7 @@ internal class TapwingVoiceController(
     fun finishAndCommit() {
         if (!sessionActive || stopRequested) return
         stopRequested = true
+        stopStartedAt = SystemClock.elapsedRealtime()
         val generation = sessionGeneration
         _state.value = _state.value.copy(isListening = false, isProcessing = true)
         if (usingLocalAudioCapture) {
@@ -469,8 +574,13 @@ internal class TapwingVoiceController(
             appendSegment(segmentPartial)
             commitAccumulated()
         } else {
+            val speechHadEnded = segmentSpeechEnded
             runCatching { sr.stopListening() }
-            val waitMs = if (segmentPartial.isNotBlank()) 1_300L else 2_500L
+            val waitMs = when {
+                segmentPartial.isBlank() -> 2_500L
+                speechHadEnded && SystemClock.elapsedRealtime() - lastPartialChangedAt >= 220L -> 700L
+                else -> 1_300L
+            }
             mainHandler.postDelayed({
                 if (generation == sessionGeneration && sessionActive) {
                     appendSegment(segmentPartial)
@@ -483,11 +593,15 @@ internal class TapwingVoiceController(
     private fun transcribeCapture(generation: Int) {
         val model = activeWhisperFile
         val cloud = activeCloud
+        val live = activeLive
+        val incremental = activeIncremental
         val lang = KeyboardLocales.baseLang(activeLocale)
         val languageHint = lang.takeIf { activeStrictLanguage }
         val de = lang == "de"
         _state.value = _state.value.copy(
             processingLabel = when {
+                live != null && de -> "Diktat abschließen …"
+                live != null -> "Finishing dictation…"
                 cloud != null && de -> "Cloud transkribiert …"
                 cloud != null -> "Transcribing in the cloud…"
                 de -> "Transkribiere auf dem Gerät …"
@@ -508,12 +622,14 @@ internal class TapwingVoiceController(
             }
             val result = try {
                 when {
+                    live != null -> live.finish()
                     cloud != null -> cloud.transcribe(recording.file, languageHint)
-                    model != null -> LocalInferenceEngine.transcribeWav(
-                        wavPath = recording.file.absolutePath,
-                        modelFile = model,
-                        languageCode = languageHint
-                    )
+                    model != null -> incremental?.finish()?.let { Result.success(it) }
+                        ?: LocalInferenceEngine.transcribeWav(
+                            wavPath = recording.file.absolutePath,
+                            modelFile = model,
+                            languageCode = languageHint
+                        )
                     else -> Result.failure(IllegalStateException("Missing speech model"))
                 }
             } finally {
@@ -523,7 +639,7 @@ internal class TapwingVoiceController(
             finishSession()
             val text = result.getOrNull().orEmpty()
             when {
-                result.isFailure && cloud != null -> {
+                result.isFailure && (cloud != null || live != null) -> {
                     showError(if (de) "Cloud-Diktat fehlgeschlagen. Prüfe Netz und Schlüssel."
                               else "Cloud dictation failed. Check your connection and API key.")
                 }
@@ -535,13 +651,20 @@ internal class TapwingVoiceController(
                                             else "No speech detected. Try again.")
                 else -> {
                     _state.value = VoiceUiState()
-                    onTranscriptReady(text, cloud?.formatsText == true)
+                    onTranscriptReady(text, cloud?.formatsText == true || live?.formatsText == true)
                 }
             }
         }
     }
 
+    fun recordInsertionTiming() {
+        if (stopStartedAt == 0L) return
+        Log.i("TapwingVoice", "Stop to insert (${activeEngineMode.name}): ${SystemClock.elapsedRealtime() - stopStartedAt} ms")
+        stopStartedAt = 0L
+    }
+
     fun cancel(keepRotationResume: Boolean = false) {
+        stopStartedAt = 0L
         if (!keepRotationResume) wasListeningBeforeConfigChange = false
         sessionGeneration++
         transcriptionJob?.cancel()
@@ -554,6 +677,8 @@ internal class TapwingVoiceController(
 
     fun destroy() {
         cancel()
+        supportRecognizer?.destroy()
+        supportRecognizer = null
         controllerScope.cancel()
     }
 

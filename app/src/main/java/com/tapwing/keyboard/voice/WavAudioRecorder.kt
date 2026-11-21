@@ -49,7 +49,10 @@ class WavAudioRecorder {
         onRmsDb: (Float) -> Unit,
         onElapsedSeconds: (Int) -> Unit,
         onError: (String) -> Unit,
-        onReady: () -> Unit = {}
+        onReady: () -> Unit = {},
+        onPcm: ((ByteArray, Int) -> Unit)? = null,
+        canScheduleChunk: (() -> Boolean)? = null,
+        onSpeechChunk: ((File) -> Unit)? = null
     ): Boolean {
         if (current != null) return false
         val capture = Capture(outputFile)
@@ -58,7 +61,10 @@ class WavAudioRecorder {
             try {
                 microphone.withLock {
                     if (!capture.stop) {
-                        capture.result = record(capture, onReady, onRmsDb, onElapsedSeconds)
+                        capture.result = record(
+                            capture, onReady, onRmsDb, onElapsedSeconds,
+                            onPcm, canScheduleChunk, onSpeechChunk
+                        )
                     }
                 }
             } catch (ex: Exception) {
@@ -74,7 +80,10 @@ class WavAudioRecorder {
         capture: Capture,
         onReady: () -> Unit,
         onRmsDb: (Float) -> Unit,
-        onElapsedSeconds: (Int) -> Unit
+        onElapsedSeconds: (Int) -> Unit,
+        onPcm: ((ByteArray, Int) -> Unit)?,
+        canScheduleChunk: (() -> Boolean)?,
+        onSpeechChunk: ((File) -> Unit)?
     ): WavRecordingResult {
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         check(minBuffer > 0)
@@ -104,26 +113,34 @@ class WavAudioRecorder {
                 var firstActivity = -1L
                 var lastActivityEnd = 0L
                 var reportedSeconds = 0
+                val boundaries = onSpeechChunk?.let { SpeechChunkBoundaries() }
 
                 while (!capture.stop) {
                     val read = recorder.read(pcm, 0, pcm.size)
                     check(read >= 0) { "AudioRecord read error $read" }
                     if (read == 0) continue
                     var sumSquares = 0.0
+                    var framePeak = 0
                     for (i in 0 until read) {
                         val sample = pcm[i].toInt()
-                        peak = maxOf(peak, abs(sample))
+                        framePeak = maxOf(framePeak, abs(sample))
                         sumSquares += sample.toDouble() * sample
                         writeShortLE(bytes, i * 2, sample)
                     }
+                    peak = maxOf(peak, framePeak)
                     val byteCount = read * 2
                     val rms = sqrt(sumSquares / read).coerceAtLeast(1.0)
                     if (rms >= 48) {
                         if (firstActivity < 0) firstActivity = totalBytes
                         lastActivityEnd = totalBytes + byteCount
                     }
+                    onPcm?.invoke(bytes, byteCount)
                     wav.write(bytes, 0, byteCount)
                     totalBytes += byteCount
+                    boundaries?.observe(
+                        totalBytes, voiced = rms >= 48, decoderReady = canScheduleChunk?.invoke() == true,
+                        hasSignal = framePeak >= 35
+                    )?.let { range -> onSpeechChunk?.invoke(copySpeechChunk(wav, capture.file, range)) }
 
                     val db = (20.0 * log10(rms / 32768.0)).toFloat()
                     onRmsDb(((db + 55f) / 4.2f).coerceIn(0f, 12f))
@@ -132,6 +149,9 @@ class WavAudioRecorder {
                         reportedSeconds = seconds
                         onElapsedSeconds(seconds)
                     }
+                }
+                boundaries?.tail(totalBytes)?.let { range ->
+                    onSpeechChunk?.invoke(copySpeechChunk(wav, capture.file, range))
                 }
                 val usedBytes = if (firstActivity >= 0) {
                     trimQuietEdges(wav, totalBytes, firstActivity, lastActivityEnd)
@@ -144,6 +164,31 @@ class WavAudioRecorder {
             runCatching { gainControl?.release() }
             runCatching { noiseSuppression?.release() }
             recorder.release()
+        }
+    }
+
+    private fun copySpeechChunk(source: RandomAccessFile, file: File, range: LongRange): File {
+        val part = File.createTempFile("tapwing_voice_chunk_", ".wav", file.parentFile)
+        val resumeAt = source.filePointer
+        try {
+            source.seek(WAV_HEADER_BYTES + range.first)
+            RandomAccessFile(part, "rw").use { target ->
+                var remaining = range.last - range.first + 1
+                writeWavHeader(target, remaining)
+                val buffer = ByteArray(16_384)
+                while (remaining > 0) {
+                    val count = minOf(remaining, buffer.size.toLong()).toInt()
+                    source.readFully(buffer, 0, count)
+                    target.write(buffer, 0, count)
+                    remaining -= count
+                }
+            }
+            return part
+        } catch (error: Exception) {
+            part.delete()
+            throw error
+        } finally {
+            source.seek(resumeAt)
         }
     }
 

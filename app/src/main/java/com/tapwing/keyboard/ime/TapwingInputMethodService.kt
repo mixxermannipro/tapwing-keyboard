@@ -95,6 +95,7 @@ import com.tapwing.keyboard.undo.UndoReason
 import com.tapwing.keyboard.undo.UndoSnapshot
 import com.tapwing.keyboard.voice.CloudDictation
 import com.tapwing.keyboard.voice.CloudSpeechProvider
+import com.tapwing.keyboard.voice.GeminiLiveConfig
 import com.tapwing.keyboard.voice.NaturalVoiceCleaner
 import com.tapwing.keyboard.voice.TapwingVoiceController
 import com.tapwing.keyboard.voice.VoiceCommandResult
@@ -255,7 +256,8 @@ class TapwingInputMethodService :
             clip.description.timestamp != dismissedCopyTimestamp
         ) {
             val timestamp = clip.description.timestamp
-            clip.getItemAt(0).text?.toString()?.takeIf { it.isNotBlank() }?.let { text ->
+            clip.getItemAt(0).text?.toString()
+                ?.takeIf { it.isNotBlank() && !ClipboardStore.isApiKey(it) }?.let { text ->
                 val code = SuggestionEngine.extractOtpFromClipboard(text)
                 when {
                     code == null -> CopiedText(text, timestamp, verificationCode = false)
@@ -335,6 +337,9 @@ class TapwingInputMethodService :
                 if (inputViewActive && clipboardWasAllowed != clipboardAllowed()) updatePasteSuggestion()
                 if (!prefs.inlineAutofillEnabled) clearAutofillSuggestions()
                 offlinePackManager.preloadLocaleAsync(prefs.activeLocale)
+                if (prefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST) {
+                    voiceController.prepareOfflineSpeech(prefs.activeLocale)
+                }
                 clipboardStore.prune(prefs.clipboardRetention, prefs.clipboardMaxItems)
                 ensureScreenshotObserverIfPermitted()
             }
@@ -552,6 +557,9 @@ class TapwingInputMethodService :
         offlinePackManager.preloadLocaleAsync(currentPrefs.activeLocale)
         modelManager.refreshStates()
         ensureScreenshotObserverIfPermitted()
+        if (currentPrefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST) {
+            voiceController.prepareOfflineSpeech(currentPrefs.activeLocale)
+        }
 
         currentTargetPackage = info?.packageName.orEmpty()
         privateEditor = isPrivateEditor(info)
@@ -836,7 +844,7 @@ class TapwingInputMethodService :
             keyCenters = keyCenters,
             locale = currentPrefs.activeLocale,
             previousWord = prevWord,
-            dictionaryStore = dictionaryStore,
+            dictionaryStore = dictionaryStore.takeUnless { currentPrefs.incognitoMode },
             secondaryLocales = secondaryLocales(),
             atSentenceStart = atStart,
             offlinePack = offlinePackManager.getLoadedPack(currentPrefs.activeLocale)
@@ -1073,6 +1081,7 @@ class TapwingInputMethodService :
     }
 
     private fun applySuggestionChip(chip: SuggestionChip) {
+        if (privateEditor || chip !in suggestions) return
         val ic = currentInputConnection ?: return
         pendingSmartUndoPair = null
         val before = if (chip.replaceCharCount > 0) {
@@ -1182,6 +1191,11 @@ class TapwingInputMethodService :
     }
 
     private fun refreshContextAndSuggestions() {
+        if (privateEditor) {
+            isTyping = false
+            suggestions = emptyList()
+            return
+        }
         val ic = currentInputConnection
         val before = ic?.getTextBeforeCursor(100, 0)?.toString().orEmpty()
         val trailing = SuggestionEngine.extractTrailingWord(before)
@@ -1232,7 +1246,7 @@ class TapwingInputMethodService :
         val prefs = if (privateEditor) currentPrefs.copy(incognitoMode = true) else currentPrefs
         voicePrefs = prefs
         val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
-        if (prefs.voiceEngine == VoiceEngineMode.CLOUD && prefs.incognitoMode) {
+        if (prefs.voiceEngine.usesCloudAudio && prefs.incognitoMode) {
             voiceController.finishExternalProcessing(
                 if (de) "Cloud-Diktat ist in privaten Feldern aus." else "Cloud dictation is off in private fields."
             )
@@ -1246,6 +1260,17 @@ class TapwingInputMethodService :
                 if (key.isBlank()) null else CloudDictation(it, key, natural, prefs.voiceRemoveFillers, prefs.voiceAutoPunctuate)
             }
         } else null
+        val live = if (prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE && prefs.aiProvider == AiProviderType.GEMINI_API) {
+            secureKeyStorage.readDictationKey(CloudSpeechProvider.GEMINI.name)
+                .takeIf(SecureKeyStorage::isValidApiKey)
+                ?.let { key ->
+                    GeminiLiveConfig(
+                        apiKey = key,
+                        smartFormatting = natural && prefs.voiceRemoveFillers && prefs.voiceAutoPunctuate,
+                        languageCode = KeyboardLocales.specFor(prefs.activeLocale).bcp47Tag.takeIf { prefs.voiceStrictLanguageLock }
+                    )
+                }
+        } else null
         voiceController.startListening(
             locale = prefs.activeLocale,
             strictLanguageLock = prefs.voiceStrictLanguageLock,
@@ -1253,7 +1278,8 @@ class TapwingInputMethodService :
             offlineOnly = prefs.incognitoMode,
             whisperModelId = prefs.selectedWhisperModelId,
             formatText = natural && prefs.voiceAutoPunctuate,
-            cloud = cloud
+            cloud = cloud,
+            live = live
         )
     }
 
@@ -1296,7 +1322,7 @@ class TapwingInputMethodService :
                 voiceController.beginExternalProcessing(if (de) "Überarbeite Text …" else "Rewriting text…")
                 voiceEditJob = serviceScope.launch {
                     try {
-                        val commandPrefs = if (prefs.voiceEngine == VoiceEngineMode.CLOUD) {
+                        val commandPrefs = if (prefs.voiceEngine.usesCloudAudio) {
                             processingPrefs.copy(aiProvider = AiProviderType.LOCAL_RULES)
                         } else processingPrefs
                         val out = writingToolsEngine.runAction(fieldText, parsed.action, commandPrefs)
@@ -1320,7 +1346,7 @@ class TapwingInputMethodService :
             is VoiceCommandResult.Text -> {
                 val fallback = if (alreadyFormatted) raw else parsed.cleanedText
                 if (!prefs.voiceAiPolish || processingPrefs.aiProvider == AiProviderType.LOCAL_RULES ||
-                    prefs.voiceEngine == VoiceEngineMode.CLOUD
+                    prefs.voiceEngine.usesCloudAudio
                 ) {
                     insertVoiceText(fallback, prefs)
                     return
@@ -1344,6 +1370,7 @@ class TapwingInputMethodService :
         if (text.isBlank()) return
         val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
         val inserted = commitTextWithSpaceSafety(text) ?: return
+        voiceController.recordInsertionTiming()
         statsStore.recordVoiceDictation(text.length, prefs.incognitoMode)
         undoManager.record(
             beforeText = "",

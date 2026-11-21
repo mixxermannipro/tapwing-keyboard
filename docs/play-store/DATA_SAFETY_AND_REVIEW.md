@@ -36,7 +36,7 @@ Tapwing declares the permissions below. Photo OCR via the system picker needs no
 
 ## 3. Data Safety Questionnaire
 
-- **Audio files → Voice or sound recordings**: Collected for app functionality, optional. Tapwing sends audio over HTTPS after the user selects cloud dictation, saves a key for Gemini or OpenAI, and stops recording. Mark this as non-ephemeral because provider retention depends on the user's account and provider. The transfer is user-initiated and disclosed before Cloud is selected.
+- **Audio files → Voice or sound recordings**: Collected for app functionality, optional. Tapwing sends audio over an encrypted connection after the user selects cloud dictation and saves a provider key. Gemini Live sends audio while the microphone is active. The separate cloud mode sends it after recording stops. Mark this as non-ephemeral because provider retention depends on the user's account and provider. The transfer is user-initiated and disclosed before Cloud is selected.
 - **Other user-generated content**: Optional text sent to the configured provider for cloud writing or transcript cleanup. Use the provider's actual retention terms for the applicable configuration.
 - On-device mode, clipboard suggestions, local typing, and adaptive learning keep their content on the device. Keep the published privacy policy consistent with the active release.
 

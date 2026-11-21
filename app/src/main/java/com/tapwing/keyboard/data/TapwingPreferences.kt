@@ -60,7 +60,10 @@ enum class VoiceEngineMode {
     LOCAL_WHISPER,
     ON_DEVICE_SPEECH,
     CLOUD,
-    SYSTEM_SPEECH
+    GEMINI_LIVE,
+    SYSTEM_SPEECH;
+
+    val usesCloudAudio: Boolean get() = this == CLOUD || this == GEMINI_LIVE
 }
 
 enum class AiProviderType {

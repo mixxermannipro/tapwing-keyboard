@@ -575,10 +575,13 @@ private fun ExpressiveKeyCap(
         KeyActionType.PERIOD
     )
 
-    val cornerShape: Shape = if (prefs.roundedExpressiveKeys) {
-        RoundedCornerShape(percent = 50)
-    } else {
-        RoundedCornerShape(7.dp)
+    val cornerShape: Shape = when {
+        kbColors.appleLiquidGlass -> RoundedCornerShape(percent = 50)
+        !prefs.roundedExpressiveKeys -> RoundedCornerShape(7.dp)
+        isActionKey -> RoundedCornerShape(19.dp)
+        key.type == KeyActionType.SPACE -> RoundedCornerShape(11.dp)
+        isModifierKey -> RoundedCornerShape(15.dp)
+        else -> RoundedCornerShape(11.dp)
     }
 
     val bgTarget = when {
@@ -592,7 +595,7 @@ private fun ExpressiveKeyCap(
 
     val bgColor by animateColorAsState(
         targetValue = bgTarget,
-        animationSpec = tween(if (pressed) 35 else 140, easing = FastOutSlowInEasing),
+        animationSpec = tween(if (pressed) 20 else 95, easing = FastOutSlowInEasing),
         label = "keyBg"
     )
 

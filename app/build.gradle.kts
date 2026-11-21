@@ -44,8 +44,8 @@ android {
         applicationId = "com.tapwing.keyboard"
         minSdk = 29
         targetSdk = 36
-        versionCode = 8
-        versionName = "2.1.0"
+        versionCode = 9
+        versionName = "2.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -140,6 +140,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.llamatik:library-android:1.10.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")

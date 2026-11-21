@@ -11,6 +11,7 @@ data class SuggestionChip(
     val isShortcut: Boolean = false,
     val isMath: Boolean = false,
     val isOtp: Boolean = false,
+    val isNextWord: Boolean = false,
     val replaceCharCount: Int = 0
 )
 
@@ -121,7 +122,9 @@ object SuggestionEngine {
 
         if (currentWord.isBlank()) {
             // Context-aware Trigram + Bigram + Per-App next-word predictions from adaptive learning
-            if (prevWord.isNotEmpty() && dictionaryStore != null) {
+            if (isEmailField || isUrlField) return results.take(3)
+            val nextWord = textBeforeCursor.lastOrNull()?.isWhitespace() == true && prevWord.isNotEmpty()
+            if (nextWord && !atSentenceStart && dictionaryStore != null) {
                 dictionaryStore.predictNextWords(
                     previousWord = prevWord,
                     limit = 3,
@@ -130,13 +133,20 @@ object SuggestionEngine {
                 ).forEach { predicted ->
                     val safeCased = enforceMidSentenceCasingRule(predicted, locale, atSentenceStart, dictionaryStore)
                     if (results.size < 3 && results.none { it.text == safeCased }) {
-                        results += SuggestionChip(text = safeCased, replaceCharCount = 0)
+                        results += SuggestionChip(text = safeCased, isNextWord = true)
                     }
                 }
             }
-            LanguageVocabularies.defaultEmptyChipsFor(locale).forEach { word ->
-                if (results.size < 3 && results.none { it.text == word }) {
-                    results += SuggestionChip(text = word, replaceCharCount = 0)
+            val contextual = if (nextWord && !atSentenceStart) {
+                LanguageVocabularies.commonNextWords(locale, prevWord)
+            } else emptyList()
+            val general = LanguageVocabularies.defaultEmptyChipsFor(locale)
+            for (word in contextual + general) {
+                if (results.size >= 3) break
+                if (!atSentenceStart && word.equals(prevWord, ignoreCase = true)) continue
+                val cased = enforceMidSentenceCasingRule(word, locale, atSentenceStart, dictionaryStore)
+                if (results.none { it.text.equals(cased, ignoreCase = true) }) {
+                    results += SuggestionChip(text = cased, isNextWord = nextWord)
                 }
             }
             return results.take(3)
