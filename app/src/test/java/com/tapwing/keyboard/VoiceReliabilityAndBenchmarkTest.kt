@@ -1,7 +1,12 @@
 package com.tapwing.keyboard.voice
 
+import com.tapwing.keyboard.ai.LocalModelCatalog
+import com.tapwing.keyboard.ai.LocalModelKind
+import com.tapwing.keyboard.ai.WritingToolsEngine
+import com.tapwing.keyboard.data.AiProviderType
 import com.tapwing.keyboard.dictionary.SuggestionEngine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -132,5 +137,23 @@ class VoiceReliabilityAndBenchmarkTest {
         val avgSuggMs = suggTotalMs / suggCount
         println("BENCHMARK suggestion_engine_500_total_ms=%.2f avg_ms=%.4f".format(suggTotalMs, avgSuggMs))
         assertTrue(avgSuggMs < 10.0)
+    }
+
+    @Test
+    fun groqCloudProviderAndSmartBypassBehaveCorrectlyWithoutLocalLlms() {
+        assertEquals(CloudSpeechProvider.GROQ, CloudSpeechProvider.from(AiProviderType.GROQ_API, ""))
+        assertEquals(CloudSpeechProvider.GEMINI, CloudSpeechProvider.from(AiProviderType.GEMINI_API, ""))
+        assertTrue(LocalModelCatalog.allModels.none { it.kind != LocalModelKind.WHISPER_STT })
+
+        assertTrue(WritingToolsEngine.shouldSkipCloudPolish("Hallo wie geht es", "Hallo wie geht es?"))
+        assertTrue(WritingToolsEngine.shouldSkipCloudPolish("Ok bin gleich da", "Ok bin gleich da."))
+        assertFalse(WritingToolsEngine.shouldSkipCloudPolish("ähm hallo", "Hallo."))
+        assertFalse(WritingToolsEngine.shouldSkipCloudPolish("treffen um 14 nein warte", "Treffen um 14?"))
+        assertFalse(
+            WritingToolsEngine.shouldSkipCloudPolish(
+                "Kannst du mir heute Abend noch kurz Bescheid sagen",
+                "Kannst du mir heute Abend noch kurz Bescheid sagen?"
+            )
+        )
     }
 }
