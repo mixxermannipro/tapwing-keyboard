@@ -2,6 +2,7 @@ package com.tapwing.keyboard.ui.keyboard
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
@@ -9,6 +10,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -57,6 +65,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +88,20 @@ import com.tapwing.keyboard.undo.UndoSnapshot
 import com.tapwing.keyboard.voice.VoiceUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private fun View.tapHaptic(enabled: Boolean) {
+    if (enabled) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+}
+
+private fun View.confirmHaptic(enabled: Boolean) {
+    if (!enabled) return
+    val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        HapticFeedbackConstants.CONFIRM
+    } else {
+        HapticFeedbackConstants.KEYBOARD_TAP
+    }
+    performHapticFeedback(flag)
+}
 
 @Composable
 fun SuggestionStrip(
@@ -103,7 +127,6 @@ fun SuggestionStrip(
     onTapScreenshotChip: (RecentScreenshot) -> Unit,
     onTapScreenshotOcr: (RecentScreenshot) -> Unit,
     onDismissScreenshotChip: () -> Unit,
-
 
     onStartVoice: () -> Unit,
     onFinishVoice: () -> Unit,
@@ -154,13 +177,14 @@ fun SuggestionStrip(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(44.dp)
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 FlatStripButton(
                     icon = if (prefs.incognitoMode) Icons.Rounded.VisibilityOff else Icons.Rounded.GridView,
                     contentDescription = stringResource(R.string.cd_tools_hub),
+                    hapticEnabled = prefs.hapticFeedback,
                     onClick = onOpenToolsHub
                 )
 
@@ -182,11 +206,14 @@ fun SuggestionStrip(
                                     modifier = Modifier.weight(1f).clickable(
                                         role = Role.Button,
                                         onClickLabel = stringResource(R.string.clipboard_paste_suggestion),
-                                        onClick = { onPasteClipboard(clipboardTimestamp) }
+                                        onClick = {
+                                            view.tapHaptic(prefs.hapticFeedback)
+                                            onPasteClipboard(clipboardTimestamp)
+                                        }
                                     )
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp).height(40.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp).height(36.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
@@ -210,6 +237,7 @@ fun SuggestionStrip(
                                 FlatStripButton(
                                     icon = Icons.Rounded.Close,
                                     contentDescription = stringResource(R.string.clipboard_dismiss_suggestion),
+                                    hapticEnabled = prefs.hapticFeedback,
                                     onClick = { onDismissClipboard(clipboardTimestamp) }
                                 )
                             }
@@ -230,18 +258,23 @@ fun SuggestionStrip(
                                     update = { v ->
                                         v.requestLayout()
                                     },
-                                    modifier = Modifier.height(40.dp)
+                                    modifier = Modifier.height(38.dp)
                                 )
                             }
                         }
                         2 -> Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.weight(1f)) {
-                                SuggestionCells(suggestions = suggestions.take(3), onSelect = onSelectSuggestion)
+                                SuggestionCells(
+                                    suggestions = suggestions.take(3),
+                                    hapticEnabled = prefs.hapticFeedback,
+                                    onSelect = onSelectSuggestion
+                                )
                             }
                             if (showNextWords && undoAvailable) {
                                 FlatStripButton(
                                     icon = Icons.AutoMirrored.Rounded.Undo,
                                     contentDescription = proactiveUndo?.label ?: stringResource(R.string.btn_undo),
+                                    hapticEnabled = prefs.hapticFeedback,
                                     onClick = onTriggerUndo
                                 )
                             }
@@ -257,7 +290,10 @@ fun SuggestionStrip(
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
                                     color = MaterialTheme.colorScheme.errorContainer,
-                                    modifier = Modifier.clickable(onClick = onDismissVoiceError)
+                                    modifier = Modifier.clickable {
+                                        view.tapHaptic(prefs.hapticFeedback)
+                                        onDismissVoiceError()
+                                    }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -291,7 +327,10 @@ fun SuggestionStrip(
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
                                     color = kbColors.actionSurface.copy(alpha = 0.22f),
-                                    modifier = Modifier.clickable(onClick = onTriggerUndo)
+                                    modifier = Modifier.clickable {
+                                        view.tapHaptic(prefs.hapticFeedback)
+                                        onTriggerUndo()
+                                    }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -301,7 +340,7 @@ fun SuggestionStrip(
                                         Icon(
                                             imageVector = Icons.AutoMirrored.Rounded.Undo,
                                             contentDescription = stringResource(R.string.btn_undo),
-                                            tint = kbColors.actionText,
+                                            tint = kbColors.keyText,
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Text(
@@ -318,13 +357,17 @@ fun SuggestionStrip(
                                             tint = kbColors.keyHintText,
                                             modifier = Modifier
                                                 .size(15.dp)
-                                                .clickable(onClick = onDismissUndo)
+                                                .clickable {
+                                                    view.tapHaptic(prefs.hapticFeedback)
+                                                    onDismissUndo()
+                                                }
                                         )
                                     }
                                 }
                             } else if (recentScreenshot != null && showShot) {
                                 ScreenshotPreviewStripChip(
                                     shot = recentScreenshot,
+                                    hapticEnabled = prefs.hapticFeedback,
                                     onPasteImage = { onTapScreenshotChip(recentScreenshot) },
                                     onPasteOcr = { onTapScreenshotOcr(recentScreenshot) },
                                     onDismiss = onDismissScreenshotChip
@@ -334,7 +377,10 @@ fun SuggestionStrip(
                         else -> QuickBarRow(
                             prefs = prefs,
                             de = de,
-                            onQuickAction = onQuickAction,
+                            onQuickAction = { action ->
+                                view.tapHaptic(prefs.hapticFeedback)
+                                onQuickAction(action)
+                            },
                             onLongPressQuickBar = onLongPressQuickBar,
                             onHaptic = {
                                 if (prefs.hapticFeedback) {
@@ -348,6 +394,7 @@ fun SuggestionStrip(
                 FlatStripButton(
                     icon = Icons.Rounded.Mic,
                     contentDescription = stringResource(R.string.cd_voice_mic),
+                    hapticEnabled = prefs.hapticFeedback,
                     onClick = onStartVoice
                 )
             }
@@ -358,12 +405,14 @@ fun SuggestionStrip(
 @Composable
 private fun ScreenshotPreviewStripChip(
     shot: RecentScreenshot,
+    hapticEnabled: Boolean,
     onPasteImage: () -> Unit,
     onPasteOcr: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val context = LocalContext.current
+    val view = LocalView.current
     val thumb by produceState<Bitmap?>(initialValue = null, shot.localImagePath, shot.uri) {
         value = withContext(Dispatchers.IO) {
             runCatching {
@@ -386,7 +435,10 @@ private fun ScreenshotPreviewStripChip(
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = kbColors.stripChipSurface,
-            modifier = Modifier.clickable(onClick = onPasteImage)
+            modifier = Modifier.clickable {
+                view.tapHaptic(hapticEnabled)
+                onPasteImage()
+            }
         ) {
             Row(
                 modifier = Modifier.padding(start = 5.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
@@ -399,7 +451,7 @@ private fun ScreenshotPreviewStripChip(
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(28.dp)
+                            .size(26.dp)
                             .clip(RoundedCornerShape(8.dp))
                     )
                 } else {
@@ -423,7 +475,10 @@ private fun ScreenshotPreviewStripChip(
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = kbColors.cardAltSurface,
-            modifier = Modifier.clickable(onClick = onPasteOcr)
+            modifier = Modifier.clickable {
+                view.tapHaptic(hapticEnabled)
+                onPasteOcr()
+            }
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
@@ -451,7 +506,10 @@ private fun ScreenshotPreviewStripChip(
             tint = kbColors.keyHintText,
             modifier = Modifier
                 .size(16.dp)
-                .clickable(onClick = onDismiss)
+                .clickable {
+                    view.tapHaptic(hapticEnabled)
+                    onDismiss()
+                }
         )
     }
 }
@@ -460,38 +518,55 @@ private fun ScreenshotPreviewStripChip(
 private fun FlatStripButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
+    hapticEnabled: Boolean,
     onClick: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
+    val view = LocalView.current
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(40.dp)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .clickable {
+                view.tapHaptic(hapticEnabled)
+                onClick()
+            },
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = kbColors.modifierText,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(21.dp)
         )
     }
 }
 
-/** Stable, equal-width candidates with a distinct surface for inline actions. */
+/** 1:1 Gboard suggestion strip cells with subtle vertical dividers and tactile haptic feedback. */
 @Composable
 private fun SuggestionCells(
     suggestions: List<SuggestionChip>,
+    hapticEnabled: Boolean,
     onSelect: (SuggestionChip) -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
+    val view = LocalView.current
     Row(
-        modifier = Modifier.fillMaxWidth().height(48.dp).padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        suggestions.forEach { chip ->
+        suggestions.forEachIndexed { index, chip ->
+            if (index > 0) {
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(20.dp)
+                        .background(kbColors.keyHintText.copy(alpha = 0.25f))
+                )
+            }
             val isEmphasized = chip.isCorrection || chip.isGrammarFix || chip.isShortcut || chip.isMath
             val label = when {
                 chip.isShortcut -> "⚡ ${chip.text}"
@@ -502,15 +577,21 @@ private fun SuggestionCells(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isEmphasized) kbColors.actionSurface.copy(alpha = 0.20f) else kbColors.keySurface.copy(alpha = 0.60f))
-                    .clickable(role = Role.Button) { onSelect(chip) },
+                    .padding(horizontal = 2.dp)
+                    .clip(RoundedCornerShape(if (isEmphasized) 16.dp else 12.dp))
+                    .background(
+                        if (isEmphasized) kbColors.actionSurface.copy(alpha = 0.24f) else Color.Transparent
+                    )
+                    .clickable(role = Role.Button) {
+                        view.tapHaptic(hapticEnabled)
+                        onSelect(chip)
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = label,
                     color = kbColors.stripChipText,
-                    fontSize = 16.sp,
+                    fontSize = 15.5.sp,
                     fontWeight = if (isEmphasized) FontWeight.SemiBold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -589,6 +670,55 @@ private fun QuickBarRow(
 }
 
 @Composable
+private fun RamblerWaveform(
+    rmsDb: Float,
+    isListening: Boolean
+) {
+    val normalized = (rmsDb / 12f).coerceIn(0.08f, 1f)
+    val transition = rememberInfiniteTransition(label = "ramblerWave")
+    val shimmer by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "wavePulse"
+    )
+    val multipliers = listOf(0.45f, 0.72f, 0.96f, 0.68f, 1.0f, 0.76f, 0.48f)
+    val waveBrush = Brush.verticalGradient(
+        listOf(Color(0xFF4285F4), Color(0xFF9B72CB), Color(0xFFD96570))
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+        modifier = Modifier.height(22.dp)
+    ) {
+        multipliers.forEachIndexed { idx, mult ->
+            val phase = if (idx % 2 == 0) shimmer else 1f - shimmer
+            val rawHeight = if (isListening) {
+                (0.22f + normalized * mult * (0.65f + 0.35f * phase)).coerceIn(0.2f, 1f)
+            } else {
+                (0.28f + 0.42f * phase).coerceIn(0.22f, 0.8f)
+            }
+            val barFraction by animateFloatAsState(
+                targetValue = rawHeight,
+                animationSpec = spring(stiffness = Spring.StiffnessMedium),
+                label = "waveBar$idx"
+            )
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .fillMaxHeight(barFraction)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(waveBrush)
+            )
+        }
+    }
+}
+
+@Composable
 private fun VoiceToolbarRow(
     prefs: TapwingPrefs,
     voiceState: VoiceUiState,
@@ -597,11 +727,13 @@ private fun VoiceToolbarRow(
     onToggleMinimize: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
+    val view = LocalView.current
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
     val pulseBg by animateColorAsState(
         targetValue = if (voiceState.isListening) kbColors.actionSurface else kbColors.modifierSurface,
         label = "voicePulseBg"
     )
-    val timerText = if ((voiceState.isLocalWhisper || voiceState.isCloud) && voiceState.isListening) {
+    val timerText = if (voiceState.isListening) {
         val m = voiceState.elapsedSeconds / 60
         val s = voiceState.elapsedSeconds % 60
         "%02d:%02d · ".format(m, s)
@@ -619,26 +751,31 @@ private fun VoiceToolbarRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .height(44.dp)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(38.dp)
+                .size(34.dp)
                 .clip(CircleShape)
                 .background(kbColors.keySurface)
-                .clickable(onClick = onCancelVoice),
+                .clickable {
+                    view.tapHaptic(prefs.hapticFeedback)
+                    onCancelVoice()
+                },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Rounded.Close,
                 contentDescription = stringResource(R.string.cd_voice_cancel),
                 tint = kbColors.keyText,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(18.dp)
             )
         }
+
+        RamblerWaveform(rmsDb = voiceState.rmsDb, isListening = voiceState.isListening)
 
         if (voiceState.isLocalWhisper || voiceState.isCloud || voiceState.isAndroidOffline) {
             Surface(
@@ -646,7 +783,7 @@ private fun VoiceToolbarRow(
                 color = kbColors.actionSurface.copy(alpha = 0.22f)
             ) {
                 Text(
-                    text = if (voiceState.isCloud) "Cloud" else "Offline",
+                    text = if (voiceState.isCloud) "Cloud" else if (de) "Lokal" else "Local",
                     color = kbColors.keyText,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -668,10 +805,13 @@ private fun VoiceToolbarRow(
         if (prefs.voiceMinimizeButton) {
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
                     .background(kbColors.modifierSurface)
-                    .clickable(onClick = onToggleMinimize),
+                    .clickable {
+                        view.tapHaptic(prefs.hapticFeedback)
+                        onToggleMinimize()
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -682,24 +822,27 @@ private fun VoiceToolbarRow(
                     },
                     contentDescription = stringResource(R.string.cd_voice_minimize),
                     tint = kbColors.modifierText,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
 
         Box(
             modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
+                .size(width = 44.dp, height = 36.dp)
+                .clip(RoundedCornerShape(percent = 50))
                 .background(pulseBg)
-                .clickable(onClick = onFinishVoice),
+                .clickable {
+                    view.confirmHaptic(prefs.hapticFeedback)
+                    onFinishVoice()
+                },
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Rounded.Check,
                 contentDescription = stringResource(R.string.cd_voice_done),
                 tint = kbColors.actionText,
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(21.dp)
             )
         }
     }
@@ -717,7 +860,7 @@ private fun QuickIconPill(
     val kbColors = LocalTapwingKeyboardColors.current
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(34.dp)
             .clip(CircleShape)
             .background(
                 if (highlighted) kbColors.actionSurface.copy(alpha = 0.25f)
@@ -733,7 +876,7 @@ private fun QuickIconPill(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = if (highlighted) kbColors.keyText else kbColors.modifierText,
-            modifier = Modifier.size(19.dp)
+            modifier = Modifier.size(18.dp)
         )
     }
 }

@@ -441,7 +441,8 @@ private data class HomeNavItem(
     override val title: String,
     val icon: ImageVector,
     val badgeColor: Color,
-    override val keywords: String
+    override val keywords: String,
+    val status: String = ""
 ) : HomeRowItem
 
 private data class HomeToggleItem(
@@ -482,21 +483,24 @@ private fun HomeSettingsScreen(
             title = stringResource(R.string.nav_appearance),
             icon = Icons.Rounded.Palette,
             badgeColor = Color(0xFFAF52DE),
-            keywords = "theme design farbe größe höhe abstand einhand"
+            keywords = "theme design farbe größe höhe abstand einhand gboard",
+            status = if (prefs.appleModeEnabled) "Apple" else "Gboard"
         ),
         HomeNavItem(
             route = SettingsRoute.QUICK_BAR,
             title = stringResource(R.string.nav_quick_bar),
             icon = Icons.Rounded.Tune,
             badgeColor = Color(0xFF5AC8FA),
-            keywords = "leiste schnellleiste toolbar symbole icons reihenfolge"
+            keywords = "leiste schnellleiste toolbar symbole icons reihenfolge",
+            status = "${prefs.quickBarActions.size}"
         ),
         HomeNavItem(
             route = SettingsRoute.LANGUAGES,
             title = stringResource(R.string.nav_languages),
             icon = Icons.Rounded.Language,
             badgeColor = Color(0xFF007AFF),
-            keywords = "sprache qwertz qwerty azerty zahlenreihe umlaute leertaste land"
+            keywords = "sprache qwertz qwerty azerty zahlenreihe umlaute leertaste land",
+            status = KeyboardLocales.specFor(prefs.activeLocale).nativeLabel.substringBefore(" ")
         )
     )
 
@@ -513,21 +517,34 @@ private fun HomeSettingsScreen(
             title = stringResource(R.string.nav_corrections),
             icon = Icons.Rounded.Spellcheck,
             badgeColor = Color(0xFF30B0C7),
-            keywords = "autokorrektur rechner math inkognito undo grammatik swipe wischen"
+            keywords = "autokorrektur rechner math inkognito undo grammatik swipe wischen zeile enter",
+            status = if (prefs.autoCorrect) (if (de) "Aktiv" else "On") else (if (de) "Aus" else "Off")
         ),
         HomeNavItem(
             route = SettingsRoute.VOICE,
             title = stringResource(R.string.nav_voice),
             icon = Icons.Rounded.Mic,
             badgeColor = Color(0xFFFF9500),
-            keywords = "sprache diktat rambler whisper modell lokal mikrofon prompt"
+            keywords = "sprache diktat rambler whisper modell lokal mikrofon prompt",
+            status = when (prefs.voiceEngine) {
+                VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) "Automatisch" else "Auto"
+                VoiceEngineMode.LOCAL_WHISPER, VoiceEngineMode.ON_DEVICE_SPEECH -> "Offline"
+                VoiceEngineMode.GEMINI_LIVE, VoiceEngineMode.CLOUD -> "Cloud"
+                VoiceEngineMode.SYSTEM_SPEECH -> "System"
+            }
         ),
         HomeNavItem(
             route = SettingsRoute.WRITING_TOOLS,
             title = stringResource(R.string.nav_writing_tools),
             icon = Icons.Rounded.AutoAwesome,
             badgeColor = Color(0xFF5856D6),
-            keywords = "ki ai gemini openai qwen gemma llama gguf modell prompt"
+            keywords = "ki ai gemini openai qwen gemma llama gguf modell prompt",
+            status = when (prefs.aiProvider) {
+                AiProviderType.LOCAL_RULES -> "Offline"
+                AiProviderType.LOCAL_LLM -> if (de) "Lokal" else "Local"
+                AiProviderType.GEMINI_API -> "Gemini"
+                AiProviderType.OPENAI_COMPATIBLE -> "OpenAI"
+            }
         )
     )
 
@@ -537,7 +554,8 @@ private fun HomeSettingsScreen(
             title = stringResource(R.string.nav_clipboard),
             icon = Icons.Rounded.ContentPaste,
             badgeColor = Color(0xFF32ADE6),
-            keywords = "zwischenablage clipboard ocr kamera scan screenshot"
+            keywords = "zwischenablage clipboard ocr kamera scan screenshot",
+            status = if (prefs.clipboardEnabled) (if (de) "Aktiv" else "On") else (if (de) "Aus" else "Off")
         ),
         HomeNavItem(
             route = SettingsRoute.EMOJI,
@@ -688,7 +706,7 @@ private fun HomeSettingsRows(rows: List<HomeRowItem>, onNavigate: (SettingsRoute
             if (index > 0) AppleHairlineDivider(startIndent = 58.dp)
             when (item) {
                 is HomeToggleItem -> MinimalToggleRow(item.title, item.checked, item.icon, item.badgeColor, item.onCheckedChange)
-                is HomeNavItem -> MinimalNavRow(item.icon, item.badgeColor, item.title, "") { onNavigate(item.route) }
+                is HomeNavItem -> MinimalNavRow(item.icon, item.badgeColor, item.title, item.status) { onNavigate(item.route) }
             }
         }
     }
@@ -794,7 +812,7 @@ private fun AppearanceScreen(
                 AppleSectionHeader(if (de) "Farbschema" else "Theme")
                 AppleGroupedSurface {
                     val modes = listOf(
-                        ThemeMode.PIXEL_SLATE to (if (de) "Pixel Slate (1:1 PixelBoard)" else "Pixel Slate"),
+                        ThemeMode.PIXEL_SLATE to (if (de) "Gboard-Stil (Standard)" else "Gboard Style (Default)"),
                         ThemeMode.EXPRESSIVE_LAVENDER to (if (de) "Expressive Lavendel" else "Lavender"),
                         ThemeMode.DYNAMIC to "Material You",
                         ThemeMode.PIXEL_BLUE to "Pixel Blue",
@@ -2000,6 +2018,22 @@ private fun CorrectionsScreen(
     ) {
         item {
             Column {
+                AppleSectionHeader(if (de) "Taste unten rechts" else "Bottom-right key")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        if (de) "Unten rechts immer neue Zeile" else "Always insert newline on bottom-right",
+                        prefs.enterKeyAlwaysNewline
+                    ) { v -> onUpdatePrefs { it.copy(enterKeyAlwaysNewline = v) } }
+                }
+                AppleSectionFooter(
+                    if (de) "Zeigt in Chats immer das Zeilenumbruch-Symbol (↵) an und fügt beim Tippen eine neue Zeile ein, statt versehentlich abzuschicken."
+                    else "Shows the newline symbol (↵) in chat fields and inserts a line break instead of accidentally sending."
+                )
+            }
+        }
+
+        item {
+            Column {
                 AppleSectionHeader(if (de) "Tippen & Korrektur" else "Typing & Corrections")
                 AppleGroupedSurface {
                     MinimalToggleRow(if (de) "Autokorrektur" else "Auto-correction", prefs.autoCorrect) { v ->
@@ -2124,6 +2158,9 @@ private fun VoiceSettingsScreen(
 
     var advanced by rememberSaveable { mutableStateOf(false) }
     var modelDetails by rememberSaveable { mutableStateOf(false) }
+    var diagRunning by remember { mutableStateOf(false) }
+    var diagReport by remember { mutableStateOf<String?>(null) }
+
     val useLiveCloud = prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE
     val dictationProvider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
         ?.takeIf { !useLiveCloud || it == CloudSpeechProvider.GEMINI }
@@ -2134,7 +2171,14 @@ private fun VoiceSettingsScreen(
     val installedWhisper = remember(modelStates, prefs.selectedWhisperModelId) {
         modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, prefs.selectedWhisperModelId)
     }
+    val installedLlm = remember(modelStates, prefs.selectedLocalLlmId) {
+        modelManager.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
+    }
     val visibleModel = installedWhisper?.first ?: requireNotNull(LocalModelCatalog.findById("whisper-tiny-q5_1"))
+    val cloudNeedsKey = prefs.voiceEngine.usesCloudAudio && (dictationProvider == null || !keySaved)
+    val offlineReady = installedWhisper != null || localAndroidAvailable ||
+        (!prefs.voiceEngine.usesCloudAudio && android.speech.SpeechRecognizer.isRecognitionAvailable(context))
+    val dictationReady = micGranted && !cloudNeedsKey && (prefs.voiceEngine.usesCloudAudio || offlineReady)
 
     val defaultPromptPreview = remember(prefs.voiceCleanupUseSystemLanguage, prefs.activeLocale) {
         CleanupPromptBuilder.buildDefaultPrompt(
@@ -2152,67 +2196,123 @@ private fun VoiceSettingsScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         item {
+            AppleGroupedSurface {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (dictationReady) Color(0xFF34C759).copy(alpha = 0.16f)
+                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (dictationReady) Icons.Rounded.Check else Icons.Rounded.Mic,
+                            contentDescription = null,
+                            tint = if (dictationReady) Color(0xFF34C759) else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = when {
+                                !micGranted -> if (de) "Mikrofon noch erlauben" else "Allow microphone access"
+                                cloudNeedsKey -> if (de) "Cloud-Schlüssel fehlt" else "Cloud API key needed"
+                                installedWhisper == null && prefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER ->
+                                    if (de) "Offline-Sprachpaket laden" else "Download offline speech model"
+                                else -> if (de) "Diktat ist einsatzbereit" else "Dictation is ready"
+                            },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = when {
+                                !micGranted -> if (de) "Ein Tipp genügt, damit Tapwing dich hört." else "Tap once so Tapwing can hear your voice."
+                                cloudNeedsKey -> if (de) "Schlüssel hinterlegen oder auf „Automatisch“ wechseln." else "Save your key or switch to Automatic."
+                                installedWhisper != null -> if (de) "Schnell & ohne Zeitlimit (${installedWhisper.first.displayName.substringBefore(" (")})." else "Fast & unlimited (${installedWhisper.first.displayName.substringBefore(" (")})."
+                                else -> if (de) "Funktioniert direkt und ohne Zeitlimit." else "Ready immediately with no time limit."
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (!micGranted) {
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalActionRow(
+                        if (de) "Mikrofon jetzt erlauben" else "Allow microphone now",
+                        MaterialTheme.colorScheme.primary
+                    ) { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+                }
+            }
+        }
+
+        item {
             Column {
                 AppleGroupedSurface {
                     MinimalToggleRow(
-                        if (de) "Diktat glätten" else "Clean up dictation",
+                        if (de) "Sätze automatisch glätten" else "Clean up sentences automatically",
                         prefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP
                     ) { enabled ->
                         val mode = if (enabled) VoiceDictationMode.NATURAL_CLEANUP else VoiceDictationMode.STANDARD
                         onUpdatePrefs { it.copy(voiceMode = mode) }
                     }
-                    if (!micGranted) {
-                        AppleHairlineDivider(startIndent = 16.dp)
-                        MinimalActionRow(
-                            if (de) "Mikrofon erlauben" else "Allow microphone",
-                            MaterialTheme.colorScheme.primary
-                        ) { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
-                    }
                 }
                 AppleSectionFooter(
-                    if (de) "Tippe zum Starten und Beenden auf das Mikrofon. Tapwing kann Zögern entfernen und Satzzeichen ergänzen."
-                    else "Tap the microphone to start and stop. Tapwing can remove hesitations and add punctuation."
+                    if (de) "Entfernt „ähm“ und Versprecher mitten im Satz, setzt Satzzeichen und versteht Befehle wie „mach es freundlicher“."
+                    else "Removes ‘ums’ and mid-sentence corrections, adds punctuation, and supports commands like ‘make it friendly’."
                 )
             }
         }
 
         item {
             Column {
-                AppleSectionHeader(if (de) "Spracherkennung" else "Speech recognition")
+                AppleSectionHeader(if (de) "Wie soll erkannt werden?" else "Recognition mode")
                 AppleGroupedSurface {
+                    val primaryOptions = listOf(
+                        VoiceEngineMode.AUTO_LOCAL_FIRST,
+                        VoiceEngineMode.LOCAL_WHISPER,
+                        VoiceEngineMode.GEMINI_LIVE
+                    )
                     val options = buildList {
-                        add(VoiceEngineMode.AUTO_LOCAL_FIRST)
-                        if (localAndroidAvailable || prefs.voiceEngine == VoiceEngineMode.ON_DEVICE_SPEECH) {
-                            add(VoiceEngineMode.ON_DEVICE_SPEECH)
-                        }
-                        add(VoiceEngineMode.LOCAL_WHISPER)
-                        add(VoiceEngineMode.GEMINI_LIVE)
-                        if (advanced || prefs.voiceEngine == VoiceEngineMode.CLOUD) add(VoiceEngineMode.CLOUD)
-                        if (advanced || prefs.voiceEngine == VoiceEngineMode.SYSTEM_SPEECH) {
-                            add(VoiceEngineMode.SYSTEM_SPEECH)
+                        addAll(primaryOptions)
+                        if (prefs.voiceEngine !in primaryOptions || advanced) {
+                            if (localAndroidAvailable || prefs.voiceEngine == VoiceEngineMode.ON_DEVICE_SPEECH) {
+                                add(VoiceEngineMode.ON_DEVICE_SPEECH)
+                            }
+                            if (advanced || prefs.voiceEngine == VoiceEngineMode.CLOUD) add(VoiceEngineMode.CLOUD)
+                            if (advanced || prefs.voiceEngine == VoiceEngineMode.SYSTEM_SPEECH) add(VoiceEngineMode.SYSTEM_SPEECH)
                         }
                     }
                     options.forEachIndexed { index, mode ->
                         if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
                         val (title, description) = when (mode) {
                             VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) {
-                                "Automatisch" to "Nutzt zuerst ein geprüftes Android-Offline-Sprachpaket. Danach kommen Whisper oder der Android-Sprachdienst."
-                            } else "Automatic" to "Prefers a verified Android offline language pack, then Whisper or the Android speech service."
-                            VoiceEngineMode.ON_DEVICE_SPEECH -> if (de) {
-                                "Android offline · Live-Text" to "Empfohlen für schnelles Offline-Diktat. Benötigt ein Android-Sprachpaket."
-                            } else "Android offline · Live text" to "Recommended for quick offline dictation. Requires an Android language pack."
+                                "Automatisch (Empfohlen)" to "Schnell & zuverlässig: nutzt dein Gerät direkt und schützt vor Ausfällen."
+                            } else "Automatic (Recommended)" to "Fast & reliable: runs on your device and falls back automatically."
                             VoiceEngineMode.LOCAL_WHISPER -> if (de) {
-                                "Whisper offline" to "Verarbeitet Abschnitte bei Sprechpausen. Audio bleibt auf dem Gerät."
-                            } else "Whisper offline" to "Processes sections at pauses. Audio stays on your device."
+                                "Nur auf dem Gerät (Offline)" to "100 % privat, funktioniert auch ohne Internet — auch für sehr lange Texte."
+                            } else "On-device only (Offline)" to "100% private, works completely offline — even for long dictations."
                             VoiceEngineMode.GEMINI_LIVE -> if (de) {
-                                "Gemini Live" to "Sendet Audio schon beim Sprechen an Google. Kostenloses Kontingent mit eigenem Schlüssel."
-                            } else "Gemini Live" to "Streams audio to Google as you speak. Free quota with your own key."
+                                "Cloud-KI (Live)" to "Höchste Genauigkeit mit Live-Vorschau und automatischem Offline-Schutz."
+                            } else "Cloud AI (Live)" to "Best accuracy with live preview and automatic offline fallback."
+                            VoiceEngineMode.ON_DEVICE_SPEECH -> if (de) {
+                                "Android offline · Live-Text" to "System-Sprachpaket auf dem Gerät mit Sofort-Vorschau."
+                            } else "Android offline · Live text" to "Built-in device language pack with instant preview."
                             VoiceEngineMode.CLOUD -> if (de) {
-                                "Cloud nach dem Stopp" to "Sendet Audio nach dem Stopp an Gemini oder OpenAI. Kosten sind möglich."
-                            } else "Cloud after you stop" to "Sends audio to Gemini or OpenAI when you stop. Charges may apply."
+                                "Cloud nach dem Stopp" to "Sendet Audio nach dem Stopp an Gemini oder OpenAI."
+                            } else "Cloud after stop" to "Sends audio to Gemini or OpenAI after stopping."
                             VoiceEngineMode.SYSTEM_SPEECH -> if (de) {
-                                "Android-Sprachdienst" to "Zeigt Live-Text. Der Dienst kann je nach Gerät das Internet nutzen."
-                            } else "Android speech service" to "Shows live text. The service may use the internet on some devices."
+                                "Android-Sprachdienst" to "Standard-Spracherkennung von Android."
+                            } else "Android speech service" to "Standard Android speech recognition."
                         }
                         VoiceChoice(title, description, selected = prefs.voiceEngine == mode) {
                             onUpdatePrefs { it.copy(voiceEngine = mode) }
@@ -2228,57 +2328,47 @@ private fun VoiceSettingsScreen(
                     AppleSectionHeader(if (de) "Cloud einrichten" else "Cloud setup")
                     AppleGroupedSurface {
                         MinimalValueRow(
-                            if (de) "Modell für Audio" else "Speech model",
-                            if (useLiveCloud) "Gemini 3.5 Transcribe Live" else when (dictationProvider) {
-                                CloudSpeechProvider.GEMINI -> "Gemini 3.5 Flash-Lite"
-                                CloudSpeechProvider.OPENAI -> CloudDictation.OPENAI_MODEL
+                            if (de) "Sprachmodell" else "Speech model",
+                            if (useLiveCloud) "Gemini Live" else when (dictationProvider) {
+                                CloudSpeechProvider.GEMINI -> "Gemini Flash-Lite"
+                                CloudSpeechProvider.OPENAI -> "OpenAI Transcribe"
                                 null -> if (de) "Anbieter wählen" else "Choose provider"
                             }
                         )
                         AppleHairlineDivider(startIndent = 16.dp)
                         MinimalActionRow(
-                            if (de) "Anbieter und Schlüssel" else "Provider and key",
+                            if (de) "Schlüssel in Schreibhilfe prüfen" else "Check key in Writing tools",
                             MaterialTheme.colorScheme.primary,
                             onClick = onOpenWritingTools
                         )
                     }
-                    AppleSectionFooter(
-                        when {
-                            useLiveCloud && de -> "Gemini 3.5 Transcribe Live glättet Text schon während der Aufnahme. Google kann Eingaben aus dem kostenlosen Tarif zur Produktverbesserung nutzen."
-                            useLiveCloud -> "Gemini 3.5 Transcribe Live polishes text while you speak. Google may use free-tier inputs to improve its products."
-                            de -> "Gemini 3.5 Flash-Lite ist im kostenlosen Kontingent verfügbar und glättet nach dem Stopp. OpenAI ist eine Alternative mit eigener API-Abrechnung."
-                            else -> "Gemini 3.5 Flash-Lite has a free quota and polishes after you stop. OpenAI is an alternative with separate API billing."
-                        }
-                    )
-                    if (useLiveCloud && dictationProvider == null) {
+                    if (!keySaved || dictationProvider == null) {
                         AppleSectionFooter(
-                            if (de) "Wähle in der Schreibhilfe Google Gemini und speichere dort deinen API-Schlüssel."
-                            else "Choose Google Gemini under Writing Tools and save your API key there."
+                            if (de) "Hinterlege in der Schreibhilfe deinen API-Schlüssel — oder nutze „Automatisch“ ohne Schlüssel."
+                            else "Add your API key under Writing tools — or switch to Automatic without a key."
                         )
-                    } else if (prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE && dictationProvider == null) {
+                    } else {
                         AppleSectionFooter(
-                            if (de) "Cloud-Diktat mit OpenAI benötigt den offiziellen OpenAI-Endpunkt."
-                            else "OpenAI dictation requires the official OpenAI endpoint."
-                        )
-                    } else if (!keySaved) {
-                        AppleSectionFooter(
-                            if (de) "Speichere den Schlüssel für diesen Anbieter. Gib einen älteren Schlüssel einmal neu ein."
-                            else "Save the key for this provider. Re-enter an existing key once to enable cloud dictation."
+                            if (de) "Bei Verbindungsabbruch übernimmt automatisch ein Offline-Modell, falls installiert."
+                            else "If the connection drops, an installed offline model takes over automatically."
                         )
                     }
                 }
             }
         }
 
-        if (prefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER || prefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST) {
+        if (prefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER ||
+            prefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST ||
+            prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE
+        ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     LocalModelCatalogSection(
-                        title = if (de) "Offline-Sprachmodell" else "Offline speech model",
+                        title = if (de) "Offline-Sprachpaket" else "Offline speech model",
                         recommendationNote = if (de) {
-                            "Starte mit Whisper Tiny (32 MB) für kürzere Wartezeit. Wähle Base (60 MB), wenn dir mehr Genauigkeit wichtiger ist."
+                            "Whisper Tiny (32 MB) ist blitzschnell. Whisper Base (60 MB) erkennt Namen und Satzbau noch genauer."
                         } else {
-                            "Start with Whisper Tiny (32 MB) for a shorter wait. Try Base (60 MB) if you need more accuracy."
+                            "Whisper Tiny (32 MB) is instant. Whisper Base (60 MB) improves accuracy on names and grammar."
                         },
                         models = if (modelDetails) LocalModelCatalog.whisperModels else listOf(visibleModel),
                         selectedModelId = installedWhisper?.first?.id.orEmpty(),
@@ -2299,7 +2389,7 @@ private fun VoiceSettingsScreen(
                         showTechnicalDetails = modelDetails
                     )
                     AppleGroupedSurface {
-                        SettingsDisclosure(if (de) "Alle Offline-Modelle" else "All offline models", modelDetails) {
+                        SettingsDisclosure(if (de) "Weitere Modellgrößen anzeigen" else "Show more model sizes", modelDetails) {
                             modelDetails = !modelDetails
                         }
                     }
@@ -2308,8 +2398,85 @@ private fun VoiceSettingsScreen(
         }
 
         item {
+            Column {
+                AppleSectionHeader(if (de) "Schnelltest" else "Quick check")
+                AppleGroupedSurface {
+                    MinimalActionRow(
+                        title = if (diagRunning) (if (de) "Test läuft…" else "Testing…")
+                        else (if (de) "Diktat kurz testen (3 Sek.)" else "Test dictation (3 sec)"),
+                        textColor = MaterialTheme.colorScheme.primary
+                    ) {
+                        if (diagRunning) return@MinimalActionRow
+                        if (!micGranted) {
+                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            return@MinimalActionRow
+                        }
+                        val target = installedWhisper
+                        if (target == null) {
+                            diagReport = if (de) "Lade zuerst oben ein Offline-Sprachpaket, um lokal zu testen."
+                            else "Download an offline speech model above first to test locally."
+                            return@MinimalActionRow
+                        }
+                        diagRunning = true
+                        diagReport = if (de) "Aufnahme läuft (3 Sek.) — sprich jetzt!" else "Recording (3 sec) — speak now!"
+                        scope.launch {
+                            val wav = File(context.cacheDir, "tapwing_diag_voice.wav")
+                            val rec = WavAudioRecorder()
+                            val started = rec.start(wav, {}, {}, { err ->
+                                diagReport = if (de) "Mikrofon-Fehler: $err" else "Mic error: $err"
+                            })
+                            if (!started) {
+                                diagRunning = false
+                                return@launch
+                            }
+                            delay(3000L)
+                            val result = rec.stopAndGetResult()
+                            if (result == null) {
+                                diagRunning = false
+                                diagReport = if (de) "Keine Aufnahme erstellt." else "No audio recorded."
+                                return@launch
+                            }
+                            diagReport = if (de) "Erkenne Text…" else "Recognizing speech…"
+                            val t0 = System.currentTimeMillis()
+                            val tr = LocalInferenceEngine.transcribeWav(
+                                wavPath = result.file.absolutePath,
+                                modelFile = target.second,
+                                languageCode = KeyboardLocales.baseLang(prefs.activeLocale)
+                            )
+                            val ms = System.currentTimeMillis() - t0
+                            result.file.delete()
+                            diagRunning = false
+                            diagReport = tr.fold(
+                                onSuccess = { txt ->
+                                    if (txt.isBlank()) {
+                                        if (de) "Keine Sprache gehört (Pegel ${result.peakSampleAbs}). Bitte lauter sprechen."
+                                        else "No speech heard (peak ${result.peakSampleAbs}). Try speaking closer."
+                                    } else {
+                                        if (de) "Erkannt in ${ms} ms: „$txt“" else "Recognized in ${ms} ms: \"$txt\""
+                                    }
+                                },
+                                onFailure = { err ->
+                                    if (de) "Fehler (${ms} ms): ${err.localizedMessage}" else "Error (${ms} ms): ${err.localizedMessage}"
+                                }
+                            )
+                        }
+                    }
+                    if (!diagReport.isNullOrBlank()) {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        Text(
+                            text = diagReport!!,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
             AppleGroupedSurface {
-                SettingsDisclosure(if (de) "Weitere Diktatoptionen" else "More dictation options", advanced) {
+                SettingsDisclosure(if (de) "Erweiterte Einstellungen" else "Advanced settings", advanced) {
                     advanced = !advanced
                 }
             }
@@ -2444,13 +2611,8 @@ private fun VoiceSettingsScreen(
         }
 
         item {
-            var diagRunning by remember { mutableStateOf(false) }
-            var diagReport by remember { mutableStateOf<String?>(null) }
-            val installedLlm = remember(modelStates, prefs.selectedLocalLlmId) {
-                modelManager.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
-            }
             Column {
-                AppleSectionHeader(if (de) "Offline-Diktat testen" else "Test offline dictation")
+                AppleSectionHeader(if (de) "Diagnose & Technik" else "Diagnostics & Tech")
                 AppleGroupedSurface {
                     MinimalValueRow(
                         if (de) "Aktives Whisper-Modell" else "Active Whisper model",
@@ -3029,8 +3191,17 @@ private fun LocalModelCatalogSection(
                                     }
                                 }
                             }
+                            val friendlyBadge = when (spec.id) {
+                                "whisper-tiny-q5_1" -> if (de) "Blitzschnell · 32 MB" else "Fastest · 32 MB"
+                                "whisper-base-q5_1" -> if (de) "Ausgewogen · 60 MB" else "Balanced · 60 MB"
+                                "whisper-small-q5_1" -> if (de) "Sehr genau · 190 MB" else "High accuracy · 190 MB"
+                                "whisper-large-v3-turbo-q5_0" -> if (de) "Studio-Qualität · 574 MB" else "Studio · 574 MB"
+                                "qwen3-0.6b-q4_k_m" -> if (de) "Schnell & kompakt · 397 MB" else "Fast & compact · 397 MB"
+                                "qwen3-1.7b-q4_k_m" -> if (de) "Beste lokale Qualität · 1.1 GB" else "Best local quality · 1.1 GB"
+                                else -> "${spec.approxSizeMb} MB"
+                            }
                             Text(
-                                text = "${spec.approxSizeMb} MB" + if (showTechnicalDetails) " · ${spec.minRamGb}+ GB RAM" else "",
+                                text = if (showTechnicalDetails) "${spec.approxSizeMb} MB · ${spec.minRamGb}+ GB RAM" else friendlyBadge,
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

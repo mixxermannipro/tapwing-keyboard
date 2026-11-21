@@ -25,6 +25,10 @@ object LocalInferenceEngine {
     private var loadedWhisperPath: String? = null
     @Volatile
     private var loadedLlmPath: String? = null
+    @Volatile
+    private var lastLlmContextLength: Int = 0
+    @Volatile
+    private var lastLlmMaxTokens: Int = 0
 
     suspend fun transcribeWav(
         wavPath: String,
@@ -80,49 +84,32 @@ object LocalInferenceEngine {
             runCatching {
                 if (!modelFile.isFile) error("Local LLM model file missing")
 
-                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+                val desiredMaxTokens = (userText.length / 2 + 128).coerceIn(256, 1024)
+                val desiredContextLength = if (userText.length > 600) 2048 else 1024
+
                 val t0 = System.currentTimeMillis()
                 if (loadedLlmPath != modelFile.absolutePath) {
                     runCatching { LlamaBridge.shutdown() }
                     // Apply context/thread/batch settings before and after init so both init-time
                     // and generate-time params in Llamatik pick them up.
-                    runCatching {
-                        LlamaBridge.updateGenerateParams(
-                            temperature = 0.15f,
-                            maxTokens = 256,
-                            topP = 0.9f,
-                            topK = 40,
-                            repeatPenalty = 1.05f,
-                            contextLength = 1024,
-                            numThreads = threads,
-                            useMmap = true,
-                            flashAttention = false,
-                            batchSize = 512,
-                            gpuLayers = 0
-                        )
-                    }
+                    applyLlmParams(desiredMaxTokens, desiredContextLength, threads)
                     val ok = LlamaBridge.initGenerateModel(modelFile.absolutePath)
                     if (!ok) {
                         loadedLlmPath = null
+                        lastLlmContextLength = 0
+                        lastLlmMaxTokens = 0
                         error("Failed to initialize local LLM (${modelFile.name})")
                     }
                     loadedLlmPath = modelFile.absolutePath
-                    runCatching {
-                        LlamaBridge.updateGenerateParams(
-                            temperature = 0.15f,
-                            maxTokens = 256,
-                            topP = 0.9f,
-                            topK = 40,
-                            repeatPenalty = 1.05f,
-                            contextLength = 1024,
-                            numThreads = threads,
-                            useMmap = true,
-                            flashAttention = false,
-                            batchSize = 512,
-                            gpuLayers = 0
-                        )
-                    }
+                    applyLlmParams(desiredMaxTokens, desiredContextLength, threads)
+                    lastLlmContextLength = desiredContextLength
+                    lastLlmMaxTokens = desiredMaxTokens
                     Log.i(TAG, "LLM init (${spec.id}, threads=$threads) took ${System.currentTimeMillis() - t0} ms")
+                } else if (lastLlmContextLength != desiredContextLength || lastLlmMaxTokens != desiredMaxTokens) {
+                    applyLlmParams(desiredMaxTokens, desiredContextLength, threads)
+                    lastLlmContextLength = desiredContextLength
+                    lastLlmMaxTokens = desiredMaxTokens
                 }
 
                 val tRun = System.currentTimeMillis()
@@ -179,10 +166,30 @@ object LocalInferenceEngine {
         loadedWhisperPath = null
     }
 
+    private fun applyLlmParams(maxTokens: Int, contextLength: Int, threads: Int) {
+        runCatching {
+            LlamaBridge.updateGenerateParams(
+                temperature = 0.15f,
+                maxTokens = maxTokens,
+                topP = 0.9f,
+                topK = 40,
+                repeatPenalty = 1.05f,
+                contextLength = contextLength,
+                numThreads = threads,
+                useMmap = true,
+                flashAttention = false,
+                batchSize = 512,
+                gpuLayers = 0
+            )
+        }
+    }
+
     private fun releaseLlm() {
         if (loadedLlmPath == null) return
         runCatching { LlamaBridge.shutdown() }
         loadedLlmPath = null
+        lastLlmContextLength = 0
+        lastLlmMaxTokens = 0
     }
 
     fun unloadWhisper() {

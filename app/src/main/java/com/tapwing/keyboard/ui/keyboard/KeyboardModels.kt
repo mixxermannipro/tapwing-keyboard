@@ -293,12 +293,12 @@ object KeyboardLayouts {
     )
 
     private fun bottomRow(spaceLabel: String): List<KeySpec> = listOf(
-        KeySpec("?123", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
-        KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
-        KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
-        KeySpec(spaceLabel, output = " ", weight = 3.85f, type = KeyActionType.SPACE),
-        KeySpec(".", weight = 1f, type = KeyActionType.PERIOD, alternates = listOf("?", "!", ",", ":", ";", "-", "'")),
-        KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
+        KeySpec("?123", weight = 1.42f, type = KeyActionType.SYMBOLS_TOGGLE),
+        KeySpec(",", weight = 0.95f, type = KeyActionType.COMMA),
+        KeySpec("☺", weight = 0.95f, type = KeyActionType.EMOJI_PANEL),
+        KeySpec(spaceLabel, output = " ", weight = 4.18f, type = KeyActionType.SPACE),
+        KeySpec(".", weight = 0.95f, type = KeyActionType.PERIOD, alternates = listOf("?", "!", ",", ":", ";", "-", "'")),
+        KeySpec("↵", weight = 1.55f, type = KeyActionType.ENTER)
     )
 
     val numberRow: List<KeySpec> = (1..9).map { KeySpec(it.toString()) } + KeySpec("0")
@@ -318,12 +318,12 @@ object KeyboardLayouts {
             KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
         ),
         listOf(
-            KeySpec("ABC", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
-            KeySpec(",", weight = 1f, type = KeyActionType.COMMA),
-            KeySpec("☺", weight = 1f, type = KeyActionType.EMOJI_PANEL),
-            KeySpec(" ", weight = 3.85f, type = KeyActionType.SPACE),
-            KeySpec(".", weight = 1f, type = KeyActionType.PERIOD),
-            KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
+            KeySpec("ABC", weight = 1.42f, type = KeyActionType.SYMBOLS_TOGGLE),
+            KeySpec(",", weight = 0.95f, type = KeyActionType.COMMA),
+            KeySpec("☺", weight = 0.95f, type = KeyActionType.EMOJI_PANEL),
+            KeySpec(" ", weight = 4.18f, type = KeyActionType.SPACE),
+            KeySpec(".", weight = 0.95f, type = KeyActionType.PERIOD),
+            KeySpec("↵", weight = 1.55f, type = KeyActionType.ENTER)
         )
     )
 
@@ -342,12 +342,12 @@ object KeyboardLayouts {
             KeySpec("⌫", weight = 1.45f, type = KeyActionType.BACKSPACE)
         ),
         listOf(
-            KeySpec("ABC", weight = 1.35f, type = KeyActionType.SYMBOLS_TOGGLE),
-            KeySpec("<", weight = 1f),
-            KeySpec(">", weight = 1f),
-            KeySpec(" ", weight = 3.85f, type = KeyActionType.SPACE),
-            KeySpec(".", weight = 1f, type = KeyActionType.PERIOD),
-            KeySpec("↵", weight = 1.5f, type = KeyActionType.ENTER)
+            KeySpec("ABC", weight = 1.42f, type = KeyActionType.SYMBOLS_TOGGLE),
+            KeySpec("<", weight = 0.95f),
+            KeySpec(">", weight = 0.95f),
+            KeySpec(" ", weight = 4.18f, type = KeyActionType.SPACE),
+            KeySpec(".", weight = 0.95f, type = KeyActionType.PERIOD),
+            KeySpec("↵", weight = 1.55f, type = KeyActionType.ENTER)
         )
     )
 

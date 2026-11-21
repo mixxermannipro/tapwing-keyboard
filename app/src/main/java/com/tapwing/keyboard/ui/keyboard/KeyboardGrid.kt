@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material.icons.automirrored.rounded.KeyboardReturn
 import androidx.compose.material.icons.automirrored.rounded.Send
@@ -149,7 +150,7 @@ fun KeyboardGrid(
     val baseDp = if (prefs.showNumberRow) 46f else prefs.keyboardHeight.rowHeightDp.toFloat()
     val scaleFactor = (prefs.keyboardScalePercent / 100f) * (prefs.keyboardHeight.rowHeightDp / 48f)
     val rowHeight = (baseDp * scaleFactor).coerceIn(33f, 70f).dp
-    val rowGap = if (prefs.showNumberRow) 5.dp else 6.dp
+    val rowGap = if (prefs.showNumberRow) 6.dp else 8.dp
     val halfRowGap = rowGap / 2
 
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
@@ -426,19 +427,19 @@ fun KeyboardGrid(
             ) {
                 if (preview != null) {
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = kbColors.cardSurface,
                         border = BorderStroke(0.8.dp, kbColors.keyGlassHighlight),
                         shadowElevation = 8.dp
                     ) {
                         Box(
-                            modifier = Modifier.width(44.dp).height(40.dp),
+                            modifier = Modifier.width(44.dp).height(48.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = preview.char,
                                 color = kbColors.keyText,
-                                fontSize = 22.sp,
+                                fontSize = 26.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -577,11 +578,11 @@ private fun ExpressiveKeyCap(
 
     val cornerShape: Shape = when {
         kbColors.appleLiquidGlass -> RoundedCornerShape(percent = 50)
-        !prefs.roundedExpressiveKeys -> RoundedCornerShape(7.dp)
-        isActionKey -> RoundedCornerShape(19.dp)
-        key.type == KeyActionType.SPACE -> RoundedCornerShape(11.dp)
-        isModifierKey -> RoundedCornerShape(15.dp)
-        else -> RoundedCornerShape(11.dp)
+        isActionKey || key.type == KeyActionType.SYMBOLS_TOGGLE || key.type == KeyActionType.SYMBOLS_EXT_TOGGLE ->
+            RoundedCornerShape(percent = 50)
+        !prefs.roundedExpressiveKeys -> RoundedCornerShape(5.dp)
+        isModifierKey -> RoundedCornerShape(8.dp)
+        else -> RoundedCornerShape(7.dp)
     }
 
     val bgTarget = when {
@@ -816,7 +817,7 @@ private fun ExpressiveKeyCap(
     val shadowMod = if (kbColors.appleLiquidGlass) {
         Modifier.shadow(if (pressed) 1.dp else 3.dp, cornerShape, clip = false)
     } else if (!isModifierKey && !isActionKey) {
-        Modifier.shadow(0.5.dp, cornerShape)
+        Modifier.shadow(if (kbColors.isDark) 0.6.dp else 1.dp, cornerShape)
     } else Modifier
 
     // Gapless hitbox wrapper: pointerInput covers the full cell including spacing so fast taps between keys never miss!
@@ -866,22 +867,37 @@ private fun ExpressiveKeyCap(
                     Text(
                         text = key.hint,
                         color = kbColors.keyHintText,
-                        fontSize = 8.5.sp,
-                        lineHeight = 9.sp,
+                        fontSize = 9.sp,
+                        lineHeight = 10.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 2.dp)
+                            .align(Alignment.TopEnd)
+                            .padding(top = 2.dp, end = 4.dp)
                     )
                 }
 
                 when (key.type) {
-                    KeyActionType.SHIFT -> Icon(
-                        imageVector = Icons.Rounded.ArrowUpward,
-                        contentDescription = key.label,
-                        tint = fgColor,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    KeyActionType.SHIFT -> Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ArrowUpward,
+                            contentDescription = key.label,
+                            tint = fgColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        if (shiftState == ShiftState.CAPS_LOCK) {
+                            Spacer(Modifier.height(1.5.dp))
+                            Box(
+                                modifier = Modifier
+                                    .width(10.dp)
+                                    .height(2.dp)
+                                    .clip(RoundedCornerShape(1.dp))
+                                    .background(fgColor)
+                            )
+                        }
+                    }
                     KeyActionType.BACKSPACE -> Icon(
                         imageVector = Icons.AutoMirrored.Rounded.Backspace,
                         contentDescription = key.label,
@@ -899,7 +915,8 @@ private fun ExpressiveKeyCap(
                             KeyActionLabel.SEARCH -> Icons.Rounded.Search
                             KeyActionLabel.SEND -> Icons.AutoMirrored.Rounded.Send
                             KeyActionLabel.DONE -> Icons.Rounded.Check
-                            else -> Icons.AutoMirrored.Rounded.KeyboardReturn
+                            KeyActionLabel.NEXT -> Icons.AutoMirrored.Rounded.ArrowForward
+                            KeyActionLabel.ENTER -> Icons.AutoMirrored.Rounded.KeyboardReturn
                         }
                         Icon(
                             imageVector = icon,
@@ -929,9 +946,8 @@ private fun ExpressiveKeyCap(
                     else -> Text(
                         text = displayText,
                         color = fgColor,
-                        fontSize = if (key.hint != null) 19.sp else 21.sp,
-                        fontWeight = FontWeight.Normal,
-                        modifier = if (key.hint != null) Modifier.padding(top = 7.dp) else Modifier
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Normal
                     )
                 }
             }
