@@ -26,6 +26,10 @@ sealed interface CloudAiResult {
 object CloudAiClient {
 
     private const val TIMEOUT_MS = 20_000
+    private const val FAST_CONNECT_TIMEOUT_MS = 5_000
+    private const val FAST_READ_TIMEOUT_MS = 10_000
+    const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+    const val DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
 
     suspend fun rewrite(
         text: String,
@@ -38,7 +42,7 @@ object CloudAiClient {
         customCleanupPrompt: String = "",
         useSystemLanguageForCleanup: Boolean = true
     ): CloudAiResult = withContext(Dispatchers.IO) {
-        if (provider == AiProviderType.LOCAL_RULES || provider == AiProviderType.LOCAL_LLM) {
+        if (provider == AiProviderType.LOCAL_RULES || provider == AiProviderType.GEMINI_NANO) {
             return@withContext CloudAiResult.Success(
                 LocalWritingAssistant.transform(text, action, locale),
                 "On-Device"
@@ -54,9 +58,11 @@ object CloudAiClient {
             customCleanupPrompt = customCleanupPrompt,
             useSystemLanguageForCleanup = useSystemLanguageForCleanup
         )
+        val fastMode = action == WritingAction.VOICE_CLEANUP
         return@withContext when (provider) {
-            AiProviderType.GEMINI_API -> callGemini(apiKey, model, prompt)
-            AiProviderType.OPENAI_COMPATIBLE -> callOpenAi(apiKey, model, customEndpoint, prompt)
+            AiProviderType.GROQ_API -> callGroq(apiKey, model, prompt, fastMode)
+            AiProviderType.GEMINI_API -> callGemini(apiKey, model, prompt, fastMode)
+            AiProviderType.OPENAI_COMPATIBLE -> callOpenAi(apiKey, model, customEndpoint, prompt, fastMode)
             else -> CloudAiResult.Success(LocalWritingAssistant.transform(text, action, locale), "On-Device")
         }
     }
@@ -104,9 +110,22 @@ object CloudAiClient {
         return "Language: $langDisplay (${spec.bcp47Tag}). Task: $instruction Return ONLY the rewritten text with no quotes or explanation.\n\nText:\n$text"
     }
 
-    private fun callGemini(apiKey: String, model: String, prompt: String): CloudAiResult {
-        val cleanModel = model.trim().ifEmpty { "gemini-2.5-flash" }
+    private fun callGemini(apiKey: String, model: String, prompt: String, fastMode: Boolean): CloudAiResult {
+        val cleanModel = if (fastMode && (model.isBlank() || model.startsWith("llama") || model.startsWith("gpt"))) {
+            "gemini-2.5-flash"
+        } else {
+            model.trim().ifEmpty { "gemini-2.5-flash" }
+        }
         val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent"
+        val genConfig = JSONObject().put("temperature", if (fastMode) 0.1 else 0.25)
+        if (fastMode) {
+            val thinking = if (cleanModel.contains("2.5")) {
+                JSONObject().put("thinkingBudget", 0)
+            } else {
+                JSONObject().put("thinkingLevel", "MINIMAL")
+            }
+            genConfig.put("thinkingConfig", thinking)
+        }
         val body = JSONObject().apply {
             put(
                 "contents",
@@ -117,17 +136,14 @@ object CloudAiClient {
                     )
                 )
             )
-            put(
-                "generationConfig",
-                JSONObject().put("temperature", 0.25)
-            )
+            put("generationConfig", genConfig)
         }.toString()
 
         return runCatching {
             val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = TIMEOUT_MS
-                readTimeout = TIMEOUT_MS
+                connectTimeout = if (fastMode) FAST_CONNECT_TIMEOUT_MS else TIMEOUT_MS
+                readTimeout = if (fastMode) FAST_READ_TIMEOUT_MS else TIMEOUT_MS
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("x-goog-api-key", apiKey)
@@ -144,7 +160,9 @@ object CloudAiClient {
             val first = candidates?.optJSONObject(0)
             val content = first?.optJSONObject("content")
             val parts = content?.optJSONArray("parts")
-            val out = parts?.optJSONObject(0)?.optString("text")?.trim().orEmpty()
+            val out = (0 until (parts?.length() ?: 0)).mapNotNull { idx ->
+                parts?.optJSONObject(idx)?.takeUnless { it.optBoolean("thought") }?.optString("text")
+            }.joinToString("").trim()
             if (out.isEmpty()) {
                 CloudAiResult.Failure("Empty Gemini response")
             } else {
@@ -155,17 +173,53 @@ object CloudAiClient {
         }
     }
 
+    private fun callGroq(apiKey: String, model: String, prompt: String, fastMode: Boolean): CloudAiResult {
+        val cleanModel = model.trim()
+            .takeIf { it.isNotEmpty() && !it.startsWith("gemini") && !it.startsWith("gpt") }
+            ?: DEFAULT_GROQ_MODEL
+        return callOpenAiCompatible(
+            apiKey = apiKey,
+            model = cleanModel,
+            endpoint = GROQ_ENDPOINT,
+            prompt = prompt,
+            fastMode = fastMode,
+            label = "Groq ($cleanModel)"
+        )
+    }
+
     private fun callOpenAi(
         apiKey: String,
         model: String,
         customEndpoint: String,
-        prompt: String
+        prompt: String,
+        fastMode: Boolean
     ): CloudAiResult {
-        val cleanModel = model.trim().ifEmpty { "gpt-4o-mini" }
+        val cleanModel = model.trim()
+            .takeIf { it.isNotEmpty() && !it.startsWith("gemini") }
+            ?: "gpt-4o-mini"
         val base = customEndpoint.trim().ifEmpty { "https://api.openai.com/v1/chat/completions" }
+        return callOpenAiCompatible(
+            apiKey = apiKey,
+            model = cleanModel,
+            endpoint = base,
+            prompt = prompt,
+            fastMode = fastMode,
+            label = "API ($cleanModel)"
+        )
+    }
+
+    private fun callOpenAiCompatible(
+        apiKey: String,
+        model: String,
+        endpoint: String,
+        prompt: String,
+        fastMode: Boolean,
+        label: String
+    ): CloudAiResult {
         val body = JSONObject().apply {
-            put("model", cleanModel)
-            put("temperature", 0.25)
+            put("model", model)
+            put("temperature", if (fastMode) 0.1 else 0.25)
+            if (fastMode) put("max_tokens", 512)
             put(
                 "messages",
                 JSONArray().put(
@@ -177,10 +231,10 @@ object CloudAiClient {
         }.toString()
 
         return runCatching {
-            val conn = (URL(base).openConnection() as HttpURLConnection).apply {
+            val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = TIMEOUT_MS
-                readTimeout = TIMEOUT_MS
+                connectTimeout = if (fastMode) FAST_CONNECT_TIMEOUT_MS else TIMEOUT_MS
+                readTimeout = if (fastMode) FAST_READ_TIMEOUT_MS else TIMEOUT_MS
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Authorization", "Bearer $apiKey")
@@ -199,7 +253,7 @@ object CloudAiClient {
             if (out.isEmpty()) {
                 CloudAiResult.Failure("Empty API response")
             } else {
-                CloudAiResult.Success(CleanupPromptBuilder.sanitizeModelOutput(out), "API ($cleanModel)")
+                CloudAiResult.Success(CleanupPromptBuilder.sanitizeModelOutput(out), label)
             }
         }.getOrElse { ex ->
             CloudAiResult.Failure(ex.localizedMessage ?: "Network error")

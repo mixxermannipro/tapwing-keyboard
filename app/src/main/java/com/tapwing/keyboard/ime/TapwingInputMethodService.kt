@@ -321,7 +321,7 @@ class TapwingInputMethodService :
         offlinePackManager = OfflineDictionaryPackManager(this)
         statsStore = TypingStatsStore.createForContext(this)
         modelManager = LocalModelManager(this)
-        writingToolsEngine = WritingToolsEngine(secureKeyStorage, dictionaryStore, modelManager)
+        writingToolsEngine = WritingToolsEngine(secureKeyStorage, dictionaryStore, modelManager, this)
         clipboardStore = ClipboardStore.createForContext(this)
         snippetsSnapshot = dictionaryStore.listSnippets()
         voiceController = TapwingVoiceController(
@@ -1345,11 +1345,8 @@ class TapwingInputMethodService :
             dictionaryStore = dictionaryStore.takeUnless { prefs.incognitoMode }
         )
         val generation = voiceEditGeneration
-        val offline = prefs.incognitoMode ||
-            prefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER ||
-            prefs.voiceEngine == VoiceEngineMode.ON_DEVICE_SPEECH
-        val processingPrefs = if (offline && prefs.aiProvider in setOf(
-            AiProviderType.GEMINI_API, AiProviderType.OPENAI_COMPATIBLE
+        val processingPrefs = if (prefs.incognitoMode && prefs.aiProvider in setOf(
+            AiProviderType.GROQ_API, AiProviderType.GEMINI_API, AiProviderType.OPENAI_COMPATIBLE
         )) prefs.copy(aiProvider = AiProviderType.LOCAL_RULES) else prefs
 
         when (parsed) {
@@ -1363,10 +1360,7 @@ class TapwingInputMethodService :
                 voiceController.beginExternalProcessing(if (de) "Überarbeite Text …" else "Rewriting text…")
                 voiceEditJob = serviceScope.launch {
                     try {
-                        val commandPrefs = if (prefs.voiceEngine.usesCloudAudio) {
-                            processingPrefs.copy(aiProvider = AiProviderType.LOCAL_RULES)
-                        } else processingPrefs
-                        val out = writingToolsEngine.runAction(fieldText, parsed.action, commandPrefs)
+                        val out = writingToolsEngine.runAction(fieldText, parsed.action, processingPrefs)
                         if (generation == voiceEditGeneration && inputViewActive &&
                             readWholeFieldText() == fieldText && out.rewrittenText.isNotBlank()
                         ) {
@@ -1386,13 +1380,15 @@ class TapwingInputMethodService :
             }
             is VoiceCommandResult.Text -> {
                 val fallback = if (alreadyFormatted) raw else parsed.cleanedText
-                if (!prefs.voiceAiPolish || processingPrefs.aiProvider == AiProviderType.LOCAL_RULES ||
-                    prefs.voiceEngine.usesCloudAudio
+                if (!prefs.voiceAiPolish ||
+                    processingPrefs.aiProvider == AiProviderType.LOCAL_RULES ||
+                    alreadyFormatted ||
+                    WritingToolsEngine.shouldSkipCloudPolish(raw, fallback)
                 ) {
                     insertVoiceText(fallback, prefs)
                     return
                 }
-                voiceController.beginExternalProcessing(if (de) "Überarbeite Diktat …" else "Polishing dictation…")
+                voiceController.beginExternalProcessing(if (de) "Glätte Text …" else "Polishing text…")
                 voiceEditJob = serviceScope.launch {
                     try {
                         val text = writingToolsEngine.cleanupVoiceTranscript(raw, processingPrefs, fallback)

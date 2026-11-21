@@ -1,11 +1,11 @@
 package com.tapwing.keyboard.ai
 
+import android.content.Context
 import com.tapwing.keyboard.data.AiProviderType
 import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.AdaptiveDictionaryStore
-import java.util.Locale
 
 data class WritingToolsOutput(
     val rewrittenText: String,
@@ -16,7 +16,8 @@ data class WritingToolsOutput(
 class WritingToolsEngine(
     private val secureKeyStorage: SecureKeyStorage,
     private val dictionaryStore: AdaptiveDictionaryStore? = null,
-    private val modelManager: LocalModelManager? = null
+    @Suppress("UNUSED_PARAMETER") modelManager: LocalModelManager? = null,
+    private val appContext: Context? = null
 ) {
 
     suspend fun runAction(
@@ -29,11 +30,30 @@ class WritingToolsEngine(
             return WritingToolsOutput("", "On-Device")
         }
 
-        if (prefs.aiProvider == AiProviderType.LOCAL_LLM) {
-            return runWithLocalLlm(sourceText, action, prefs)
+        if (prefs.aiProvider == AiProviderType.GEMINI_NANO) {
+            val ctx = appContext
+            if (ctx != null) {
+                val nano = GeminiNanoClient.processText(ctx, sourceText, action, locale)
+                if (nano.isSuccess) {
+                    return WritingToolsOutput(
+                        rewrittenText = nano.getOrThrow(),
+                        badge = "Gemini Nano (AICore)"
+                    )
+                }
+            }
+            val local = LocalWritingAssistant.transform(sourceText, action, locale, dictionaryStore)
+            return WritingToolsOutput(
+                rewrittenText = local,
+                badge = "On-Device",
+                fallbackNote = if (KeyboardLocales.baseLang(locale) == "de") {
+                    "Gemini Nano auf diesem Gerät nicht verfügbar — Offline-Regeln genutzt"
+                } else {
+                    "Gemini Nano unavailable on this device — used local rules"
+                }
+            )
         }
 
-        if (prefs.aiProvider == AiProviderType.GEMINI_API || prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE) {
+        if (prefs.aiProvider in CLOUD_PROVIDERS) {
             val apiKey = secureKeyStorage.readApiKey()
             if (apiKey.isNotBlank()) {
                 when (
@@ -65,16 +85,12 @@ class WritingToolsEngine(
                     }
                 }
             } else {
-                val installed = modelManager?.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
-                if (installed != null) {
-                    return runWithLocalLlm(sourceText, action, prefs)
-                }
                 val local = LocalWritingAssistant.transform(sourceText, action, locale, dictionaryStore)
                 return WritingToolsOutput(
                     rewrittenText = local,
                     badge = "On-Device",
                     fallbackNote = if (KeyboardLocales.baseLang(locale) == "de") {
-                        "Kein API-Key — lokale Regeln genutzt"
+                        "Kein API-Key — Offline-Regeln genutzt"
                     } else {
                         "No API key set — used local rules"
                     }
@@ -90,10 +106,11 @@ class WritingToolsEngine(
     }
 
     /**
-     * Cleans up voice dictation text using the configured AI backend:
-     * 1) Local LLM (when prefs.aiProvider == LOCAL_LLM, or Cloud fallback when no API key is configured)
-     * 2) Cloud AI (when Gemini/OpenAI provider is chosen with an API key)
-     * 3) Instant offline rule-based NaturalVoiceCleaner (when LOCAL_RULES or as fallback)
+     * Cleans up voice dictation text using the configured fast AI backend:
+     * 1) Smart-Bypass for ultra-short clean utterances (< 1 ms local)
+     * 2) Gemini Nano / Google AICore on supported devices
+     * 3) Fast Cloud AI (Groq LPU / Gemini Flash-Lite / OpenAI) with API key
+     * 4) Instant offline rule-based NaturalVoiceCleaner fallback
      */
     suspend fun cleanupVoiceTranscript(
         rawTranscript: String,
@@ -102,36 +119,41 @@ class WritingToolsEngine(
     ): WritingToolsOutput {
         if (rawTranscript.isBlank()) return WritingToolsOutput("", "On-Device")
 
-        val installed = modelManager?.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
-
-        if (prefs.voiceAiPolish && prefs.aiProvider == AiProviderType.LOCAL_LLM && installed != null) {
-            val (spec, file) = installed
-            val sysPrompt = CleanupPromptBuilder.resolveSystemPrompt(
-                customPrompt = prefs.voiceCleanupPrompt,
-                useSystemLanguage = prefs.voiceCleanupUseSystemLanguage,
-                activeKeyboardLocale = prefs.activeLocale,
-                customVocabulary = dictionaryStore?.allKnownVocabularyWords().orEmpty()
+        if (!prefs.voiceAiPolish || prefs.aiProvider == AiProviderType.LOCAL_RULES ||
+            shouldSkipCloudPolish(rawTranscript, ruleCleaned)
+        ) {
+            return WritingToolsOutput(
+                rewrittenText = ruleCleaned,
+                badge = "On-Device Rules"
             )
-            val llmRes = LocalInferenceEngine.generateWithLocalLlm(
-                modelFile = file,
-                spec = spec,
-                systemPrompt = sysPrompt,
-                userText = rawTranscript
-            )
-            if (llmRes.isSuccess) {
-                val candidate = llmRes.getOrThrow()
-                if (!looksOverTruncated(rawTranscript, candidate)) {
-                    return WritingToolsOutput(
-                        rewrittenText = candidate,
-                        badge = "${spec.displayName} (Local)"
-                    )
-                }
-            }
         }
 
-        if (prefs.voiceAiPolish &&
-            (prefs.aiProvider == AiProviderType.GEMINI_API || prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE)
-        ) {
+        if (prefs.aiProvider == AiProviderType.GEMINI_NANO) {
+            val ctx = appContext
+            if (ctx != null) {
+                val nano = GeminiNanoClient.processText(
+                    context = ctx,
+                    text = ruleCleaned.ifBlank { rawTranscript },
+                    action = WritingAction.VOICE_CLEANUP,
+                    locale = prefs.activeLocale
+                )
+                if (nano.isSuccess) {
+                    val candidate = nano.getOrThrow()
+                    if (!looksOverTruncated(rawTranscript, candidate)) {
+                        return WritingToolsOutput(
+                            rewrittenText = candidate,
+                            badge = "Gemini Nano (AICore)"
+                        )
+                    }
+                }
+            }
+            return WritingToolsOutput(
+                rewrittenText = ruleCleaned,
+                badge = "On-Device Rules"
+            )
+        }
+
+        if (prefs.aiProvider in CLOUD_PROVIDERS) {
             val apiKey = secureKeyStorage.readApiKey()
             if (apiKey.isNotBlank()) {
                 val res = CloudAiClient.rewrite(
@@ -145,34 +167,11 @@ class WritingToolsEngine(
                     customCleanupPrompt = prefs.voiceCleanupPrompt,
                     useSystemLanguageForCleanup = prefs.voiceCleanupUseSystemLanguage
                 )
-                if (res is CloudAiResult.Success) {
+                if (res is CloudAiResult.Success && !looksOverTruncated(rawTranscript, res.text)) {
                     return WritingToolsOutput(
                         rewrittenText = res.text,
                         badge = res.providerLabel
                     )
-                }
-            } else if (installed != null) {
-                val (spec, file) = installed
-                val sysPrompt = CleanupPromptBuilder.resolveSystemPrompt(
-                    customPrompt = prefs.voiceCleanupPrompt,
-                    useSystemLanguage = prefs.voiceCleanupUseSystemLanguage,
-                    activeKeyboardLocale = prefs.activeLocale,
-                    customVocabulary = dictionaryStore?.allKnownVocabularyWords().orEmpty()
-                )
-                val llmRes = LocalInferenceEngine.generateWithLocalLlm(
-                    modelFile = file,
-                    spec = spec,
-                    systemPrompt = sysPrompt,
-                    userText = rawTranscript
-                )
-                if (llmRes.isSuccess) {
-                    val candidate = llmRes.getOrThrow()
-                    if (!looksOverTruncated(rawTranscript, candidate)) {
-                        return WritingToolsOutput(
-                            rewrittenText = candidate,
-                            badge = "${spec.displayName} (Local)"
-                        )
-                    }
                 }
             }
         }
@@ -187,75 +186,37 @@ class WritingToolsEngine(
         val rawWords = raw.trim().split(Regex("""\s+""")).count { it.isNotBlank() }
         if (rawWords < 6) return false
         val lower = raw.lowercase()
-        val hasShortenCmd = lower.contains("kürzer") || lower.contains("shorter") || lower.contains("zusammenfass") || lower.contains("summarize")
+        val hasShortenCmd = lower.contains("kürzer") || lower.contains("shorter") ||
+            lower.contains("zusammenfass") || lower.contains("summarize")
         if (hasShortenCmd) return false
         val cleanWords = cleaned.trim().split(Regex("""\s+""")).count { it.isNotBlank() }
         return cleanWords * 100 < rawWords * 45
     }
 
-    private suspend fun runWithLocalLlm(
-        sourceText: String,
-        action: WritingAction,
-        prefs: TapwingPrefs
-    ): WritingToolsOutput {
-        val installed = modelManager?.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
-        if (installed == null) {
-            val local = LocalWritingAssistant.transform(sourceText, action, prefs.activeLocale, dictionaryStore)
-            return WritingToolsOutput(
-                rewrittenText = local,
-                badge = "On-Device Rules",
-                fallbackNote = if (KeyboardLocales.baseLang(prefs.activeLocale) == "de") {
-                    "Kein lokales KI-Modell geladen — Regeln genutzt"
-                } else {
-                    "No local LLM downloaded — used rules"
-                }
-            )
-        }
-
-        val (spec, file) = installed
-        val sysPrompt = if (action == WritingAction.VOICE_CLEANUP) {
-            CleanupPromptBuilder.resolveSystemPrompt(
-                customPrompt = prefs.voiceCleanupPrompt,
-                useSystemLanguage = prefs.voiceCleanupUseSystemLanguage,
-                activeKeyboardLocale = prefs.activeLocale,
-                customVocabulary = dictionaryStore?.allKnownVocabularyWords().orEmpty()
-            )
-        } else {
-            val kbSpec = KeyboardLocales.specFor(prefs.activeLocale)
-            val langDisplay = Locale.forLanguageTag(kbSpec.bcp47Tag).getDisplayLanguage(Locale.ENGLISH).ifBlank { "English" }
-            val sysLang = KeyboardLocales.systemLanguageDisplayName()
-            val task = when (action) {
-                WritingAction.PROOFREAD -> "Fix spelling, punctuation, and grammar while keeping the original meaning and language."
-                WritingAction.PROFESSIONAL -> "Rewrite in a polite, clear, professional tone."
-                WritingAction.CASUAL -> "Rewrite in a friendly, natural, casual tone."
-                WritingAction.CONCISE -> "Make the text shorter and more direct while preserving all key facts."
-                WritingAction.EMOTIVE -> "Make the text warmer, more expressive, and engaging."
-                WritingAction.REPHRASE -> "Rephrase cleanly with fresh wording while keeping the exact intent."
-                WritingAction.SUMMARIZE -> "Summarize the key points clearly as short bullet points."
-                WritingAction.TRANSLATE -> "Translate naturally into $langDisplay (or into $sysLang if already in $langDisplay)."
-                WritingAction.VOICE_CLEANUP -> ""
-            }
-            "You are Tapwing Writing Assistant. Language: $langDisplay (${kbSpec.bcp47Tag}). Task: $task Output ONLY the final rewritten text without quotes, commentary, or preamble."
-        }
-
-        val res = LocalInferenceEngine.generateWithLocalLlm(
-            modelFile = file,
-            spec = spec,
-            systemPrompt = sysPrompt,
-            userText = sourceText
+    companion object {
+        private val CLOUD_PROVIDERS = setOf(
+            AiProviderType.GROQ_API,
+            AiProviderType.GEMINI_API,
+            AiProviderType.OPENAI_COMPATIBLE
         )
-        return if (res.isSuccess) {
-            WritingToolsOutput(
-                rewrittenText = res.getOrThrow(),
-                badge = "${spec.displayName} (Local)"
-            )
-        } else {
-            val local = LocalWritingAssistant.transform(sourceText, action, prefs.activeLocale, dictionaryStore)
-            WritingToolsOutput(
-                rewrittenText = local,
-                badge = "On-Device (Fallback)",
-                fallbackNote = res.exceptionOrNull()?.localizedMessage
-            )
+
+        private val BYPASS_BLOCKING_CUES = setOf(
+            "äh", "ähm", "öhm", "um", "uh", "erm", "nein", "warte", "meine",
+            "besser", "eigentlich", "actually", "wait", "scratch", "bullet",
+            "stichpunkt", "komma", "punkt", "fragezeichen"
+        )
+
+        /**
+         * Avoids a network round-trip when a short 1-4 word phrase already needs no AI semantic rewrite.
+         */
+        fun shouldSkipCloudPolish(rawTranscript: String, ruleCleaned: String): Boolean {
+            val trimmed = rawTranscript.trim()
+            if (trimmed.isEmpty() || ruleCleaned.isBlank()) return true
+            val words = trimmed.split(Regex("""\s+""")).filter { it.isNotBlank() }
+            if (words.size > 4) return false
+            return words.none { word ->
+                word.lowercase().trim(',', '.', '!', '?') in BYPASS_BLOCKING_CUES
+            }
         }
     }
 }
