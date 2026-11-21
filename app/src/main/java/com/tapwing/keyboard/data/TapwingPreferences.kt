@@ -88,7 +88,8 @@ data class TapwingPrefs(
     val multilingualPredictions: Boolean = true,
     val showNumberRow: Boolean = true,
     val showGermanUmlautKeys: Boolean = false,
-    val showSpacebarLanguageLabel: Boolean = false,
+    val showSpacebarLanguageLabel: Boolean = true,
+    val enterKeyAlwaysNewline: Boolean = true,
     val roundedExpressiveKeys: Boolean = true,
     val showKeyBorders: Boolean = false,
     val keyboardHeight: KeyboardHeightMode = KeyboardHeightMode.NORMAL,
@@ -173,6 +174,7 @@ class TapwingPreferencesRepository(context: Context) {
         val SHOW_NUMBER_ROW = booleanPreferencesKey("show_number_row")
         val SHOW_GERMAN_UMLAUTS = booleanPreferencesKey("show_german_umlauts")
         val SHOW_SPACEBAR_LABEL = booleanPreferencesKey("show_spacebar_label")
+        val ENTER_KEY_ALWAYS_NEWLINE = booleanPreferencesKey("enter_key_always_newline")
         val ROUNDED_EXPRESSIVE_KEYS = booleanPreferencesKey("rounded_expressive_keys")
         val SHOW_KEY_BORDERS = booleanPreferencesKey("show_key_borders")
         val KEYBOARD_HEIGHT = stringPreferencesKey("keyboard_height")
@@ -278,7 +280,8 @@ class TapwingPreferencesRepository(context: Context) {
             multilingualPredictions = p[Keys.MULTILINGUAL_PREDICTIONS] ?: true,
             showNumberRow = p[Keys.SHOW_NUMBER_ROW] ?: true,
             showGermanUmlautKeys = p[Keys.SHOW_GERMAN_UMLAUTS] ?: false,
-            showSpacebarLanguageLabel = p[Keys.SHOW_SPACEBAR_LABEL] ?: false,
+            showSpacebarLanguageLabel = p[Keys.SHOW_SPACEBAR_LABEL] ?: true,
+            enterKeyAlwaysNewline = p[Keys.ENTER_KEY_ALWAYS_NEWLINE] ?: true,
             roundedExpressiveKeys = p[Keys.ROUNDED_EXPRESSIVE_KEYS] ?: true,
             showKeyBorders = p[Keys.SHOW_KEY_BORDERS] ?: false,
             keyboardHeight = parseEnum(p[Keys.KEYBOARD_HEIGHT], KeyboardHeightMode.NORMAL),
@@ -357,6 +360,7 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.SHOW_NUMBER_ROW] = next.showNumberRow
         mutable[Keys.SHOW_GERMAN_UMLAUTS] = next.showGermanUmlautKeys
         mutable[Keys.SHOW_SPACEBAR_LABEL] = next.showSpacebarLanguageLabel
+        mutable[Keys.ENTER_KEY_ALWAYS_NEWLINE] = next.enterKeyAlwaysNewline
         mutable[Keys.ROUNDED_EXPRESSIVE_KEYS] = next.roundedExpressiveKeys
         mutable[Keys.SHOW_KEY_BORDERS] = next.showKeyBorders
         mutable[Keys.KEYBOARD_HEIGHT] = next.keyboardHeight.name

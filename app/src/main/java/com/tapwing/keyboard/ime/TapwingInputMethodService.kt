@@ -140,6 +140,8 @@ class TapwingInputMethodService :
     private var panelMode by mutableStateOf(KeyboardPanelMode.KEYS)
     private var layoutPage by mutableStateOf(KeyboardLayoutPage.LETTERS)
     private var shiftState by mutableStateOf(ShiftState.ONCE)
+    private var currentEditorInfo: EditorInfo? = null
+    private var resolvedImeAction by mutableStateOf(ResolvedImeAction(KeyActionLabel.ENTER, insertNewlineDirectly = true))
     private var imeActionLabel by mutableStateOf(KeyActionLabel.ENTER)
     private var suggestions by mutableStateOf<List<SuggestionChip>>(emptyList())
     private var isTyping by mutableStateOf(false)
@@ -334,6 +336,15 @@ class TapwingInputMethodService :
                 val clipboardWasAllowed = clipboardAllowed()
                 currentPrefs = prefs
                 prefsLoaded = true
+                if (inputViewActive) {
+                    val resolved = ImeActionResolver.resolve(
+                        imeOptions = currentEditorInfo?.imeOptions ?: 0,
+                        inputType = currentEditorInfo?.inputType ?: 0,
+                        alwaysNewline = prefs.enterKeyAlwaysNewline
+                    )
+                    resolvedImeAction = resolved
+                    imeActionLabel = resolved.label
+                }
                 if (inputViewActive && clipboardWasAllowed != clipboardAllowed()) updatePasteSuggestion()
                 if (!prefs.inlineAutofillEnabled) clearAutofillSuggestions()
                 offlinePackManager.preloadLocaleAsync(prefs.activeLocale)
@@ -561,6 +572,7 @@ class TapwingInputMethodService :
             voiceController.prepareOfflineSpeech(currentPrefs.activeLocale)
         }
 
+        currentEditorInfo = info
         currentTargetPackage = info?.packageName.orEmpty()
         privateEditor = isPrivateEditor(info)
         inputViewActive = true
@@ -570,7 +582,8 @@ class TapwingInputMethodService :
             variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS
         isUrlField = variation == InputType.TYPE_TEXT_VARIATION_URI
 
-        imeActionLabel = resolveImeAction(info)
+        resolvedImeAction = resolveImeAction(info)
+        imeActionLabel = resolvedImeAction.label
         layoutPage = KeyboardLayoutPage.LETTERS
         panelMode = KeyboardPanelMode.KEYS
         textEditSelectionActive = false
@@ -740,16 +753,12 @@ class TapwingInputMethodService :
         view.setViewTreeSavedStateRegistryOwner(this)
     }
 
-    private fun resolveImeAction(info: EditorInfo?): KeyActionLabel {
-        val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
-        return when (action) {
-            EditorInfo.IME_ACTION_SEARCH -> KeyActionLabel.SEARCH
-            EditorInfo.IME_ACTION_SEND -> KeyActionLabel.SEND
-            EditorInfo.IME_ACTION_DONE -> KeyActionLabel.DONE
-            EditorInfo.IME_ACTION_NEXT -> KeyActionLabel.NEXT
-            else -> KeyActionLabel.ENTER
-        }
-    }
+    private fun resolveImeAction(info: EditorInfo?): ResolvedImeAction =
+        ImeActionResolver.resolve(
+            imeOptions = info?.imeOptions ?: 0,
+            inputType = info?.inputType ?: 0,
+            alwaysNewline = currentPrefs.enterKeyAlwaysNewline
+        )
 
     private fun secondaryLocales(): List<String> {
         return if (currentPrefs.multilingualPredictions) {
@@ -795,8 +804,9 @@ class TapwingInputMethodService :
                 pendingSmartUndoPair = null
                 pendingSuggestionTrailingSpace = false
                 learnCompletedTrailingWord()
-                val handled = sendDefaultEditorAction(true)
-                if (!handled) {
+                if (resolvedImeAction.insertNewlineDirectly) {
+                    ic.commitText("\n", 1)
+                } else if (!sendDefaultEditorAction(true)) {
                     ic.commitText("\n", 1)
                 }
                 refreshContextAndSuggestions()
@@ -1253,23 +1263,49 @@ class TapwingInputMethodService :
             return
         }
         val natural = prefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP
+        val customVocab = if (prefs.incognitoMode) emptySet() else dictionaryStore.allKnownVocabularyWords()
+        val vocabHint = customVocab
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.length in 2..32 && it.any(Char::isLetter) }
+            .take(12)
+            .joinToString(", ")
+            .takeIf { it.isNotEmpty() }
+
         val cloud = if (prefs.voiceEngine == VoiceEngineMode.CLOUD) {
             val provider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
             provider?.let {
                 val key = secureKeyStorage.readDictationKey(it.name)
-                if (key.isBlank()) null else CloudDictation(it, key, natural, prefs.voiceRemoveFillers, prefs.voiceAutoPunctuate)
+                if (key.isBlank()) null else CloudDictation(
+                    provider = it,
+                    apiKey = key,
+                    natural = natural,
+                    removeFillers = prefs.voiceRemoveFillers,
+                    autoPunctuate = prefs.voiceAutoPunctuate,
+                    customVocabulary = customVocab
+                )
             }
         } else null
-        val live = if (prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE && prefs.aiProvider == AiProviderType.GEMINI_API) {
+        val geminiKey = if (prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE) {
             secureKeyStorage.readDictationKey(CloudSpeechProvider.GEMINI.name)
                 .takeIf(SecureKeyStorage::isValidApiKey)
-                ?.let { key ->
-                    GeminiLiveConfig(
-                        apiKey = key,
-                        smartFormatting = natural && prefs.voiceRemoveFillers && prefs.voiceAutoPunctuate,
-                        languageCode = KeyboardLocales.specFor(prefs.activeLocale).bcp47Tag.takeIf { prefs.voiceStrictLanguageLock }
-                    )
-                }
+        } else null
+        val live = if (geminiKey != null && prefs.aiProvider == AiProviderType.GEMINI_API) {
+            GeminiLiveConfig(
+                apiKey = geminiKey,
+                smartFormatting = natural && prefs.voiceRemoveFillers && prefs.voiceAutoPunctuate,
+                languageCode = KeyboardLocales.specFor(prefs.activeLocale).bcp47Tag.takeIf { prefs.voiceStrictLanguageLock }
+            )
+        } else null
+        val fallbackCloud = if (live != null) {
+            CloudDictation(
+                provider = CloudSpeechProvider.GEMINI,
+                apiKey = geminiKey!!,
+                natural = natural,
+                removeFillers = prefs.voiceRemoveFillers,
+                autoPunctuate = prefs.voiceAutoPunctuate,
+                customVocabulary = customVocab
+            )
         } else null
         voiceController.startListening(
             locale = prefs.activeLocale,
@@ -1279,7 +1315,9 @@ class TapwingInputMethodService :
             whisperModelId = prefs.selectedWhisperModelId,
             formatText = natural && prefs.voiceAutoPunctuate,
             cloud = cloud,
-            live = live
+            live = live,
+            fallbackCloud = fallbackCloud,
+            vocabularyHint = vocabHint
         )
     }
 
@@ -1316,6 +1354,9 @@ class TapwingInputMethodService :
 
         when (parsed) {
             VoiceCommandResult.DeleteLastWord -> deletePreviousWord()
+            VoiceCommandResult.DeleteLastSentence -> deletePreviousSentence(de)
+            VoiceCommandResult.ClearAll -> clearWholeFieldWithUndo(de)
+            VoiceCommandResult.UndoLast -> performUndo()
             is VoiceCommandResult.RewriteAction -> {
                 val fieldText = readWholeFieldText()
                 if (fieldText.isBlank()) return
@@ -1386,6 +1427,49 @@ class TapwingInputMethodService :
         val before = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
         val match = Regex("""\s*\S+\s*$""").find(before) ?: return
         ic.deleteSurroundingText(match.value.length, 0)
+        refreshContextAndSuggestions()
+    }
+
+    private fun deletePreviousSentence(de: Boolean) {
+        val ic = currentInputConnection ?: return
+        val before = ic.getTextBeforeCursor(600, 0)?.toString().orEmpty()
+        if (before.isBlank()) return
+        val trimmedEnd = before.trimEnd()
+        if (trimmedEnd.isEmpty()) return
+        val boundarySearchEnd = (trimmedEnd.length - 1).coerceAtLeast(0)
+        var cutIdx = -1
+        for (i in boundarySearchEnd downTo 0) {
+            val ch = trimmedEnd[i]
+            if (ch == '\n' || (ch in ".!?" && i < trimmedEnd.lastIndex && trimmedEnd[i + 1].isWhitespace())) {
+                cutIdx = i + 1
+                break
+            }
+        }
+        val deleteFrom = if (cutIdx >= 0) cutIdx else 0
+        val deleted = before.substring(deleteFrom)
+        if (deleted.isEmpty()) return
+        ic.deleteSurroundingText(deleted.length, 0)
+        undoManager.record(
+            beforeText = deleted,
+            afterText = "",
+            reason = UndoReason.BULK_DELETE,
+            label = if (de) "Satz wiederherstellen" else "Restore sentence"
+        )
+        proactiveUndoState = undoManager.activeBanner()
+        refreshContextAndSuggestions()
+    }
+
+    private fun clearWholeFieldWithUndo(de: Boolean) {
+        val fullText = readWholeFieldText()
+        if (fullText.isBlank()) return
+        replaceWholeFieldText("")
+        undoManager.record(
+            beforeText = fullText,
+            afterText = "",
+            reason = UndoReason.AI_REWRITE,
+            label = if (de) "Text wiederherstellen" else "Restore text"
+        )
+        proactiveUndoState = undoManager.activeBanner()
         refreshContextAndSuggestions()
     }
 
