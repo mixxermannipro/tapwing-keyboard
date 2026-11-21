@@ -1,7 +1,6 @@
 package com.tapwing.keyboard.ai
 
 import android.util.Log
-import com.llamatik.library.platform.LlamaBridge
 import com.llamatik.library.platform.WhisperBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -10,25 +9,18 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Thread-safe on-device inference engine wrapping Llamatik's whisper.cpp & llama.cpp native bridges.
- * Keeps active model paths cached so consecutive transcriptions/rewrites execute quickly,
- * while permitting clean release when switching models or under memory pressure.
+ * Thread-safe on-device speech inference engine wrapping Llamatik's whisper.cpp native bridge.
+ * Keeps active Whisper model path cached so consecutive transcriptions execute quickly,
+ * while permitting clean release under memory pressure.
  */
 object LocalInferenceEngine {
 
     private const val TAG = "TapwingAI"
 
     private val whisperMutex = Mutex()
-    private val llmMutex = Mutex()
 
     @Volatile
     private var loadedWhisperPath: String? = null
-    @Volatile
-    private var loadedLlmPath: String? = null
-    @Volatile
-    private var lastLlmContextLength: Int = 0
-    @Volatile
-    private var lastLlmMaxTokens: Int = 0
 
     suspend fun transcribeWav(
         wavPath: String,
@@ -74,78 +66,6 @@ object LocalInferenceEngine {
         }
     }
 
-    suspend fun generateWithLocalLlm(
-        modelFile: File,
-        spec: LocalModelSpec,
-        systemPrompt: String,
-        userText: String
-    ): Result<String> = withContext(Dispatchers.IO) {
-        llmMutex.withLock {
-            runCatching {
-                if (!modelFile.isFile) error("Local LLM model file missing")
-
-                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
-                val desiredMaxTokens = (userText.length / 2 + 128).coerceIn(256, 1024)
-                val desiredContextLength = if (userText.length > 600) 2048 else 1024
-
-                val t0 = System.currentTimeMillis()
-                if (loadedLlmPath != modelFile.absolutePath) {
-                    runCatching { LlamaBridge.shutdown() }
-                    // Apply context/thread/batch settings before and after init so both init-time
-                    // and generate-time params in Llamatik pick them up.
-                    applyLlmParams(desiredMaxTokens, desiredContextLength, threads)
-                    val ok = LlamaBridge.initGenerateModel(modelFile.absolutePath)
-                    if (!ok) {
-                        loadedLlmPath = null
-                        lastLlmContextLength = 0
-                        lastLlmMaxTokens = 0
-                        error("Failed to initialize local LLM (${modelFile.name})")
-                    }
-                    loadedLlmPath = modelFile.absolutePath
-                    applyLlmParams(desiredMaxTokens, desiredContextLength, threads)
-                    lastLlmContextLength = desiredContextLength
-                    lastLlmMaxTokens = desiredMaxTokens
-                    Log.i(TAG, "LLM init (${spec.id}, threads=$threads) took ${System.currentTimeMillis() - t0} ms")
-                } else if (lastLlmContextLength != desiredContextLength || lastLlmMaxTokens != desiredMaxTokens) {
-                    applyLlmParams(desiredMaxTokens, desiredContextLength, threads)
-                    lastLlmContextLength = desiredContextLength
-                    lastLlmMaxTokens = desiredMaxTokens
-                }
-
-                val tRun = System.currentTimeMillis()
-                runCatching { LlamaBridge.sessionReset() }
-                val effectiveUser = if (spec.supportsNoThink) {
-                    "/no_think\n$userText"
-                } else {
-                    userText
-                }
-                val formatted = runCatching {
-                    LlamaBridge.applyChatTemplate(
-                        messages = listOf(
-                            "system" to systemPrompt,
-                            "user" to effectiveUser
-                        ),
-                        addAssistantPrefix = true
-                    )
-                }.getOrNull()
-
-                val rawOutput = if (!formatted.isNullOrBlank()) {
-                    LlamaBridge.generate(formatted)
-                } else {
-                    LlamaBridge.generateWithContext(systemPrompt, "", effectiveUser)
-                }
-                val cleaned = CleanupPromptBuilder.sanitizeModelOutput(rawOutput)
-                Log.i(
-                    TAG,
-                    "LLM generate (${spec.id}) took ${System.currentTimeMillis() - tRun} ms " +
-                        "(rawChars=${rawOutput.length}, cleanChars=${cleaned.length})"
-                )
-                if (cleaned.isBlank()) error("Local LLM returned empty output")
-                cleaned
-            }
-        }
-    }
-
     suspend fun warmWhisper(modelFile: File): Result<Unit> = withContext(Dispatchers.IO) {
         whisperMutex.withLock { runCatching { loadWhisper(modelFile) } }
     }
@@ -166,32 +86,6 @@ object LocalInferenceEngine {
         loadedWhisperPath = null
     }
 
-    private fun applyLlmParams(maxTokens: Int, contextLength: Int, threads: Int) {
-        runCatching {
-            LlamaBridge.updateGenerateParams(
-                temperature = 0.15f,
-                maxTokens = maxTokens,
-                topP = 0.9f,
-                topK = 40,
-                repeatPenalty = 1.05f,
-                contextLength = contextLength,
-                numThreads = threads,
-                useMmap = true,
-                flashAttention = false,
-                batchSize = 512,
-                gpuLayers = 0
-            )
-        }
-    }
-
-    private fun releaseLlm() {
-        if (loadedLlmPath == null) return
-        runCatching { LlamaBridge.shutdown() }
-        loadedLlmPath = null
-        lastLlmContextLength = 0
-        lastLlmMaxTokens = 0
-    }
-
     fun unloadWhisper() {
         if (!whisperMutex.tryLock()) return
         try {
@@ -209,23 +103,10 @@ object LocalInferenceEngine {
                 whisperMutex.unlock()
             }
         }
-        if (llmMutex.tryLock()) {
-            try {
-                if (loadedLlmPath == path) releaseLlm()
-            } finally {
-                llmMutex.unlock()
-            }
-        }
     }
 
     fun unloadAll() {
         unloadWhisper()
-        if (!llmMutex.tryLock()) return
-        try {
-            releaseLlm()
-        } finally {
-            llmMutex.unlock()
-        }
     }
 
     private fun extractSegmentsText(jsonRaw: String): String {

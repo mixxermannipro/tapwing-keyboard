@@ -1,8 +1,7 @@
 package com.tapwing.keyboard.ai
 
 enum class LocalModelKind {
-    WHISPER_STT,
-    CLEANUP_LLM
+    WHISPER_STT
 }
 
 data class LocalModelSpec(
@@ -15,7 +14,6 @@ data class LocalModelSpec(
     val downloadUrl: String,
     val repoUrl: String,
     val isRecommended: Boolean = false,
-    val supportsNoThink: Boolean = false,
     val summaryDe: String,
     val summaryEn: String
 )
@@ -74,65 +72,9 @@ object LocalModelCatalog {
         )
     )
 
-    val llmModels: List<LocalModelSpec> = listOf(
-        LocalModelSpec(
-            id = "qwen3-1.7b-q4_k_m",
-            kind = LocalModelKind.CLEANUP_LLM,
-            displayName = "Qwen3 1.7B (Q4_K_M)",
-            fileName = "Qwen3-1.7B-Q4_K_M.gguf",
-            approxSizeMb = 1107,
-            minRamGb = 6,
-            downloadUrl = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
-            repoUrl = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF",
-            isRecommended = true,
-            supportsNoThink = true,
-            summaryDe = "Für längere Texte und mehrsprachige Schreibhilfe. Braucht mehr Speicher als Qwen3 0.6B.",
-            summaryEn = "For longer text and multilingual editing. Uses more memory than Qwen3 0.6B."
-        ),
-        LocalModelSpec(
-            id = "qwen3-0.6b-q4_k_m",
-            kind = LocalModelKind.CLEANUP_LLM,
-            displayName = "Qwen3 0.6B (Q4_K_M)",
-            fileName = "Qwen3-0.6B-Q4_K_M.gguf",
-            approxSizeMb = 397,
-            minRamGb = 4,
-            downloadUrl = "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf",
-            repoUrl = "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF",
-            supportsNoThink = true,
-            summaryDe = "Sehr schnell und sparsam (~400 MB) — ideal für Mittelklasse-Smartphones.",
-            summaryEn = "Very fast and memory-light (~400 MB) — ideal for mid-range phones."
-        ),
-        LocalModelSpec(
-            id = "gemma-3-1b-it-q4_k_m",
-            kind = LocalModelKind.CLEANUP_LLM,
-            displayName = "Gemma 3 1B-IT (Q4_K_M)",
-            fileName = "gemma-3-1b-it-Q4_K_M.gguf",
-            approxSizeMb = 806,
-            minRamGb = 4,
-            downloadUrl = "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf",
-            repoUrl = "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF",
-            summaryDe = "Googles kompaktes 1B-Modell für flüssigen Stil, Tonfall & Zeichensetzung.",
-            summaryEn = "Google's compact 1B instruction model for smooth tone and punctuation."
-        ),
-        LocalModelSpec(
-            id = "llama-3.2-1b-it-q4_k_m",
-            kind = LocalModelKind.CLEANUP_LLM,
-            displayName = "Llama 3.2 1B Instruct (Q4_K_M)",
-            fileName = "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-            approxSizeMb = 808,
-            minRamGb = 4,
-            downloadUrl = "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-            repoUrl = "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF",
-            summaryDe = "Schnelles Meta-Modell mit sehr guter Geschwindigkeit auf Mobilgeräten.",
-            summaryEn = "Fast Meta mobile instruction model for quick dictation cleanup."
-        )
-    )
-
-    val allModels: List<LocalModelSpec> = whisperModels + llmModels
+    val allModels: List<LocalModelSpec> = whisperModels
 
     fun findById(id: String): LocalModelSpec? = allModels.firstOrNull { it.id == id }
 
     fun recommendedWhisper(): LocalModelSpec = whisperModels.first { it.isRecommended }
-
-    fun recommendedLlm(): LocalModelSpec = llmModels.first { it.isRecommended }
 }

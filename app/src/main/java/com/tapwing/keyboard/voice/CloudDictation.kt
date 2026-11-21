@@ -14,12 +14,13 @@ import java.util.Base64
 import java.util.UUID
 
 internal enum class CloudSpeechProvider {
-    GEMINI, OPENAI;
+    GEMINI, GROQ, OPENAI;
 
     companion object {
         fun from(provider: AiProviderType, customEndpoint: String): CloudSpeechProvider? =
             when (provider) {
                 AiProviderType.GEMINI_API -> GEMINI
+                AiProviderType.GROQ_API -> GROQ
                 AiProviderType.OPENAI_COMPATIBLE -> OPENAI.takeIf {
                     customEndpoint.isBlank() || customEndpoint.trim().trimEnd('/') ==
                         "https://api.openai.com/v1/chat/completions"
@@ -62,7 +63,20 @@ internal class CloudDictation(
                         val segment = withTransientRetry {
                             when (provider) {
                                 CloudSpeechProvider.GEMINI -> requestGemini(part, language, previousTail)
-                                CloudSpeechProvider.OPENAI -> requestOpenAi(part, language, previousTail)
+                                CloudSpeechProvider.GROQ -> requestMultipartAudio(
+                                    url = GROQ_AUDIO_URL,
+                                    model = GROQ_MODEL,
+                                    wav = part,
+                                    language = language,
+                                    previousContext = previousTail
+                                )
+                                CloudSpeechProvider.OPENAI -> requestMultipartAudio(
+                                    url = OPENAI_AUDIO_URL,
+                                    model = OPENAI_MODEL,
+                                    wav = part,
+                                    language = language,
+                                    previousContext = previousTail
+                                )
                             }
                         }
                         if (segment.isNotBlank()) {
@@ -131,14 +145,20 @@ internal class CloudDictation(
         return CleanupPromptBuilder.sanitizeModelOutput(transcript).takeUnless { it == "[NO_SPEECH]" }.orEmpty()
     }
 
-    private fun requestOpenAi(wav: File, language: String?, previousContext: String): String {
+    private fun requestMultipartAudio(
+        url: String,
+        model: String,
+        wav: File,
+        language: String?,
+        previousContext: String
+    ): String {
         val boundary = "Tapwing${UUID.randomUUID()}"
         val combinedPrompt = listOf(vocabHint, previousContext).filter { it.isNotEmpty() }.joinToString(". ")
         val header = buildString {
             fun field(name: String, value: String) {
                 append("--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n")
             }
-            field("model", OPENAI_MODEL)
+            field("model", model)
             field("response_format", "json")
             language?.let { field("language", it) }
             if (combinedPrompt.isNotEmpty()) field("prompt", combinedPrompt)
@@ -147,7 +167,7 @@ internal class CloudDictation(
         }.toByteArray()
         val footer = "\r\n--$boundary--\r\n".toByteArray()
         return post(
-            "https://api.openai.com/v1/audio/transcriptions",
+            url,
             "Authorization" to "Bearer $apiKey",
             "multipart/form-data; boundary=$boundary",
             header.size + wav.length() + footer.size
@@ -189,7 +209,10 @@ internal class CloudDictation(
 
     companion object {
         const val GEMINI_MODEL = "gemini-3.5-flash-lite"
+        const val GROQ_MODEL = "whisper-large-v3-turbo"
         const val OPENAI_MODEL = "gpt-4o-mini-transcribe"
+        private const val GROQ_AUDIO_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+        private const val OPENAI_AUDIO_URL = "https://api.openai.com/v1/audio/transcriptions"
         private const val MAX_CHUNK_SECONDS = 45
         private const val CONNECT_TIMEOUT_MS = 8_000
         private const val READ_TIMEOUT_MS = 30_000

@@ -68,7 +68,8 @@ enum class VoiceEngineMode {
 
 enum class AiProviderType {
     LOCAL_RULES,
-    LOCAL_LLM,
+    GEMINI_NANO,
+    GROQ_API,
     GEMINI_API,
     OPENAI_COMPATIBLE
 }
@@ -127,7 +128,6 @@ data class TapwingPrefs(
     val voiceMode: VoiceDictationMode = VoiceDictationMode.NATURAL_CLEANUP,
     val voiceEngine: VoiceEngineMode = VoiceEngineMode.AUTO_LOCAL_FIRST,
     val selectedWhisperModelId: String = "whisper-small-q5_1",
-    val selectedLocalLlmId: String = "qwen3-1.7b-q4_k_m",
     val voiceCleanupPrompt: String = "",
     val voiceCleanupUseSystemLanguage: Boolean = true,
     val voiceRemoveFillers: Boolean = true,
@@ -212,7 +212,6 @@ class TapwingPreferencesRepository(context: Context) {
         val VOICE_MODE = stringPreferencesKey("voice_mode")
         val VOICE_ENGINE = stringPreferencesKey("voice_engine")
         val SELECTED_WHISPER_MODEL_ID = stringPreferencesKey("selected_whisper_model_id")
-        val SELECTED_LOCAL_LLM_ID = stringPreferencesKey("selected_local_llm_id")
         val VOICE_CLEANUP_PROMPT = stringPreferencesKey("voice_cleanup_prompt")
         val VOICE_CLEANUP_USE_SYSTEM_LANG = booleanPreferencesKey("voice_cleanup_use_system_lang")
         val VOICE_REMOVE_FILLERS = booleanPreferencesKey("voice_remove_fillers")
@@ -319,7 +318,6 @@ class TapwingPreferencesRepository(context: Context) {
             voiceMode = parseEnum(p[Keys.VOICE_MODE], VoiceDictationMode.NATURAL_CLEANUP),
             voiceEngine = parseEnum(p[Keys.VOICE_ENGINE], VoiceEngineMode.AUTO_LOCAL_FIRST),
             selectedWhisperModelId = p[Keys.SELECTED_WHISPER_MODEL_ID] ?: "whisper-small-q5_1",
-            selectedLocalLlmId = p[Keys.SELECTED_LOCAL_LLM_ID] ?: "qwen3-1.7b-q4_k_m",
             voiceCleanupPrompt = p[Keys.VOICE_CLEANUP_PROMPT] ?: "",
             voiceCleanupUseSystemLanguage = p[Keys.VOICE_CLEANUP_USE_SYSTEM_LANG] ?: true,
             voiceRemoveFillers = p[Keys.VOICE_REMOVE_FILLERS] ?: true,
@@ -395,7 +393,6 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.VOICE_MODE] = next.voiceMode.name
         mutable[Keys.VOICE_ENGINE] = next.voiceEngine.name
         mutable[Keys.SELECTED_WHISPER_MODEL_ID] = next.selectedWhisperModelId
-        mutable[Keys.SELECTED_LOCAL_LLM_ID] = next.selectedLocalLlmId
         mutable[Keys.VOICE_CLEANUP_PROMPT] = next.voiceCleanupPrompt
         mutable[Keys.VOICE_CLEANUP_USE_SYSTEM_LANG] = next.voiceCleanupUseSystemLanguage
         mutable[Keys.VOICE_REMOVE_FILLERS] = next.voiceRemoveFillers

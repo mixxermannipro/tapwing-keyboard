@@ -89,6 +89,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -133,12 +134,14 @@ import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.CleanupPromptBuilder
 import com.tapwing.keyboard.ai.CloudAiClient
 import com.tapwing.keyboard.ai.CloudAiResult
+import com.tapwing.keyboard.ai.GeminiNanoClient
 import com.tapwing.keyboard.ai.LocalInferenceEngine
 import com.tapwing.keyboard.ai.LocalModelCatalog
 import com.tapwing.keyboard.ai.LocalModelKind
 import com.tapwing.keyboard.ai.LocalModelManager
 import com.tapwing.keyboard.ai.LocalModelSpec
 import com.tapwing.keyboard.ai.ModelInstallState
+import com.tapwing.keyboard.ai.NanoAvailability
 import com.tapwing.keyboard.voice.VoiceSelfTest
 import com.tapwing.keyboard.voice.CloudDictation
 import com.tapwing.keyboard.voice.CloudSpeechProvider
@@ -538,10 +541,11 @@ private fun HomeSettingsScreen(
             title = stringResource(R.string.nav_writing_tools),
             icon = Icons.Rounded.AutoAwesome,
             badgeColor = Color(0xFF5856D6),
-            keywords = "ki ai gemini openai qwen gemma llama gguf modell prompt",
+            keywords = "ki ai groq gemini nano openai prompt",
             status = when (prefs.aiProvider) {
                 AiProviderType.LOCAL_RULES -> "Offline"
-                AiProviderType.LOCAL_LLM -> if (de) "Lokal" else "Local"
+                AiProviderType.GEMINI_NANO -> "Gemini Nano"
+                AiProviderType.GROQ_API -> "Groq"
                 AiProviderType.GEMINI_API -> "Gemini"
                 AiProviderType.OPENAI_COMPATIBLE -> "OpenAI"
             }
@@ -2171,9 +2175,6 @@ private fun VoiceSettingsScreen(
     val installedWhisper = remember(modelStates, prefs.selectedWhisperModelId) {
         modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, prefs.selectedWhisperModelId)
     }
-    val installedLlm = remember(modelStates, prefs.selectedLocalLlmId) {
-        modelManager.firstInstalledModel(LocalModelKind.CLEANUP_LLM, prefs.selectedLocalLlmId)
-    }
     val visibleModel = installedWhisper?.first ?: requireNotNull(LocalModelCatalog.findById("whisper-tiny-q5_1"))
     val cloudNeedsKey = prefs.voiceEngine.usesCloudAudio && (dictationProvider == null || !keySaved)
     val offlineReady = installedWhisper != null || localAndroidAvailable ||
@@ -2257,6 +2258,64 @@ private fun VoiceSettingsScreen(
 
         item {
             Column {
+                AppleSectionHeader(if (de) "Empfohlener Workflow (für Tempo)" else "Recommended workflow (for speed)")
+                AppleGroupedSurface {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (de) "1. Rambler-Tempo (~0,3 Sek. nach ✓)" else "1. Rambler speed (~0.3s after ✓)",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = if (de) {
+                                "„Cloud-KI (Live)“ mit Gemini ODER „Automatisch“ (Android-Live) kombiniert mit Groq/Gemini unter Schreibhilfe."
+                            } else {
+                                "“Cloud AI (Live)” with Gemini OR “Automatic” (Android live) paired with Groq/Gemini in Writing tools."
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        AppleHairlineDivider(startIndent = 0.dp)
+                        Text(
+                            text = if (de) "2. Sofort & 100 % Offline (< 0,2 Sek.)" else "2. Instant & 100% Offline (< 0.2s)",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (de) {
+                                "„Automatisch“ nutzt das Android-Sprachpaket + schnelle Offline-Regeln (auf unterstützten Pixel/Flagships auch Gemini Nano)."
+                            } else {
+                                "“Automatic” uses your Android speech pack + instant offline rules (or Gemini Nano on supported AICore phones)."
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        AppleHairlineDivider(startIndent = 0.dp)
+                        Text(
+                            text = if (de) "3. Offline ohne Google (Whisper)" else "3. Offline without Google (Whisper)",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (de) {
+                                "Whisper Tiny/Base läuft komplett autark auf dem Gerät — ideal für Datenschutz oder lange Monologe."
+                            } else {
+                                "Whisper Tiny/Base runs standalone on-device — great for strict privacy or long monologues."
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            Column {
                 AppleGroupedSurface {
                     MinimalToggleRow(
                         if (de) "Sätze automatisch glätten" else "Clean up sentences automatically",
@@ -2331,6 +2390,7 @@ private fun VoiceSettingsScreen(
                             if (de) "Sprachmodell" else "Speech model",
                             if (useLiveCloud) "Gemini Live" else when (dictationProvider) {
                                 CloudSpeechProvider.GEMINI -> "Gemini Flash-Lite"
+                                CloudSpeechProvider.GROQ -> "Groq Whisper Turbo"
                                 CloudSpeechProvider.OPENAI -> "OpenAI Transcribe"
                                 null -> if (de) "Anbieter wählen" else "Choose provider"
                             }
@@ -2622,8 +2682,9 @@ private fun VoiceSettingsScreen(
                     MinimalValueRow(
                         if (de) "Aktive KI-Bereinigung" else "Active cleanup AI",
                         when (prefs.aiProvider) {
-                            AiProviderType.LOCAL_LLM -> installedLlm?.first?.displayName ?: (if (de) "Kein GGUF" else "No GGUF")
                             AiProviderType.LOCAL_RULES -> if (de) "On-Device Regeln" else "Local Rules"
+                            AiProviderType.GEMINI_NANO -> "Gemini Nano (AICore)"
+                            AiProviderType.GROQ_API -> "Groq Blitz-Cloud"
                             AiProviderType.GEMINI_API -> "Gemini API"
                             AiProviderType.OPENAI_COMPATIBLE -> "OpenAI API"
                         }
@@ -2695,47 +2756,6 @@ private fun VoiceSettingsScreen(
                         }
                         FilledTonalButton(
                             onClick = {
-                                val target = installedLlm
-                                if (target == null) {
-                                    diagReport = if (de) "Kein lokales GGUF-Modell installiert." else "No local GGUF LLM installed."
-                                    return@FilledTonalButton
-                                }
-                                diagRunning = true
-                                diagReport = if (de) "Teste ${target.first.displayName}…" else "Testing ${target.first.displayName}…"
-                                scope.launch {
-                                    val prompt = CleanupPromptBuilder.resolveSystemPrompt(
-                                        customPrompt = prefs.voiceCleanupPrompt,
-                                        useSystemLanguage = prefs.voiceCleanupUseSystemLanguage,
-                                        activeKeyboardLocale = prefs.activeLocale
-                                    )
-                                    val t0 = System.currentTimeMillis()
-                                    val res = LocalInferenceEngine.generateWithLocalLlm(
-                                        modelFile = target.second,
-                                        spec = target.first,
-                                        systemPrompt = prompt,
-                                        userText = "äh hallo ich wollte fragen treffen wir uns um 14 uhr nein warte 15 uhr im büro"
-                                    )
-                                    val ms = System.currentTimeMillis() - t0
-                                    diagRunning = false
-                                    diagReport = res.fold(
-                                        onSuccess = { out -> "${target.first.displayName} (${ms}ms) → '$out'" },
-                                        onFailure = { err -> "LLM error (${ms}ms): ${err.localizedMessage}" }
-                                    )
-                                }
-                            },
-                            enabled = !diagRunning,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(if (de) "Lokale KI testen" else "Test Local LLM", fontSize = 12.sp)
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilledTonalButton(
-                            onClick = {
                                 val target = installedWhisper
                                 if (target == null) {
                                     diagReport = if (de) "Bitte zuerst ein Whisper-Modell laden." else "Please download a Whisper model first."
@@ -2773,9 +2793,9 @@ private fun VoiceSettingsScreen(
                             },
                             enabled = !diagRunning,
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Text(if (de) "TTS-Sprache → Whisper testen" else "Test TTS Speech → Whisper", fontSize = 12.sp)
+                            Text(if (de) "TTS → Whisper" else "TTS → Whisper", fontSize = 12.sp)
                         }
                     }
                     if (!diagReport.isNullOrBlank()) {
@@ -2798,13 +2818,11 @@ private fun WritingToolsSettingsScreen(
     prefs: TapwingPrefs,
     de: Boolean,
     secureKeyStorage: SecureKeyStorage,
-    modelManager: LocalModelManager,
+    @Suppress("UNUSED_PARAMETER") modelManager: LocalModelManager,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val modelStates by modelManager.states.collectAsState()
-    var pendingImportSpec by remember { mutableStateOf<LocalModelSpec?>(null) }
 
     var apiKeyInput by remember { mutableStateOf("") }
     var hasSavedKey by remember { mutableStateOf(secureKeyStorage.hasApiKey()) }
@@ -2812,7 +2830,15 @@ private fun WritingToolsSettingsScreen(
     var testStatus by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
     var advanced by rememberSaveable { mutableStateOf(false) }
+    var nanoStatus by remember { mutableStateOf<NanoAvailability?>(null) }
+    var nanoDownloading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(prefs.aiProvider, prefs.activeLocale) {
+        nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
+    }
+
     val recommendedModel = when (prefs.aiProvider) {
+        AiProviderType.GROQ_API -> CloudAiClient.DEFAULT_GROQ_MODEL
         AiProviderType.GEMINI_API -> CloudDictation.GEMINI_MODEL
         AiProviderType.OPENAI_COMPATIBLE -> "gpt-4o-mini"
         else -> ""
@@ -2820,25 +2846,10 @@ private fun WritingToolsSettingsScreen(
 
     if (showKeyHelp && recommendedModel.isNotEmpty()) {
         ApiKeyHelpDialog(
-            isGemini = prefs.aiProvider == AiProviderType.GEMINI_API,
+            providerType = prefs.aiProvider,
             de = de,
             onDismiss = { showKeyHelp = false }
         )
-    }
-
-    val importLlmLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val targetSpec = pendingImportSpec
-        pendingImportSpec = null
-        if (uri != null && targetSpec != null) {
-            scope.launch {
-                val ok = modelManager.importModelFromUri(targetSpec, uri)
-                if (ok) {
-                    onUpdatePrefs {
-                        it.copy(selectedLocalLlmId = targetSpec.id, aiProvider = AiProviderType.LOCAL_LLM)
-                    }
-                }
-            }
-        }
     }
 
     LazyColumn(
@@ -2851,29 +2862,38 @@ private fun WritingToolsSettingsScreen(
                 MinimalToggleRow(if (de) "KI-Schreibhilfe" else "AI Writing Tools", prefs.aiWritingToolsEnabled) { v ->
                     onUpdatePrefs { it.copy(aiWritingToolsEnabled = v) }
                 }
-
             }
         }
 
         item {
             Column {
-                AppleSectionHeader(if (de) "Text verarbeiten" else "Text processing")
+                AppleSectionHeader(if (de) "Text glätten & umschreiben" else "Text cleanup & rewriting")
                 AppleGroupedSurface {
-                    AiProviderType.entries.forEachIndexed { index, provider ->
+                    val orderedProviders = listOf(
+                        AiProviderType.GROQ_API,
+                        AiProviderType.GEMINI_API,
+                        AiProviderType.GEMINI_NANO,
+                        AiProviderType.LOCAL_RULES,
+                        AiProviderType.OPENAI_COMPATIBLE
+                    )
+                    orderedProviders.forEachIndexed { index, provider ->
                         if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
                         val (title, description) = when (provider) {
-                            AiProviderType.LOCAL_RULES -> if (de) {
-                                "Schnell und offline" to "Einfache Korrekturen ohne Download. Empfohlen für den Start."
-                            } else "Fast and offline" to "Basic cleanup without a download. Recommended to start."
-                            AiProviderType.LOCAL_LLM -> if (de) {
-                                "KI auf dem Gerät" to "Schreibt Texte um. Einmaliger Modelldownload nötig."
-                            } else "On-device AI" to "Rewrites text. Requires a one-time model download."
+                            AiProviderType.GROQ_API -> if (de) {
+                                "Groq Blitz-Cloud (Empfohlen)" to "Extrem schnelle KI-Glättung (~0,2 Sek.) & Whisper Turbo. Kostenloser Schlüssel unter console.groq.com."
+                            } else "Groq Fast Cloud (Recommended)" to "Ultra-fast AI cleanup (~0.2s) & Whisper Turbo. Free API key at console.groq.com."
                             AiProviderType.GEMINI_API -> if (de) {
-                                "Google Gemini" to "Schreibhilfe und optionales Cloud-Diktat mit eigenem Schlüssel."
-                            } else "Google Gemini" to "Writing tools and optional cloud dictation with your own key."
+                                "Google Gemini" to "Ideal zusammen mit Gemini Live. Kostenloses Kontingent mit Google-Schlüssel."
+                            } else "Google Gemini" to "Great alongside Gemini Live. Free tier available with your Google API key."
+                            AiProviderType.GEMINI_NANO -> if (de) {
+                                "Gemini Nano (Google AICore)" to "Läuft direkt auf dem Gerät ohne Cloud (nur für unterstützte Pixel/Flagships mit AICore)."
+                            } else "Gemini Nano (Google AICore)" to "Runs privately on-device via Google AICore (supported Pixel & flagship devices only)."
+                            AiProviderType.LOCAL_RULES -> if (de) {
+                                "Offline-Regeln (Sofort)" to "Entfernt Füllwörter, Korrekturen & setzt Satzzeichen in < 1 ms — ohne Internet."
+                            } else "Offline Rules (Instant)" to "Removes fillers, self-corrections & adds punctuation in < 1ms — completely offline."
                             AiProviderType.OPENAI_COMPATIBLE -> if (de) {
-                                "OpenAI" to "Schreibhilfe und optionales Cloud-Diktat mit eigenem Schlüssel."
-                            } else "OpenAI" to "Writing tools and optional cloud dictation with your own key."
+                                "OpenAI / Eigener Endpunkt" to "Schreibhilfe und Cloud-Diktat mit eigenem OpenAI- oder kompatiblem Schlüssel."
+                            } else "OpenAI / Custom endpoint" to "Writing tools and cloud dictation with an OpenAI or compatible API key."
                         }
                         VoiceChoice(title, description, selected = prefs.aiProvider == provider) {
                             onUpdatePrefs { it.copy(aiProvider = provider) }
@@ -2883,40 +2903,40 @@ private fun WritingToolsSettingsScreen(
             }
         }
 
-        if (prefs.aiProvider == AiProviderType.LOCAL_LLM) item {
-            LocalModelCatalogSection(
-                title = if (de) "Offline-Schreibmodell" else "Offline writing model",
-                recommendationNote = if (de) {
-                    "Starte mit Qwen3 0.6B (397 MB). Für längere Texte gibt es Qwen3 1.7B (1,1 GB)."
-                } else {
-                    "Start with Qwen3 0.6B (397 MB). Try Qwen3 1.7B (1.1 GB) for longer text."
-                },
-                models = if (advanced) LocalModelCatalog.llmModels else listOf(
-                    LocalModelCatalog.findById(prefs.selectedLocalLlmId)
-                        ?.takeIf { modelStates[it.id] is ModelInstallState.Installed || modelStates[it.id] is ModelInstallState.Downloading }
-                        ?: requireNotNull(LocalModelCatalog.findById("qwen3-0.6b-q4_k_m"))
-                ),
-                selectedModelId = prefs.selectedLocalLlmId,
-                states = modelStates,
-                de = de,
-                onSelectModel = { spec ->
-                    onUpdatePrefs { it.copy(selectedLocalLlmId = spec.id, aiProvider = AiProviderType.LOCAL_LLM) }
-                },
-                onDownloadModel = { spec ->
-                    if (!advanced) onUpdatePrefs { it.copy(selectedLocalLlmId = spec.id) }
-                    modelManager.startDownload(spec)
-                },
-                onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
-                onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
-                onImportModel = { spec ->
-                    pendingImportSpec = spec
-                    importLlmLauncher.launch(arrayOf("application/octet-stream", "*/*"))
-                },
-                onOpenUrl = { url ->
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                },
-                showTechnicalDetails = advanced
-            )
+        if (prefs.aiProvider == AiProviderType.GEMINI_NANO) item {
+            Column {
+                AppleSectionHeader(if (de) "Geräte-Status (Google AICore)" else "Device status (Google AICore)")
+                AppleGroupedSurface {
+                    val statusText = when (nanoStatus) {
+                        NanoAvailability.AVAILABLE -> if (de) "Bereit auf diesem Gerät ✓" else "Ready on this device ✓"
+                        NanoAvailability.DOWNLOADABLE -> if (de) "Kann über Google AICore geladen werden" else "Ready to download via Google AICore"
+                        NanoAvailability.DOWNLOADING -> if (de) "Wird über Google AICore geladen…" else "Downloading via Google AICore…"
+                        NanoAvailability.UNAVAILABLE -> if (de) "Nicht verfügbar (AICore fehlt)" else "Unavailable (AICore missing)"
+                        null -> if (de) "Prüfe Gerät…" else "Checking device…"
+                    }
+                    MinimalValueRow(if (de) "Gemini Nano Status" else "Gemini Nano status", statusText)
+                    if (nanoStatus == NanoAvailability.DOWNLOADABLE) {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalActionRow(
+                            title = if (nanoDownloading) (if (de) "Starte Download…" else "Starting download…")
+                            else (if (de) "Gemini Nano über AICore laden" else "Download Gemini Nano via AICore"),
+                            textColor = MaterialTheme.colorScheme.primary
+                        ) {
+                            if (nanoDownloading) return@MinimalActionRow
+                            nanoDownloading = true
+                            scope.launch {
+                                GeminiNanoClient.requestDownload(context, prefs.activeLocale)
+                                nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
+                                nanoDownloading = false
+                            }
+                        }
+                    }
+                }
+                AppleSectionFooter(
+                    if (de) "Wenn Google AICore auf deinem Smartphone nicht vorinstalliert ist, nutzt Tapwing automatisch die schnellen Offline-Regeln."
+                    else "If Google AICore is not present on your device, Tapwing automatically falls back to instant offline rules."
+                )
+            }
         }
 
         if (recommendedModel.isNotEmpty()) item {
@@ -3074,17 +3094,35 @@ private fun WritingToolsSettingsScreen(
 }
 
 @Composable
-private fun ApiKeyHelpDialog(isGemini: Boolean, de: Boolean, onDismiss: () -> Unit) {
+private fun ApiKeyHelpDialog(providerType: AiProviderType, de: Boolean, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val provider = if (isGemini) "Google Gemini" else "OpenAI"
-    val keyPage = if (isGemini) "https://aistudio.google.com/apikey" else "https://platform.openai.com/api-keys"
+    val provider = when (providerType) {
+        AiProviderType.GROQ_API -> "Groq"
+        AiProviderType.GEMINI_API -> "Google Gemini"
+        else -> "OpenAI"
+    }
+    val keyPage = when (providerType) {
+        AiProviderType.GROQ_API -> "https://console.groq.com/keys"
+        AiProviderType.GEMINI_API -> "https://aistudio.google.com/apikey"
+        else -> "https://platform.openai.com/api-keys"
+    }
     val steps = when {
-        isGemini && de -> listOf(
+        providerType == AiProviderType.GROQ_API && de -> listOf(
+            "Öffne console.groq.com/keys und melde dich kostenlos an.",
+            "Tippe auf „Create API Key“ und kopiere den Schlüssel.",
+            "Füge den Schlüssel in Tapwing ein und tippe auf „Speichern“."
+        )
+        providerType == AiProviderType.GROQ_API -> listOf(
+            "Open console.groq.com/keys and sign in for free.",
+            "Click Create API Key and copy the generated key.",
+            "Paste the key in Tapwing and tap Save."
+        )
+        providerType == AiProviderType.GEMINI_API && de -> listOf(
             "Öffne die Schlüsselseite von Google AI Studio und melde dich mit deinem Google-Konto an.",
             "Tippe auf „Create API key“ (API-Schlüssel erstellen). Wähle ein Projekt oder erstelle eines.",
             "Kopiere den Schlüssel. Halte das Schlüsselfeld in Tapwing gedrückt, wähle „Einfügen“ und tippe auf „Speichern“."
         )
-        isGemini -> listOf(
+        providerType == AiProviderType.GEMINI_API -> listOf(
             "Open the Google AI Studio key page and sign in with your Google account.",
             "Choose Create API key. Select a project or create one.",
             "Copy the key. Touch and hold Tapwing’s key field, choose Paste, then tap Save."
@@ -3101,8 +3139,10 @@ private fun ApiKeyHelpDialog(isGemini: Boolean, de: Boolean, onDismiss: () -> Un
         )
     }
     val cost = when {
-        isGemini && de -> "Gemini 3.5 Transcribe Live und Flash-Lite haben ein kostenloses Kontingent. Google kann Eingaben im kostenlosen Tarif zur Produktverbesserung verwenden."
-        isGemini -> "Gemini 3.5 Transcribe Live and Flash-Lite have a free quota. Google may use free-tier inputs to improve its products."
+        providerType == AiProviderType.GROQ_API && de -> "Groq bietet ein großzügiges kostenloses Kontingent mit extrem schneller Antwortzeit (~0,2 Sek.)."
+        providerType == AiProviderType.GROQ_API -> "Groq offers a generous free tier with ultra-fast LPU inference (~0.2s)."
+        providerType == AiProviderType.GEMINI_API && de -> "Gemini 3.5 Transcribe Live und Flash-Lite haben ein kostenloses Kontingent."
+        providerType == AiProviderType.GEMINI_API -> "Gemini 3.5 Transcribe Live and Flash-Lite have a free quota."
         de -> "Die OpenAI-API wird getrennt von einem ChatGPT-Abo abgerechnet. Richte bei Bedarf die Abrechnung auf der API-Plattform ein."
         else -> "OpenAI API billing is separate from a ChatGPT subscription. Enable billing on the API platform if needed."
     }
@@ -3196,8 +3236,6 @@ private fun LocalModelCatalogSection(
                                 "whisper-base-q5_1" -> if (de) "Ausgewogen · 60 MB" else "Balanced · 60 MB"
                                 "whisper-small-q5_1" -> if (de) "Sehr genau · 190 MB" else "High accuracy · 190 MB"
                                 "whisper-large-v3-turbo-q5_0" -> if (de) "Studio-Qualität · 574 MB" else "Studio · 574 MB"
-                                "qwen3-0.6b-q4_k_m" -> if (de) "Schnell & kompakt · 397 MB" else "Fast & compact · 397 MB"
-                                "qwen3-1.7b-q4_k_m" -> if (de) "Beste lokale Qualität · 1.1 GB" else "Best local quality · 1.1 GB"
                                 else -> "${spec.approxSizeMb} MB"
                             }
                             Text(
