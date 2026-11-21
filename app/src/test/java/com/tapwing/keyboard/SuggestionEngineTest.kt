@@ -59,4 +59,22 @@ class SuggestionEngineTest {
         assertNull(SuggestionEngine.extractOtpFromClipboard("Source code for issue 123456"))
         assertNull(SuggestionEngine.extractOtpFromClipboard("Your verification code is https://example.com/123456"))
     }
+
+    @Test
+    fun continuesWithContextAfterRepeatedSuggestionTaps() {
+        val afterIch = SuggestionEngine.suggestionsFor("Ich ", "de")
+        assertEquals("bin", afterIch.first().text)
+        assertTrue(afterIch.all { it.isNextWord && it.replaceCharCount == 0 })
+        val afterBin = SuggestionEngine.suggestionsFor("Ich bin ", "de")
+        assertEquals("gleich", afterBin.first().text)
+        assertTrue(SuggestionEngine.suggestionsFor("Ich bin gleich ", "de").any { it.text == "da" })
+    }
+
+    @Test
+    fun keepsNextWordsOutOfAddressesAndPartialWordCompletions() {
+        assertTrue(SuggestionEngine.suggestionsFor("mail ", "en", isEmailField = true).none { it.isNextWord })
+        assertTrue(SuggestionEngine.suggestionsFor("I am ", "en", isUrlField = true).none { it.isNextWord })
+        assertTrue(SuggestionEngine.suggestionsFor("Ich bi", "de").none { it.isNextWord })
+        assertTrue(SuggestionEngine.suggestionsFor("Ich bin. ", "de").none { it.text == "gleich" })
+    }
 }

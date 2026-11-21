@@ -90,14 +90,19 @@ class SecureKeyStorage(context: Context) {
         return generator.generateKey()
     }
 
-    private companion object {
-        const val ANDROID_KEYSTORE = "AndroidKeyStore"
-        const val KEY_ALIAS = "tapwing_ai_api_key_v1"
-        const val PREFS_NAME = "tapwing_secure_keys"
-        const val KEY_CIPHER = "api_key_ciphertext"
-        const val KEY_IV = "api_key_iv"
-        const val DICTATION_PROVIDER = "dictation_provider"
-        const val TRANSFORMATION = "AES/GCM/NoPadding"
-        const val GCM_TAG_BITS = 128
+    companion object {
+        internal fun isValidApiKey(raw: String): Boolean {
+            val value = raw.trim()
+            return value.isNotEmpty() && value.all { it in '!'..'~' }
+        }
+
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        private const val KEY_ALIAS = "tapwing_ai_api_key_v1"
+        private const val PREFS_NAME = "tapwing_secure_keys"
+        private const val KEY_CIPHER = "api_key_ciphertext"
+        private const val KEY_IV = "api_key_iv"
+        private const val DICTATION_PROVIDER = "dictation_provider"
+        private const val TRANSFORMATION = "AES/GCM/NoPadding"
+        private const val GCM_TAG_BITS = 128
     }
 }

@@ -24,6 +24,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -71,6 +73,7 @@ import androidx.compose.material.icons.rounded.Spellcheck
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
@@ -2121,7 +2124,9 @@ private fun VoiceSettingsScreen(
 
     var advanced by rememberSaveable { mutableStateOf(false) }
     var modelDetails by rememberSaveable { mutableStateOf(false) }
+    val useLiveCloud = prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE
     val dictationProvider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
+        ?.takeIf { !useLiveCloud || it == CloudSpeechProvider.GEMINI }
     val keySaved = remember(dictationProvider) {
         dictationProvider != null && secureKeyStorage.readDictationKey(dictationProvider.name).isNotBlank()
     }
@@ -2129,7 +2134,7 @@ private fun VoiceSettingsScreen(
     val installedWhisper = remember(modelStates, prefs.selectedWhisperModelId) {
         modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, prefs.selectedWhisperModelId)
     }
-    val visibleModel = installedWhisper?.first ?: requireNotNull(LocalModelCatalog.findById("whisper-base-q5_1"))
+    val visibleModel = installedWhisper?.first ?: requireNotNull(LocalModelCatalog.findById("whisper-tiny-q5_1"))
 
     val defaultPromptPreview = remember(prefs.voiceCleanupUseSystemLanguage, prefs.activeLocale) {
         CleanupPromptBuilder.buildDefaultPrompt(
@@ -2181,7 +2186,8 @@ private fun VoiceSettingsScreen(
                             add(VoiceEngineMode.ON_DEVICE_SPEECH)
                         }
                         add(VoiceEngineMode.LOCAL_WHISPER)
-                        add(VoiceEngineMode.CLOUD)
+                        add(VoiceEngineMode.GEMINI_LIVE)
+                        if (advanced || prefs.voiceEngine == VoiceEngineMode.CLOUD) add(VoiceEngineMode.CLOUD)
                         if (advanced || prefs.voiceEngine == VoiceEngineMode.SYSTEM_SPEECH) {
                             add(VoiceEngineMode.SYSTEM_SPEECH)
                         }
@@ -2190,17 +2196,20 @@ private fun VoiceSettingsScreen(
                         if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
                         val (title, description) = when (mode) {
                             VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) {
-                                "Automatisch" to "Nutzt ein geladenes Whisper-Modell oder den Android-Sprachdienst."
-                            } else "Automatic" to "Uses a downloaded Whisper model or the Android speech service."
+                                "Automatisch" to "Nutzt zuerst ein geprüftes Android-Offline-Sprachpaket. Danach kommen Whisper oder der Android-Sprachdienst."
+                            } else "Automatic" to "Prefers a verified Android offline language pack, then Whisper or the Android speech service."
                             VoiceEngineMode.ON_DEVICE_SPEECH -> if (de) {
-                                "Android offline · Live-Text" to "Text erscheint beim Sprechen. Benötigt ein Android-Sprachpaket."
-                            } else "Android offline · Live text" to "Shows text as you speak. Requires an Android language pack."
+                                "Android offline · Live-Text" to "Empfohlen für schnelles Offline-Diktat. Benötigt ein Android-Sprachpaket."
+                            } else "Android offline · Live text" to "Recommended for quick offline dictation. Requires an Android language pack."
                             VoiceEngineMode.LOCAL_WHISPER -> if (de) {
-                                "Whisper offline" to "Audio bleibt auf dem Gerät. Text erscheint nach dem Stopp."
-                            } else "Whisper offline" to "Audio stays on your device. Text appears when you stop."
+                                "Whisper offline" to "Verarbeitet Abschnitte bei Sprechpausen. Audio bleibt auf dem Gerät."
+                            } else "Whisper offline" to "Processes sections at pauses. Audio stays on your device."
+                            VoiceEngineMode.GEMINI_LIVE -> if (de) {
+                                "Gemini Live" to "Sendet Audio schon beim Sprechen an Google. Kostenloses Kontingent mit eigenem Schlüssel."
+                            } else "Gemini Live" to "Streams audio to Google as you speak. Free quota with your own key."
                             VoiceEngineMode.CLOUD -> if (de) {
-                                "Cloud mit eigenem Schlüssel" to "Sendet Audio nach dem Stopp an Gemini oder OpenAI. Kosten sind möglich."
-                            } else "Cloud with your own key" to "Sends audio to Gemini or OpenAI when you stop. Charges may apply."
+                                "Cloud nach dem Stopp" to "Sendet Audio nach dem Stopp an Gemini oder OpenAI. Kosten sind möglich."
+                            } else "Cloud after you stop" to "Sends audio to Gemini or OpenAI when you stop. Charges may apply."
                             VoiceEngineMode.SYSTEM_SPEECH -> if (de) {
                                 "Android-Sprachdienst" to "Zeigt Live-Text. Der Dienst kann je nach Gerät das Internet nutzen."
                             } else "Android speech service" to "Shows live text. The service may use the internet on some devices."
@@ -2213,14 +2222,14 @@ private fun VoiceSettingsScreen(
             }
         }
 
-        if (prefs.voiceEngine == VoiceEngineMode.CLOUD) {
+        if (prefs.voiceEngine.usesCloudAudio) {
             item {
                 Column {
                     AppleSectionHeader(if (de) "Cloud einrichten" else "Cloud setup")
                     AppleGroupedSurface {
                         MinimalValueRow(
                             if (de) "Modell für Audio" else "Speech model",
-                            when (dictationProvider) {
+                            if (useLiveCloud) "Gemini 3.5 Transcribe Live" else when (dictationProvider) {
                                 CloudSpeechProvider.GEMINI -> "Gemini 3.5 Flash-Lite"
                                 CloudSpeechProvider.OPENAI -> CloudDictation.OPENAI_MODEL
                                 null -> if (de) "Anbieter wählen" else "Choose provider"
@@ -2234,10 +2243,19 @@ private fun VoiceSettingsScreen(
                         )
                     }
                     AppleSectionFooter(
-                        if (de) "Empfehlung für natürliche Nachrichten: Gemini. Es transkribiert und glättet in einem Schritt. OpenAI ist eine Alternative, wenn du dort bereits einen Schlüssel hast."
-                        else "For natural messages, try Gemini. It transcribes and cleans up in one step. OpenAI is an option if you already have an OpenAI key."
+                        when {
+                            useLiveCloud && de -> "Gemini 3.5 Transcribe Live glättet Text schon während der Aufnahme. Google kann Eingaben aus dem kostenlosen Tarif zur Produktverbesserung nutzen."
+                            useLiveCloud -> "Gemini 3.5 Transcribe Live polishes text while you speak. Google may use free-tier inputs to improve its products."
+                            de -> "Gemini 3.5 Flash-Lite ist im kostenlosen Kontingent verfügbar und glättet nach dem Stopp. OpenAI ist eine Alternative mit eigener API-Abrechnung."
+                            else -> "Gemini 3.5 Flash-Lite has a free quota and polishes after you stop. OpenAI is an alternative with separate API billing."
+                        }
                     )
-                    if (prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE && dictationProvider == null) {
+                    if (useLiveCloud && dictationProvider == null) {
+                        AppleSectionFooter(
+                            if (de) "Wähle in der Schreibhilfe Google Gemini und speichere dort deinen API-Schlüssel."
+                            else "Choose Google Gemini under Writing Tools and save your API key there."
+                        )
+                    } else if (prefs.aiProvider == AiProviderType.OPENAI_COMPATIBLE && dictationProvider == null) {
                         AppleSectionFooter(
                             if (de) "Cloud-Diktat mit OpenAI benötigt den offiziellen OpenAI-Endpunkt."
                             else "OpenAI dictation requires the official OpenAI endpoint."
@@ -2258,9 +2276,9 @@ private fun VoiceSettingsScreen(
                     LocalModelCatalogSection(
                         title = if (de) "Offline-Sprachmodell" else "Offline speech model",
                         recommendationNote = if (de) {
-                            "Starte mit Whisper Base (60 MB). Probiere Small (190 MB), wenn Namen oder Fachwörter oft fehlen."
+                            "Starte mit Whisper Tiny (32 MB) für kürzere Wartezeit. Wähle Base (60 MB), wenn dir mehr Genauigkeit wichtiger ist."
                         } else {
-                            "Start with Whisper Base (60 MB). Try Small (190 MB) if names or technical terms are often missed."
+                            "Start with Whisper Tiny (32 MB) for a shorter wait. Try Base (60 MB) if you need more accuracy."
                         },
                         models = if (modelDetails) LocalModelCatalog.whisperModels else listOf(visibleModel),
                         selectedModelId = installedWhisper?.first?.id.orEmpty(),
@@ -2627,7 +2645,8 @@ private fun WritingToolsSettingsScreen(
     var pendingImportSpec by remember { mutableStateOf<LocalModelSpec?>(null) }
 
     var apiKeyInput by remember { mutableStateOf("") }
-    var maskedKey by remember { mutableStateOf(secureKeyStorage.maskedPreview()) }
+    var hasSavedKey by remember { mutableStateOf(secureKeyStorage.hasApiKey()) }
+    var showKeyHelp by rememberSaveable { mutableStateOf(false) }
     var testStatus by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
     var advanced by rememberSaveable { mutableStateOf(false) }
@@ -2635,6 +2654,14 @@ private fun WritingToolsSettingsScreen(
         AiProviderType.GEMINI_API -> CloudDictation.GEMINI_MODEL
         AiProviderType.OPENAI_COMPATIBLE -> "gpt-4o-mini"
         else -> ""
+    }
+
+    if (showKeyHelp && recommendedModel.isNotEmpty()) {
+        ApiKeyHelpDialog(
+            isGemini = prefs.aiProvider == AiProviderType.GEMINI_API,
+            de = de,
+            onDismiss = { showKeyHelp = false }
+        )
     }
 
     val importLlmLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -2757,20 +2784,41 @@ private fun WritingToolsSettingsScreen(
                                 )
                             }
                         }
-                        AppleInlineField(
-                            value = apiKeyInput,
-                            onValueChange = { apiKeyInput = it },
-                            placeholder = if (de) "Neuen API-Key eingeben…" else "Enter new API key…",
-                            isPassword = true
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) {
+                                AppleInlineField(
+                                    value = apiKeyInput,
+                                    onValueChange = { apiKeyInput = it },
+                                    placeholder = if (de) "API-Schlüssel einfügen" else "Paste your API key",
+                                    isPassword = true
+                                )
+                            }
+                            IconButton(onClick = { showKeyHelp = true }) {
+                                Icon(
+                                    Icons.Rounded.Info,
+                                    contentDescription = if (de) "Wo bekomme ich einen API-Schlüssel?" else "How do I get an API key?",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = {
                                     val provider = CloudSpeechProvider.from(prefs.aiProvider, prefs.aiCustomEndpoint)
-                                    secureKeyStorage.saveApiKey(apiKeyInput, dictationProvider = provider?.name)
-                                    maskedKey = secureKeyStorage.maskedPreview()
-                                    apiKeyInput = ""
-                                    testStatus = if (de) "Schlüssel auf dem Gerät gespeichert." else "Key saved on this device."
+                                    if (!SecureKeyStorage.isValidApiKey(apiKeyInput)) {
+                                        testStatus = if (de) "Der Schlüssel enthält Leerzeichen oder ungültige Zeichen. Kopiere ihn erneut."
+                                                     else "The key contains spaces or unsupported characters. Copy it again."
+                                    } else if (runCatching {
+                                        secureKeyStorage.saveApiKey(apiKeyInput, dictationProvider = provider?.name)
+                                    }.isSuccess) {
+                                        hasSavedKey = secureKeyStorage.hasApiKey()
+                                        apiKeyInput = ""
+                                        testStatus = if (de) "Schlüssel auf dem Gerät gespeichert." else "Key saved on this device."
+                                    } else {
+                                        testStatus = if (de) "Der Schlüssel konnte gerade nicht gespeichert werden."
+                                                     else "The key could not be saved right now."
+                                    }
                                 },
                                 enabled = apiKeyInput.isNotBlank(),
                                 shape = RoundedCornerShape(10.dp),
@@ -2781,10 +2829,10 @@ private fun WritingToolsSettingsScreen(
                             FilledTonalButton(
                                 onClick = {
                                     secureKeyStorage.clearApiKey()
-                                    maskedKey = ""
+                                    hasSavedKey = false
                                     testStatus = if (de) "API-Key gelöscht." else "Cleared."
                                 },
-                                enabled = maskedKey.isNotEmpty(),
+                                enabled = hasSavedKey,
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -2861,6 +2909,57 @@ private fun WritingToolsSettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ApiKeyHelpDialog(isGemini: Boolean, de: Boolean, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val provider = if (isGemini) "Google Gemini" else "OpenAI"
+    val keyPage = if (isGemini) "https://aistudio.google.com/apikey" else "https://platform.openai.com/api-keys"
+    val steps = when {
+        isGemini && de -> listOf(
+            "Öffne die Schlüsselseite von Google AI Studio und melde dich mit deinem Google-Konto an.",
+            "Tippe auf „Create API key“ (API-Schlüssel erstellen). Wähle ein Projekt oder erstelle eines.",
+            "Kopiere den Schlüssel. Halte das Schlüsselfeld in Tapwing gedrückt, wähle „Einfügen“ und tippe auf „Speichern“."
+        )
+        isGemini -> listOf(
+            "Open the Google AI Studio key page and sign in with your Google account.",
+            "Choose Create API key. Select a project or create one.",
+            "Copy the key. Touch and hold Tapwing’s key field, choose Paste, then tap Save."
+        )
+        de -> listOf(
+            "Öffne die Schlüsselseite der OpenAI API-Plattform und melde dich an.",
+            "Wähle ein Projekt und tippe auf „Create new secret key“ (neuen Schlüssel erstellen).",
+            "Kopiere den angezeigten Schlüssel sofort. Halte das Schlüsselfeld in Tapwing gedrückt, wähle „Einfügen“ und tippe auf „Speichern“."
+        )
+        else -> listOf(
+            "Open the OpenAI API platform's key page and sign in.",
+            "Select a project and choose Create new secret key.",
+            "Copy the key now. Touch and hold Tapwing’s key field, choose Paste, then tap Save."
+        )
+    }
+    val cost = when {
+        isGemini && de -> "Gemini 3.5 Transcribe Live und Flash-Lite haben ein kostenloses Kontingent. Google kann Eingaben im kostenlosen Tarif zur Produktverbesserung verwenden."
+        isGemini -> "Gemini 3.5 Transcribe Live and Flash-Lite have a free quota. Google may use free-tier inputs to improve its products."
+        de -> "Die OpenAI-API wird getrennt von einem ChatGPT-Abo abgerechnet. Richte bei Bedarf die Abrechnung auf der API-Plattform ein."
+        else -> "OpenAI API billing is separate from a ChatGPT subscription. Enable billing on the API platform if needed."
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (de) "API-Schlüssel für $provider" else "API key for $provider") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                steps.forEachIndexed { index, step -> Text("${index + 1}. $step") }
+                Text(cost, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(keyPage))) }
+            }) { Text(if (de) "Schlüsselseite öffnen" else "Open key page") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (de) "Schließen" else "Close") } }
+    )
 }
 
 @Composable

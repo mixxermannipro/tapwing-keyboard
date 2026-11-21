@@ -425,6 +425,53 @@ object LanguageVocabularies {
         else -> englishTypoMap
     }
 
+    private val germanNextWords = mapOf(
+        "ich" to listOf("bin", "habe", "kann"),
+        "du" to listOf("bist", "hast", "kannst"),
+        "wir" to listOf("sind", "haben", "können"),
+        "bin" to listOf("gleich", "schon", "noch"),
+        "bist" to listOf("du", "schon", "noch"),
+        "gleich" to listOf("da", "wieder", "fertig"),
+        "schon" to listOf("da", "unterwegs", "fertig"),
+        "habe" to listOf("noch", "gerade", "Zeit"),
+        "kann" to listOf("dir", "das", "noch"),
+        "kannst" to listOf("du", "mir", "das"),
+        "danke" to listOf("dir", "für", "vielmals"),
+        "vielen" to listOf("Dank", "Grüßen"),
+        "guten" to listOf("Morgen", "Tag", "Abend"),
+        "bis" to listOf("gleich", "morgen", "später"),
+        "alles" to listOf("klar", "Gute", "gut"),
+        "morgen" to listOf("früh", "wieder", "um"),
+        "und" to listOf("dann", "ich", "so")
+    )
+    private val englishNextWords = mapOf(
+        "i" to listOf("am", "have", "can"),
+        "you" to listOf("are", "can", "have"),
+        "we" to listOf("are", "can", "will"),
+        "am" to listOf("on", "going", "still"),
+        "are" to listOf("you", "we", "still"),
+        "on" to listOf("my", "the", "your"),
+        "my" to listOf("way", "phone", "own"),
+        "going" to listOf("to", "home", "out"),
+        "thank" to listOf("you", "goodness"),
+        "thanks" to listOf("for", "again", "so"),
+        "see" to listOf("you", "the", "if"),
+        "good" to listOf("morning", "night", "luck"),
+        "have" to listOf("a", "to", "been"),
+        "can" to listOf("you", "we", "I"),
+        "the" to listOf("same", "next", "first"),
+        "and" to listOf("then", "the", "I")
+    )
+
+    fun commonNextWords(locale: String, previousWord: String): List<String> {
+        val words = when (KeyboardLocales.baseLang(locale)) {
+            "de" -> germanNextWords
+            "en" -> englishNextWords
+            else -> return emptyList()
+        }
+        return words[previousWord.lowercase()].orEmpty()
+    }
+
     fun defaultEmptyChipsFor(locale: String): List<String> = when (KeyboardLocales.baseLang(locale)) {
         "de" -> listOf("Hallo", "Danke", "Okay")
         "fr" -> listOf("Bonjour", "Merci", "D'accord")
