@@ -4,17 +4,38 @@ import com.tapwing.keyboard.data.ClipboardRetention
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 class ClipboardStoreTest {
 
     @Test
-    fun leavesApiKeysOutOfClipboardHistory() {
-        val store = ClipboardStore(storageFile = null)
-        store.addClip("AIza" + "x".repeat(35))
-        store.addClip("AQ." + "x".repeat(40))
-        store.addClip("sk-proj-" + "x".repeat(40))
+    fun storesAllCopiedTextIncludingApiKeysOtpUrlsAndMultiline() {
+        val tempFile = File.createTempFile("tapwing_clip_test", ".json")
+        tempFile.deleteOnExit()
+        val store = ClipboardStore(storageFile = tempFile)
+        val key1 = "AIza" + "x".repeat(35)
+        val key2 = "sk-proj-" + "x".repeat(40)
+        val otp = "482910"
+        val url = "https://example.com/path?q=1"
+        val multiline = "Zeile 1\nZeile 2"
+
+        store.addClip(key1)
+        store.addClip(key2)
+        store.addClip(otp)
+        store.addClip(url)
+        store.addClip(multiline)
         store.addClip("A normal sentence")
-        assertEquals(listOf("A normal sentence"), store.items.value.map { it.text })
+
+        val texts = store.items.value.map { it.text }
+        assertTrue(texts.contains(key1))
+        assertTrue(texts.contains(key2))
+        assertTrue(texts.contains(otp))
+        assertTrue(texts.contains(url))
+        assertTrue(texts.contains(multiline))
+        assertTrue(texts.contains("A normal sentence"))
+
+        val reloaded = ClipboardStore(storageFile = tempFile)
+        assertEquals(texts.toSet(), reloaded.items.value.map { it.text }.toSet())
     }
 
     @Test

@@ -57,7 +57,10 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     private val learnedTrigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
     private val learnedEmojis = linkedMapOf<String, LinkedHashMap<String, Int>>()
     private val perAppUnigrams = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    private val perAppBigrams = linkedMapOf<String, LinkedHashMap<String, LinkedHashMap<String, Int>>>()
     private val perAppTones = linkedMapOf<String, String>()
+    private val learnedCorrections = linkedMapOf<String, String>()
+    private val recentEmojis = mutableListOf<String>()
     private val snippets = mutableListOf<TextSnippet>()
     private val rejectedCorrections = linkedSetOf<String>()
 
@@ -252,6 +255,20 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             appMap[storedForm] = ((appMap[storedForm] ?: 0) + 1).coerceAtMost(5_000)
             trimSubMap(appMap, MAX_PER_APP_WORDS)
             trimOuterMap(perAppUnigrams, MAX_APP_PROFILES)
+
+            if (prev.length >= 2) {
+                val appBiHead = perAppBigrams.getOrPut(cleanPkg) { linkedMapOf() }
+                val appFollowers = appBiHead.getOrPut(prev) { linkedMapOf() }
+                val nextStored = if (wasSentenceStart && isSingleLeadingCap && lower in LanguageVocabularies.germanNeverAutoCapMidSentence) {
+                    lower
+                } else {
+                    storedForm
+                }
+                appFollowers[nextStored] = ((appFollowers[nextStored] ?: 0) + 1).coerceAtMost(5_000)
+                trimSubMap(appFollowers, MAX_TRIGRAM_FOLLOWERS)
+                trimOuterMap(appBiHead, MAX_PER_APP_BIGRAMS)
+                trimOuterMap(perAppBigrams, MAX_APP_PROFILES)
+            }
         }
         saveToDisk()
     }
@@ -346,12 +363,87 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     }
 
     @Synchronized
+    fun recordRecentEmoji(emoji: String, learningEnabled: Boolean, incognito: Boolean) {
+        if (!learningEnabled || incognito) return
+        val clean = emoji.trim()
+        if (clean.isEmpty()) return
+        recentEmojis.remove(clean)
+        recentEmojis.add(0, clean)
+        while (recentEmojis.size > MAX_RECENT_EMOJIS) {
+            recentEmojis.removeAt(recentEmojis.lastIndex)
+        }
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun listRecentEmojis(): List<String> = recentEmojis.toList()
+
+    @Synchronized
+    fun recordChosenCorrection(
+        mistypedWord: String,
+        chosenWord: String,
+        learningEnabled: Boolean,
+        incognito: Boolean
+    ) {
+        if (!learningEnabled || incognito) return
+        val rawLower = mistypedWord.trim().lowercase()
+        val chosen = chosenWord.trim()
+        if (rawLower.length < 2 || chosen.length < 2 || rawLower == chosen.lowercase()) return
+        rejectedCorrections.remove(rawLower)
+        learnedCorrections[rawLower] = chosen
+        if (learnedCorrections.size > MAX_LEARNED_CORRECTIONS) {
+            val oldest = learnedCorrections.keys.firstOrNull()
+            if (oldest != null) learnedCorrections.remove(oldest)
+        }
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun preferredCorrectionFor(word: String): String? {
+        val lower = word.trim().lowercase()
+        if (lower in rejectedCorrections) return null
+        return learnedCorrections[lower]
+    }
+
+    @Synchronized
+    fun recordTextBatch(
+        text: String,
+        learningEnabled: Boolean,
+        incognito: Boolean,
+        locale: String = "de",
+        appPackage: String? = null
+    ) {
+        if (!learningEnabled || incognito || text.isBlank()) return
+        val sentences = text.split(Regex("""[.!?\n]+"""))
+        for (sentence in sentences) {
+            val words = Regex("""[\p{L}][\p{L}'-]*""").findAll(sentence).map { it.value }.toList()
+            var p1: String? = null
+            var p2: String? = null
+            words.forEachIndexed { idx, w ->
+                recordTypedWord(
+                    word = w,
+                    previousWord = p1,
+                    learningEnabled = true,
+                    incognito = false,
+                    previousTwoWord = p2,
+                    wasSentenceStart = idx == 0,
+                    locale = locale,
+                    appPackage = appPackage
+                )
+                p2 = p1
+                p1 = w
+            }
+        }
+    }
+
+    @Synchronized
     fun recordCorrectionRejected(originalWord: String, learningEnabled: Boolean, incognito: Boolean) {
         if (!learningEnabled || incognito) return
         val clean = originalWord.trim()
         if (clean.length < 2) return
         val lower = clean.lowercase()
         rejectedCorrections += lower
+        learnedCorrections.remove(lower)
         customWordsLower.putIfAbsent(lower, clean)
         learnedUnigrams[clean] = maxOf(learnedUnigrams[clean] ?: 0, 3)
         learnedUnigramsLower[lower] = clean
@@ -460,7 +552,11 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         val trigramMap = if (prevLower.isNotEmpty() && prev2Lower.isNotEmpty()) {
             learnedTrigrams["$prev2Lower $prevLower"]
         } else null
-        val appMap = appPackage?.trim()?.takeIf { it.isNotEmpty() }?.let { perAppUnigrams[it] }
+        val cleanApp = appPackage?.trim()?.takeIf { it.isNotEmpty() }
+        val appMap = cleanApp?.let { perAppUnigrams[it] }
+        val appBigramFollowers = if (cleanApp != null && prevLower.isNotEmpty()) {
+            perAppBigrams[cleanApp]?.get(prevLower)
+        } else null
 
         fun addScore(word: String, baseScore: Double) {
             val cleanWord = if (!atSentenceStart &&
@@ -475,9 +571,10 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             if (!cleanWord.lowercase().startsWith(lower) || cleanWord == prefix) return
             val recencyBonus = ((wordRecency[cleanWord.lowercase()] ?: 0L).toDouble() / maxOf(1L, recencyClock)) * 180.0
             val biBoost = (bigramMap?.get(cleanWord) ?: bigramMap?.get(cleanWord.lowercase()) ?: 0) * 400.0
+            val appBiBoost = (appBigramFollowers?.get(cleanWord) ?: appBigramFollowers?.get(cleanWord.lowercase()) ?: 0) * 600.0
             val triBoost = (trigramMap?.get(cleanWord) ?: trigramMap?.get(cleanWord.lowercase()) ?: 0) * 750.0
             val appBoost = (appMap?.get(cleanWord) ?: appMap?.get(cleanWord.lowercase()) ?: 0) * 260.0
-            val total = baseScore + recencyBonus + biBoost + triBoost + appBoost
+            val total = baseScore + recencyBonus + biBoost + appBiBoost + triBoost + appBoost
             scored[cleanWord] = maxOf(scored[cleanWord] ?: 0.0, total)
         }
 
@@ -489,6 +586,9 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         }
         appMap?.forEach { (word, count) ->
             addScore(word, 650.0 + count * 30.0)
+        }
+        appBigramFollowers?.forEach { (word, count) ->
+            addScore(word, 780.0 + count * 40.0)
         }
         bigramMap?.forEach { (word, count) ->
             addScore(word, 700.0 + count * 20.0)
@@ -526,7 +626,14 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         val prevLower = previousWord.trim().lowercase()
         if (prevLower.isEmpty()) return emptyList()
         val combined = linkedMapOf<String, Int>()
-        val appMap = appPackage?.trim()?.takeIf { it.isNotEmpty() }?.let { perAppUnigrams[it] }
+        val cleanPkg = appPackage?.trim()?.takeIf { it.isNotEmpty() }
+        val appMap = cleanPkg?.let { perAppUnigrams[it] }
+
+        if (cleanPkg != null) {
+            perAppBigrams[cleanPkg]?.get(prevLower)?.forEach { (word, count) ->
+                combined[word] = (combined[word] ?: 0) + count * 4
+            }
+        }
 
         val prev2Lower = previousTwoWord?.trim()?.lowercase().orEmpty()
         if (prev2Lower.isNotEmpty()) {
@@ -599,7 +706,10 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         learnedTrigrams.clear()
         learnedEmojis.clear()
         perAppUnigrams.clear()
+        perAppBigrams.clear()
         perAppTones.clear()
+        learnedCorrections.clear()
+        recentEmojis.clear()
         rejectedCorrections.clear()
         saveToDisk()
     }
@@ -780,6 +890,37 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                 }
             }
 
+            perAppBigrams.clear()
+            root.optJSONObject("perAppBigrams")?.let { obj ->
+                obj.keys().forEach { pkg ->
+                    val headsObj = obj.optJSONObject(pkg) ?: return@forEach
+                    val headMap = linkedMapOf<String, LinkedHashMap<String, Int>>()
+                    headsObj.keys().forEach { prev ->
+                        val follObj = headsObj.optJSONObject(prev) ?: return@forEach
+                        val follMap = linkedMapOf<String, Int>()
+                        follObj.keys().forEach { next -> follMap[next] = follObj.optInt(next, 1) }
+                        if (follMap.isNotEmpty()) headMap[prev] = follMap
+                    }
+                    if (headMap.isNotEmpty()) perAppBigrams[pkg] = headMap
+                }
+            }
+
+            learnedCorrections.clear()
+            root.optJSONObject("learnedCorrections")?.let { obj ->
+                obj.keys().forEach { k ->
+                    val v = obj.optString(k, "").trim()
+                    if (v.isNotEmpty()) learnedCorrections[k] = v
+                }
+            }
+
+            recentEmojis.clear()
+            root.optJSONArray("recentEmojis")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val e = arr.optString(i, "").trim()
+                    if (e.isNotEmpty()) recentEmojis += e
+                }
+            }
+
             perAppTones.clear()
             root.optJSONObject("perAppTones")?.let { obj ->
                 obj.keys().forEach { pkg ->
@@ -872,6 +1013,21 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                     put(pkg, JSONObject().apply { sub.forEach { (w, c) -> put(w, c) } })
                 }
             })
+            root.put("perAppBigrams", JSONObject().apply {
+                perAppBigrams.forEach { (pkg, heads) ->
+                    put(pkg, JSONObject().apply {
+                        heads.forEach { (prev, sub) ->
+                            put(prev, JSONObject().apply { sub.forEach { (next, c) -> put(next, c) } })
+                        }
+                    })
+                }
+            })
+            root.put("learnedCorrections", JSONObject().apply {
+                learnedCorrections.forEach { (k, v) -> put(k, v) }
+            })
+            root.put("recentEmojis", JSONArray().apply {
+                recentEmojis.forEach { put(it) }
+            })
             root.put("perAppTones", JSONObject().apply {
                 perAppTones.forEach { (pkg, tone) -> put(pkg, tone) }
             })
@@ -901,6 +1057,9 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         private const val MAX_TRIGRAM_FOLLOWERS = 15
         private const val MAX_APP_PROFILES = 40
         private const val MAX_PER_APP_WORDS = 200
+        private const val MAX_PER_APP_BIGRAMS = 250
+        private const val MAX_LEARNED_CORRECTIONS = 300
+        private const val MAX_RECENT_EMOJIS = 28
 
         fun createForContext(context: Context): AdaptiveDictionaryStore {
             val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)

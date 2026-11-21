@@ -411,7 +411,21 @@ object KeyboardLayouts {
                         }
                     }
                 }
-                if (showNumberRow) listOf(numberRow) + base else base
+                val rowsWithTopHints = if (showNumberRow) {
+                    base
+                } else {
+                    val topRow = base.firstOrNull().orEmpty().mapIndexed { idx, spec ->
+                        if (idx < 10) {
+                            val digitHint = ((idx + 1) % 10).toString()
+                            val mergedAlts = (listOf(digitHint) + spec.alternates).distinct()
+                            spec.copy(hint = digitHint, alternates = mergedAlts)
+                        } else {
+                            spec
+                        }
+                    }
+                    listOf(topRow) + base.drop(1)
+                }
+                if (showNumberRow) listOf(numberRow) + rowsWithTopHints else rowsWithTopHints
             }
             KeyboardLayoutPage.SYMBOLS -> symbolRows
             KeyboardLayoutPage.SYMBOLS_EXT -> symbolExtRows

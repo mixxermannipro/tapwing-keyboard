@@ -251,18 +251,21 @@ internal class TapwingVoiceController(
             return
         }
         if (engineMode == VoiceEngineMode.CLOUD) {
-            if (cloud == null) {
+            val effectiveCloud = cloud ?: fallbackCloud
+            val effectiveFallback = if (cloud != null) fallbackCloud else null
+            if (effectiveCloud == null) {
                 if (!offlineOnly && installedWhisper != null) {
                     startAudioCapture(locale, modelFile = installedWhisper, cloud = null)
                 } else {
-                    showError(if (de) "Cloud-Diktat braucht einen Gemini- oder OpenAI-Schlüssel"
-                              else "Cloud dictation needs a Gemini or OpenAI key")
+                    showError(if (de) "Cloud-Diktat braucht einen API-Schlüssel"
+                              else "Cloud dictation needs an API key")
                 }
             } else {
                 startAudioCapture(
                     locale = locale,
                     modelFile = null,
-                    cloud = cloud,
+                    cloud = effectiveCloud,
+                    fallbackCloud = effectiveFallback,
                     fallbackWhisperFile = installedWhisper
                 )
             }
@@ -746,6 +749,16 @@ internal class TapwingVoiceController(
                         if (cloudRes.isSuccess && cloudRes.getOrNull().orEmpty().isNotBlank()) {
                             outputFormatted = cloud.formatsText
                             cloudRes
+                        } else if (fallbackCloud != null) {
+                            val fcRes = fallbackCloud.transcribe(recording.file, languageHint)
+                            if (fcRes.isSuccess && fcRes.getOrNull().orEmpty().isNotBlank()) {
+                                outputFormatted = fallbackCloud.formatsText
+                                fcRes
+                            } else if (fallbackWhisper != null) {
+                                transcribeLocalWavSafely(recording.file, fallbackWhisper, languageHint, vocabHint)
+                            } else {
+                                fcRes
+                            }
                         } else if (fallbackWhisper != null) {
                             transcribeLocalWavSafely(recording.file, fallbackWhisper, languageHint, vocabHint)
                         } else {

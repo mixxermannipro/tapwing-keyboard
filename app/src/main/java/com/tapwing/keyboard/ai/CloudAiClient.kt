@@ -20,7 +20,7 @@ sealed interface CloudAiResult {
 }
 
 /**
- * Clean REST client for user-configured Gemini or OpenAI-compatible endpoints.
+ * Clean REST client for user-configured Gemini, Groq, OpenRouter, xAI Grok, and OpenAI-compatible endpoints.
  * API keys are transmitted strictly via request headers, never logged or embedded in URLs.
  */
 object CloudAiClient {
@@ -29,7 +29,10 @@ object CloudAiClient {
     private const val FAST_CONNECT_TIMEOUT_MS = 5_000
     private const val FAST_READ_TIMEOUT_MS = 10_000
     const val GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
-    const val DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+    const val OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+    const val XAI_ENDPOINT = "https://api.x.ai/api/v1/chat/completions"
+    const val OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+    const val DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
     suspend fun rewrite(
         text: String,
@@ -62,6 +65,8 @@ object CloudAiClient {
         return@withContext when (provider) {
             AiProviderType.GROQ_API -> callGroq(apiKey, model, prompt, fastMode)
             AiProviderType.GEMINI_API -> callGemini(apiKey, model, prompt, fastMode)
+            AiProviderType.OPENROUTER_API -> callOpenRouter(apiKey, model, prompt, fastMode)
+            AiProviderType.XAI_API -> callXai(apiKey, model, prompt, fastMode)
             AiProviderType.OPENAI_COMPATIBLE -> callOpenAi(apiKey, model, customEndpoint, prompt, fastMode)
             else -> CloudAiResult.Success(LocalWritingAssistant.transform(text, action, locale), "On-Device")
         }
@@ -75,7 +80,8 @@ object CloudAiClient {
         locale: String
     ): CloudAiResult {
         val sample = if (KeyboardLocales.baseLang(locale) == "de") "Hallo Welt" else "Hello world"
-        return rewrite(sample, WritingAction.PROOFREAD, locale, provider, apiKey, model, customEndpoint)
+        val effectiveModel = model.trim().ifEmpty { AiModelCatalog.defaultTextModelFor(provider) }
+        return rewrite(sample, WritingAction.PROOFREAD, locale, provider, apiKey, effectiveModel, customEndpoint)
     }
 
     fun buildPrompt(
@@ -111,14 +117,10 @@ object CloudAiClient {
     }
 
     private fun callGemini(apiKey: String, model: String, prompt: String, fastMode: Boolean): CloudAiResult {
-        val cleanModel = if (fastMode && (model.isBlank() || model.startsWith("llama") || model.startsWith("gpt"))) {
-            "gemini-2.5-flash"
-        } else {
-            model.trim().ifEmpty { "gemini-2.5-flash" }
-        }
+        val cleanModel = model.trim().ifEmpty { "gemini-3.8-flash" }
         val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent"
         val genConfig = JSONObject().put("temperature", if (fastMode) 0.1 else 0.25)
-        if (fastMode) {
+        if (fastMode && cleanModel.startsWith("gemini-")) {
             val thinking = if (cleanModel.contains("2.5")) {
                 JSONObject().put("thinkingBudget", 0)
             } else {
@@ -174,9 +176,7 @@ object CloudAiClient {
     }
 
     private fun callGroq(apiKey: String, model: String, prompt: String, fastMode: Boolean): CloudAiResult {
-        val cleanModel = model.trim()
-            .takeIf { it.isNotEmpty() && !it.startsWith("gemini") && !it.startsWith("gpt") }
-            ?: DEFAULT_GROQ_MODEL
+        val cleanModel = model.trim().ifEmpty { DEFAULT_GROQ_MODEL }
         return callOpenAiCompatible(
             apiKey = apiKey,
             model = cleanModel,
@@ -187,6 +187,34 @@ object CloudAiClient {
         )
     }
 
+    private fun callOpenRouter(apiKey: String, model: String, prompt: String, fastMode: Boolean): CloudAiResult {
+        val cleanModel = model.trim().ifEmpty { AiModelCatalog.defaultTextModelFor(AiProviderType.OPENROUTER_API) }
+        return callOpenAiCompatible(
+            apiKey = apiKey,
+            model = cleanModel,
+            endpoint = OPENROUTER_ENDPOINT,
+            prompt = prompt,
+            fastMode = fastMode,
+            label = "OpenRouter ($cleanModel)",
+            extraHeaders = mapOf(
+                "HTTP-Referer" to "https://tapwing-keyboard.mixxermannipropvp.workers.dev",
+                "X-Title" to "Tapwing Keyboard"
+            )
+        )
+    }
+
+    private fun callXai(apiKey: String, model: String, prompt: String, fastMode: Boolean): CloudAiResult {
+        val cleanModel = model.trim().ifEmpty { AiModelCatalog.defaultTextModelFor(AiProviderType.XAI_API) }
+        return callOpenAiCompatible(
+            apiKey = apiKey,
+            model = cleanModel,
+            endpoint = XAI_ENDPOINT,
+            prompt = prompt,
+            fastMode = fastMode,
+            label = "Grok ($cleanModel)"
+        )
+    }
+
     private fun callOpenAi(
         apiKey: String,
         model: String,
@@ -194,10 +222,8 @@ object CloudAiClient {
         prompt: String,
         fastMode: Boolean
     ): CloudAiResult {
-        val cleanModel = model.trim()
-            .takeIf { it.isNotEmpty() && !it.startsWith("gemini") }
-            ?: "gpt-4o-mini"
-        val base = customEndpoint.trim().ifEmpty { "https://api.openai.com/v1/chat/completions" }
+        val cleanModel = model.trim().ifEmpty { "gpt-4.1-mini" }
+        val base = customEndpoint.trim().ifEmpty { OPENAI_ENDPOINT }
         return callOpenAiCompatible(
             apiKey = apiKey,
             model = cleanModel,
@@ -214,7 +240,8 @@ object CloudAiClient {
         endpoint: String,
         prompt: String,
         fastMode: Boolean,
-        label: String
+        label: String,
+        extraHeaders: Map<String, String> = emptyMap()
     ): CloudAiResult {
         val body = JSONObject().apply {
             put("model", model)
@@ -238,6 +265,7 @@ object CloudAiClient {
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Authorization", "Bearer $apiKey")
+                extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
             }
             OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { it.write(body) }
             val code = conn.responseCode

@@ -48,7 +48,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key as composeKey
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -146,6 +148,14 @@ fun KeyboardGrid(
     val currentPrefs by rememberUpdatedState(prefs)
     val currentOnSwipeWord by rememberUpdatedState(onSwipeWord)
 
+    LaunchedEffect(layoutPage, prefs.activeLocale, prefs.showNumberRow, prefs.showGermanUmlautKeys) {
+        activePreview = null
+        altPopup = null
+        lastAltPopup = null
+        swipeTrail.clear()
+        keyCenterMap.clear()
+    }
+
     // Continuous dynamic height scaling (75%..135%) applied smoothly on top of keyboardHeight preset
     val baseDp = if (prefs.showNumberRow) 46f else prefs.keyboardHeight.rowHeightDp.toFloat()
     val scaleFactor = (prefs.keyboardScalePercent / 100f) * (prefs.keyboardHeight.rowHeightDp / 48f)
@@ -206,21 +216,22 @@ fun KeyboardGrid(
                                 modifier = if (isSplitActive) Modifier.weight(1f) else Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                halfKeys.forEachIndexed { keyIdx, key ->
+                                halfKeys.forEachIndexed { keyIdx, keySpec ->
                                     val isLetterCharKey = currentLayoutPage == KeyboardLayoutPage.LETTERS &&
-                                        key.type == KeyActionType.CHAR &&
-                                        key.label.length == 1 &&
-                                        key.label[0].isLetter()
-                                    val keyIdentity = "${layoutPage.name}_${rowIndex}_${halfIdx}_${keyIdx}_${key.type.name}_${key.label}"
+                                        keySpec.type == KeyActionType.CHAR &&
+                                        keySpec.label.length == 1 &&
+                                        keySpec.label[0].isLetter()
+                                    val keyIdentity = "${layoutPage.name}_${rowIndex}_${halfIdx}_${keyIdx}_${keySpec.type.name}_${keySpec.label}"
 
+                                    composeKey(keyIdentity) {
                                     ExpressiveKeyCap(
                                         modifier = Modifier
-                                            .weight(key.weight)
+                                            .weight(keySpec.weight)
                                             .height(rowHeight + rowGap),
                                         innerPaddingHorizontal = 2.5.dp,
-                                        innerPaddingVertical = halfRowGap,
+                                        innerPaddingVertical = if (prefs.roundedExpressiveKeys) 3.dp else halfRowGap,
                                         keyIdentity = keyIdentity,
-                                        key = key,
+                                        key = keySpec,
                                         prefs = prefs,
                                         shiftState = shiftState,
                                         imeActionLabel = imeActionLabel,
@@ -228,18 +239,18 @@ fun KeyboardGrid(
                                         swipeSlopPx = swipeSlopPx,
                                         onCenterMeasured = { cx, cy ->
                                             if (isLetterCharKey) {
-                                                keyCenterMap[key.label] = KeyCenter(
-                                                    char = key.label[0],
+                                                keyCenterMap[keySpec.label] = KeyCenter(
+                                                    char = keySpec.label[0],
                                                     x = cx - gridLeftRoot,
                                                     y = cy - gridTopRoot
                                                 )
                                             }
                                         },
                                         onPressStateChanged = { isDown, cx, topY ->
-                                            if (isDown && key.type == KeyActionType.CHAR) {
+                                            if (isDown && keySpec.type == KeyActionType.CHAR) {
                                                 activePreview = KeyPreviewBubble(
                                                     keyId = keyIdentity,
-                                                    char = applyShiftCase(key.label, currentShiftState),
+                                                    char = applyShiftCase(keySpec.label, currentShiftState),
                                                     centerXRoot = cx,
                                                     topYRoot = topY
                                                 )
@@ -253,17 +264,18 @@ fun KeyboardGrid(
                                             }
                                         },
                                         onPress = { resolvedOutput ->
+                                            activePreview = null
                                             altPopup = null
-                                            onKeyPress(key, resolvedOutput)
+                                            onKeyPress(keySpec, resolvedOutput)
                                         },
                                         onLongPress = { centerX ->
                                             when {
-                                                key.type == KeyActionType.SPACE -> onSwitchLanguage()
-                                                key.alternates.size == 1 -> {
-                                                    onKeyPress(key, applyShiftCase(key.alternates.first(), currentShiftState))
+                                                keySpec.type == KeyActionType.SPACE -> onSwitchLanguage()
+                                                keySpec.alternates.size == 1 -> {
+                                                    onKeyPress(keySpec, applyShiftCase(keySpec.alternates.first(), currentShiftState))
                                                 }
-                                                key.alternates.size > 1 -> {
-                                                    val sorted = key.alternates.sortedBy { alt ->
+                                                keySpec.alternates.size > 1 -> {
+                                                    val sorted = keySpec.alternates.sortedBy { alt ->
                                                         if (alt.firstOrNull()?.isLetter() == true) 0 else 1
                                                     }
                                                     val isRightHalf = centerX > gridLeftRoot + gridWidthPx * 0.55f
@@ -280,7 +292,7 @@ fun KeyboardGrid(
                                                     val left = rawLeft.coerceIn(minLeft, maxLeft)
                                                     altPopup = AlternatePopup(
                                                         items = items,
-                                                        origin = key,
+                                                        origin = keySpec,
                                                         selected = defaultIndex,
                                                         leftRootPx = left,
                                                         startXPx = centerX
@@ -335,6 +347,7 @@ fun KeyboardGrid(
                                         onCursorMoveSteps = onCursorMoveSteps,
                                         onSwipeBackspaceWord = onDeletePreviousWord
                                     )
+                                    }
                                 }
                             }
                         }
@@ -500,7 +513,8 @@ enum class KeyActionLabel {
     SEARCH,
     SEND,
     DONE,
-    NEXT
+    NEXT,
+    GO
 }
 
 @Composable
@@ -532,7 +546,7 @@ private fun ExpressiveKeyCap(
     val kbColors = LocalTapwingKeyboardColors.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
-    var pressed by remember { mutableStateOf(false) }
+    var pressed by remember(keyIdentity) { mutableStateOf(false) }
     var keyLeftRoot by remember { mutableFloatStateOf(0f) }
     var keyTopRoot by remember { mutableFloatStateOf(0f) }
     var keyWidthPx by remember { mutableFloatStateOf(0f) }
@@ -577,12 +591,8 @@ private fun ExpressiveKeyCap(
     )
 
     val cornerShape: Shape = when {
-        kbColors.appleLiquidGlass -> RoundedCornerShape(percent = 50)
-        isActionKey || key.type == KeyActionType.SYMBOLS_TOGGLE || key.type == KeyActionType.SYMBOLS_EXT_TOGGLE ->
-            RoundedCornerShape(percent = 50)
-        !prefs.roundedExpressiveKeys -> RoundedCornerShape(5.dp)
-        isModifierKey -> RoundedCornerShape(8.dp)
-        else -> RoundedCornerShape(7.dp)
+        kbColors.appleLiquidGlass || prefs.roundedExpressiveKeys -> RoundedCornerShape(percent = 50)
+        else -> RoundedCornerShape(5.dp)
     }
 
     val bgTarget = when {
@@ -871,8 +881,8 @@ private fun ExpressiveKeyCap(
                         lineHeight = 10.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 2.dp, end = 4.dp)
+                            .align(Alignment.TopCenter)
+                            .padding(top = 2.dp)
                     )
                 }
 
@@ -915,7 +925,7 @@ private fun ExpressiveKeyCap(
                             KeyActionLabel.SEARCH -> Icons.Rounded.Search
                             KeyActionLabel.SEND -> Icons.AutoMirrored.Rounded.Send
                             KeyActionLabel.DONE -> Icons.Rounded.Check
-                            KeyActionLabel.NEXT -> Icons.AutoMirrored.Rounded.ArrowForward
+                            KeyActionLabel.NEXT, KeyActionLabel.GO -> Icons.AutoMirrored.Rounded.ArrowForward
                             KeyActionLabel.ENTER -> Icons.AutoMirrored.Rounded.KeyboardReturn
                         }
                         Icon(
@@ -946,8 +956,11 @@ private fun ExpressiveKeyCap(
                     else -> Text(
                         text = displayText,
                         color = fgColor,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Normal
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.Normal,
+                        modifier = Modifier.padding(
+                            top = if (key.hint != null && key.type == KeyActionType.CHAR) 7.dp else 0.dp
+                        )
                     )
                 }
             }
