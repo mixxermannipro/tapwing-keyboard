@@ -141,6 +141,9 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.llamatik:library-android:1.10.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.mlkit:genai-proofreading:1.0.0-beta1")
+    implementation("com.google.mlkit:genai-rewriting:1.0.0-beta1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
