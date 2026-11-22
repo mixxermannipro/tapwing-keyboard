@@ -140,13 +140,13 @@ fun SuggestionStrip(
     val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
 
     val voiceActive = voiceState.isListening || voiceState.isProcessing
-    val showVoiceError = !voiceActive && !voiceState.errorMessage.isNullOrBlank()
-    val showAutofill = !showVoiceError && inlineAutofillViews.isNotEmpty()
+    val showAutofill = inlineAutofillViews.isNotEmpty()
+    val showVoiceError = !showAutofill && !voiceActive && !voiceState.errorMessage.isNullOrBlank()
     val showNextWords = suggestions.any { it.isNextWord }
     val undoAvailable = proactiveUndo != null && prefs.proactiveUndo
     val showUndo = !showVoiceError && !showAutofill && undoAvailable && !showNextWords
-    val showClipboard = !showVoiceError && !showAutofill && !showUndo && !clipboardPreview.isNullOrBlank()
-    val showShot = !showClipboard && !showVoiceError && !showUndo && !showAutofill &&
+    val showClipboard = !showVoiceError && !showAutofill && !undoAvailable && !clipboardPreview.isNullOrBlank()
+    val showShot = !showClipboard && !showVoiceError && !undoAvailable && !showAutofill &&
         recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
     val showSuggestions = !showVoiceError && !showUndo && !showShot && !showAutofill && suggestions.isNotEmpty() &&
         (isTyping || showNextWords || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
@@ -159,7 +159,7 @@ fun SuggestionStrip(
     }
 
     AnimatedContent(
-        targetState = voiceActive,
+        targetState = voiceActive && !showAutofill,
         transitionSpec = {
             fadeIn(tween(200, delayMillis = 40, easing = FastOutSlowInEasing)) togetherWith
                 fadeOut(tween(120, easing = FastOutSlowInEasing))
@@ -204,10 +204,7 @@ fun SuggestionStrip(
                                         (autofillView.parent as? ViewGroup)?.removeView(autofillView)
                                         autofillView
                                     },
-                                    update = { v ->
-                                        v.requestLayout()
-                                    },
-                                    modifier = Modifier.height(38.dp)
+                                    modifier = Modifier
                                 )
                             }
                         }

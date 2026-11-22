@@ -23,7 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
+import java.security.DigestOutputStream
+import java.security.MessageDigest
 import kotlin.coroutines.resume
 
 data class RecentScreenshot(
@@ -40,6 +41,8 @@ data class RecentScreenshot(
  * clipboard via FileProvider, and extracts on-device ML Kit OCR text.
  */
 object ScreenshotMonitor {
+
+    data class CachedImage(val file: File, val digest: String)
 
     @Volatile
     private var lastSelfCopiedAtMs: Long = 0L
@@ -146,25 +149,44 @@ object ScreenshotMonitor {
         null
     }
 
-    suspend fun cacheImageLocally(context: Context, sourceUri: Uri): File? = withContext(Dispatchers.IO) {
-        runCatching {
-            val dir = File(context.filesDir, "clipboard_images")
-            if (!dir.exists()) dir.mkdirs()
-
-            val decoded = context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                BitmapFactory.decodeStream(input)
-            } ?: return@withContext null
-
-            val scaled = downscaleIfNeeded(decoded, maxDimension = 2160)
-            val outFile = File(dir, "shot_${System.currentTimeMillis()}.png")
-            FileOutputStream(outFile).use { fos ->
-                scaled.compress(Bitmap.CompressFormat.PNG, 95, fos)
-            }
-            if (scaled !== decoded) scaled.recycle()
-            decoded.recycle()
-            outFile
-        }.getOrNull()
-    }
+    suspend fun cacheImageLocally(context: Context, sourceUri: Uri): CachedImage? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val dir = File(context.filesDir, "clipboard_images")
+                dir.mkdirs()
+                val resolver = context.contentResolver
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                resolver.openInputStream(sourceUri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                val longest = maxOf(bounds.outWidth, bounds.outHeight)
+                if (longest <= 0) return@withContext null
+                val options = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    while (longest / inSampleSize.coerceAtLeast(1) > 4320) {
+                        inSampleSize = inSampleSize.coerceAtLeast(1) * 2
+                    }
+                }
+                val decoded = resolver.openInputStream(sourceUri)?.use {
+                    BitmapFactory.decodeStream(it, null, options)
+                } ?: return@withContext null
+                val scaled = downscaleIfNeeded(decoded, maxDimension = 2160)
+                var outFile: File? = null
+                try {
+                    val file = File.createTempFile("image_", ".png", dir)
+                    outFile = file
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    DigestOutputStream(file.outputStream().buffered(), digest).use { output ->
+                        check(scaled.compress(Bitmap.CompressFormat.PNG, 100, output))
+                    }
+                    CachedImage(file, digest.digest().toHexString())
+                } catch (failure: Exception) {
+                    outFile?.delete()
+                    throw failure
+                } finally {
+                    if (scaled !== decoded) scaled.recycle()
+                    decoded.recycle()
+                }
+            }.getOrNull()
+        }
 
     fun fileProviderUri(context: Context, file: File): Uri {
         return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -199,6 +221,7 @@ object ScreenshotMonitor {
                     .addOnFailureListener {
                         cont.resume("")
                     }
+                    .addOnCompleteListener { recognizer.close() }
             }
         }.getOrDefault("")
     }

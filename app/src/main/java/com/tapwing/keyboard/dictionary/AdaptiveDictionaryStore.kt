@@ -179,8 +179,19 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         appPackage: String? = null
     ) {
         if (!learningEnabled || incognito) return
+        if (learnWord(word, previousWord, previousTwoWord, wasSentenceStart, locale, appPackage)) saveToDisk()
+    }
+
+    private fun learnWord(
+        word: String,
+        previousWord: String?,
+        previousTwoWord: String?,
+        wasSentenceStart: Boolean,
+        locale: String,
+        appPackage: String?
+    ): Boolean {
         val clean = word.trim()
-        if (clean.length < 2 || clean.any { it.isDigit() }) return
+        if (clean.isEmpty() || clean.none { it.isLetter() } || clean.any { !it.isLetter() && it !in "'’-" }) return false
 
         val lower = clean.lowercase()
         val isSingleLeadingCap = clean.length >= 2 &&
@@ -228,7 +239,7 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         trimUnigramsIfNeeded()
 
         val prev = previousWord?.trim()?.lowercase().orEmpty()
-        if (prev.length >= 2) {
+        if (prev.isNotEmpty()) {
             val nextMap = learnedBigrams.getOrPut(prev) { linkedMapOf() }
             val nextStored = if (wasSentenceStart && isSingleLeadingCap && lower in LanguageVocabularies.germanNeverAutoCapMidSentence) {
                 lower
@@ -240,7 +251,7 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             trimOuterMap(learnedBigrams, MAX_BIGRAM_HEADS)
 
             val prev2 = previousTwoWord?.trim()?.lowercase().orEmpty()
-            if (prev2.length >= 2) {
+            if (prev2.isNotEmpty()) {
                 val trigramKey = "$prev2 $prev"
                 val triMap = learnedTrigrams.getOrPut(trigramKey) { linkedMapOf() }
                 triMap[nextStored] = ((triMap[nextStored] ?: 0) + 1).coerceAtMost(10_000)
@@ -256,7 +267,7 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             trimSubMap(appMap, MAX_PER_APP_WORDS)
             trimOuterMap(perAppUnigrams, MAX_APP_PROFILES)
 
-            if (prev.length >= 2) {
+            if (prev.isNotEmpty()) {
                 val appBiHead = perAppBigrams.getOrPut(cleanPkg) { linkedMapOf() }
                 val appFollowers = appBiHead.getOrPut(prev) { linkedMapOf() }
                 val nextStored = if (wasSentenceStart && isSingleLeadingCap && lower in LanguageVocabularies.germanNeverAutoCapMidSentence) {
@@ -270,7 +281,7 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                 trimOuterMap(perAppBigrams, MAX_APP_PROFILES)
             }
         }
-        saveToDisk()
+        return true
     }
 
     @Synchronized
@@ -420,11 +431,9 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             var p1: String? = null
             var p2: String? = null
             words.forEachIndexed { idx, w ->
-                recordTypedWord(
+                learnWord(
                     word = w,
                     previousWord = p1,
-                    learningEnabled = true,
-                    incognito = false,
                     previousTwoWord = p2,
                     wasSentenceStart = idx == 0,
                     locale = locale,
@@ -434,6 +443,7 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
                 p1 = w
             }
         }
+        saveToDisk()
     }
 
     @Synchronized
@@ -625,32 +635,31 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     ): List<String> {
         val prevLower = previousWord.trim().lowercase()
         if (prevLower.isEmpty()) return emptyList()
-        val combined = linkedMapOf<String, Int>()
+        val scores = linkedMapOf<String, Double>()
+        val forms = linkedMapOf<String, String>()
         val cleanPkg = appPackage?.trim()?.takeIf { it.isNotEmpty() }
-        val appMap = cleanPkg?.let { perAppUnigrams[it] }
 
-        if (cleanPkg != null) {
-            perAppBigrams[cleanPkg]?.get(prevLower)?.forEach { (word, count) ->
-                combined[word] = (combined[word] ?: 0) + count * 4
+        fun addContext(words: Map<String, Int>?, weight: Double) {
+            if (words.isNullOrEmpty()) return
+            val total = words.values.sum().toDouble() + 1
+            for ((word, count) in words.entries.sortedByDescending { it.value }) {
+                val key = word.lowercase()
+                forms.putIfAbsent(key, word)
+                scores[key] = (scores[key] ?: 0.0) + weight * count / total
             }
         }
 
         val prev2Lower = previousTwoWord?.trim()?.lowercase().orEmpty()
-        if (prev2Lower.isNotEmpty()) {
-            learnedTrigrams["$prev2Lower $prevLower"]?.forEach { (word, count) ->
-                val appBoost = (appMap?.get(word) ?: 0) * 2
-                combined[word] = (combined[word] ?: 0) + count * 3 + appBoost
-            }
-        }
-        learnedBigrams[prevLower]?.forEach { (word, count) ->
-            val appBoost = (appMap?.get(word) ?: 0) * 2
-            combined[word] = (combined[word] ?: 0) + count + appBoost
-        }
+        if (prev2Lower.isNotEmpty()) addContext(learnedTrigrams["$prev2Lower $prevLower"], 9.0)
+        addContext(cleanPkg?.let { perAppBigrams[it]?.get(prevLower) }, 4.0)
+        addContext(learnedBigrams[prevLower], 2.0)
 
-        return combined.entries
-            .sortedByDescending { it.value }
-            .take(limit)
-            .map { it.key }
+        return scores.entries.sortedWith(
+            compareByDescending<Map.Entry<String, Double>> { it.value }
+                .thenByDescending { wordRecency[it.key] ?: 0L }
+        ).take(limit.coerceAtLeast(0)).map { (key, _) ->
+            dominantMidSentenceForm(key) ?: forms.getValue(key)
+        }
     }
 
     @Synchronized
@@ -1061,11 +1070,14 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         private const val MAX_LEARNED_CORRECTIONS = 300
         private const val MAX_RECENT_EMOJIS = 28
 
+        private val stores = mutableMapOf<String, AdaptiveDictionaryStore>()
+
+        @Synchronized
         fun createForContext(context: Context): AdaptiveDictionaryStore {
             val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
                 ?: context.applicationContext
             val file = File(safeCtx.filesDir, "tapwing_dictionary_state.json")
-            return AdaptiveDictionaryStore(file)
+            return stores.getOrPut(file.absolutePath) { AdaptiveDictionaryStore(file) }
         }
     }
 }

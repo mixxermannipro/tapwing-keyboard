@@ -49,8 +49,7 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun AppleSwitch(
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    checked: Boolean
 ) {
     val trackColor by animateColorAsState(
         targetValue = if (checked) Color(0xFF34C759) else Color(0x55787880),
@@ -71,11 +70,7 @@ fun AppleSwitch(
             .width(50.dp)
             .height(30.dp)
             .clip(RoundedCornerShape(15.dp))
-            .background(trackColor)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onCheckedChange(!checked) },
+            .background(trackColor),
         contentAlignment = Alignment.CenterStart
     ) {
         Box(
@@ -162,7 +157,7 @@ fun AppleGroupedSurface(
     content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,

@@ -279,6 +279,16 @@ object AiModelCatalog {
         AiProviderType.OPENAI_COMPATIBLE -> if (de) "OpenAI / Eigener Endpunkt" else "OpenAI / Custom"
     }
 
+    fun modelsUrl(provider: AiProviderType): String? = when (provider) {
+        AiProviderType.GEMINI_API -> "https://ai.google.dev/gemini-api/docs/models"
+        AiProviderType.GROQ_API -> "https://console.groq.com/docs/models"
+        AiProviderType.OPENROUTER_API -> "https://openrouter.ai/models"
+        AiProviderType.XAI_API -> "https://docs.x.ai/developers/models"
+        AiProviderType.OPENAI_COMPATIBLE -> "https://developers.openai.com/api/docs/models"
+        AiProviderType.GEMINI_NANO -> "https://developer.android.com/ai/gemini-nano"
+        AiProviderType.LOCAL_RULES -> null
+    }
+
     fun signupUrl(provider: AiProviderType): String = when (provider) {
         AiProviderType.GEMINI_API -> "https://aistudio.google.com/apikey"
         AiProviderType.GROQ_API -> "https://console.groq.com/keys"

@@ -3,19 +3,25 @@ package com.tapwing.keyboard.settings
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.os.PersistableBundle
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.inputmethod.InputMethodManager
+import android.view.autofill.AutofillManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,6 +34,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,15 +45,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
@@ -70,15 +81,13 @@ import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
-import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Spellcheck
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -90,7 +99,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -102,10 +110,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -153,16 +162,20 @@ import com.tapwing.keyboard.ai.ModelInstallState
 import com.tapwing.keyboard.ai.NanoAvailability
 import com.tapwing.keyboard.voice.VoiceSelfTest
 import com.tapwing.keyboard.voice.CloudDictation
+import com.tapwing.keyboard.voice.GeminiLiveDictation
 import com.tapwing.keyboard.voice.CloudSpeechProvider
 import com.tapwing.keyboard.voice.TapwingVoiceController
 import com.tapwing.keyboard.voice.WavAudioRecorder
 import com.tapwing.keyboard.clipboard.ScreenshotMonitor
+import com.tapwing.keyboard.clipboard.SENSITIVE_CLIP_EXTRA
 import com.tapwing.keyboard.data.AiProviderType
 import com.tapwing.keyboard.data.ClipboardRetention
 import com.tapwing.keyboard.data.DarkModePreference
 import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.QuickBarAction
+import com.tapwing.keyboard.data.QuickSearchEngine
+import com.tapwing.keyboard.data.SearchApp
 import com.tapwing.keyboard.data.SecureKeyStorage
 import com.tapwing.keyboard.data.SplitKeyboardMode
 import com.tapwing.keyboard.data.TapwingPrefs
@@ -190,6 +203,8 @@ enum class SettingsRoute {
     HOME,
     APPEARANCE,
     QUICK_BAR,
+    QUICK_SEARCH,
+    AUTOFILL,
     LANGUAGES,
     DICTIONARY,
     CORRECTIONS,
@@ -215,27 +230,35 @@ fun TapwingSettingsApp(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val backStack = remember { mutableStateListOf(SettingsRoute.HOME) }
+    var backStack by rememberSaveable(stateSaver = listSaver(
+        save = { stack: List<SettingsRoute> -> stack.map { it.name } },
+        restore = { saved -> saved.map { SettingsRoute.valueOf(it) } }
+    )) { mutableStateOf(listOf(SettingsRoute.HOME)) }
+    val stateHolder = rememberSaveableStateHolder()
     val route = backStack.last()
     var navigatingBack by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var testInputText by remember { mutableStateOf("") }
     var dictRevision by remember { mutableIntStateOf(0) }
 
     var imeEnabled by remember { mutableStateOf(false) }
     var imeSelected by remember { mutableStateOf(false) }
+    var installedSearchApp by remember(prefs.quickSearchEngine) {
+        mutableStateOf(prefs.quickSearchEngine.installedApp(context))
+    }
+    var hasAutofillProvider by remember { mutableStateOf(false) }
 
     fun navigateTo(target: SettingsRoute) {
         if (route != target) {
             navigatingBack = false
-            backStack.add(target)
+            backStack = backStack + target
         }
     }
 
     fun navigateBack() {
         if (backStack.size > 1) {
             navigatingBack = true
-            backStack.removeAt(backStack.lastIndex)
+            backStack = backStack.dropLast(1)
         } else if (route == SettingsRoute.HOME && searchQuery.isNotEmpty()) {
             searchQuery = ""
         }
@@ -256,13 +279,15 @@ fun TapwingSettingsApp(
             Settings.Secure.DEFAULT_INPUT_METHOD
         ).orEmpty()
         imeSelected = defaultIme.startsWith("$pkg/")
+        hasAutofillProvider = context.getSystemService(AutofillManager::class.java)?.isEnabled == true
     }
 
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, prefs.quickSearchEngine) {
         refreshImeStatus()
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshImeStatus()
+                installedSearchApp = prefs.quickSearchEngine.installedApp(context)
                 dictionaryStore.reloadIfModifiedOnDisk()
                 statsStore.reloadIfModifiedOnDisk()
                 packManager.refreshStates()
@@ -280,476 +305,411 @@ fun TapwingSettingsApp(
     }
     val de = effectiveLang == "de"
 
-    Scaffold(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            if (route != SettingsRoute.HOME) {
-                val title = when (route) {
-                    SettingsRoute.HOME -> ""
-                    SettingsRoute.APPEARANCE -> stringResource(R.string.nav_appearance)
-                    SettingsRoute.QUICK_BAR -> stringResource(R.string.nav_quick_bar)
-                    SettingsRoute.LANGUAGES -> stringResource(R.string.nav_languages)
-                    SettingsRoute.DICTIONARY -> stringResource(R.string.nav_dictionary)
-                    SettingsRoute.CORRECTIONS -> stringResource(R.string.nav_corrections)
-                    SettingsRoute.VOICE -> stringResource(R.string.nav_voice)
-                    SettingsRoute.WRITING_TOOLS -> stringResource(R.string.nav_writing_tools)
-                    SettingsRoute.API_KEYS -> stringResource(R.string.nav_api_keys)
-                    SettingsRoute.CLIPBOARD -> stringResource(R.string.nav_clipboard)
-                    SettingsRoute.EMOJI -> stringResource(R.string.nav_emoji)
-                    SettingsRoute.STATS -> if (de) "Tastatur-Statistik" else "Typing Statistics"
-                    SettingsRoute.ABOUT -> stringResource(R.string.nav_about)
-                }
-                CenterAlignedTopAppBar(
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.96f)
-                    ),
-                    title = {
-                        Text(
-                            text = title,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 17.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+    val liveStats by statsStore.stats.collectAsState()
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        AnimatedContent(
+            modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
+            targetState = route,
+            transitionSpec = {
+                val direction = if (navigatingBack) -1 else 1
+                (slideInHorizontally(tween(270, easing = FastOutSlowInEasing)) { direction * it / 8 } +
+                    fadeIn(tween(220))) togetherWith
+                    (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 12 } +
+                        fadeOut(tween(160)))
+            },
+            label = "settingsNavigation"
+        ) { activeRoute ->
+            stateHolder.SaveableStateProvider(activeRoute.name) {
+                Column(Modifier.fillMaxSize()) {
+                    if (activeRoute != SettingsRoute.HOME) SettingsHeader(activeRoute, ::navigateBack)
+                    when (activeRoute) {
+                        SettingsRoute.HOME -> HomeSettingsScreen(
+                            prefs = prefs,
+                            imeEnabled = imeEnabled,
+                            imeSelected = imeSelected,
+                            hasAutofillProvider = hasAutofillProvider,
+                            searchQuery = searchQuery,
+                            onSearchQueryChange = { searchQuery = it },
+                            testInputText = testInputText,
+                            onTestInputChange = { testInputText = it },
+                            onOpenImeSystemSettings = {
+                                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                            },
+                            onShowImePicker = {
+                                val imm = context.getSystemService(InputMethodManager::class.java)
+                                imm?.showInputMethodPicker()
+                            },
+                            onNavigate = { navigateTo(it) }
                         )
-                    },
-                    navigationIcon = {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { navigateBack() }
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
-                                contentDescription = if (de) "Zurück" else "Back",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Text(
-                                text = if (de) "Zurück" else "Back",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Normal
-                            )
-                        }
+                        SettingsRoute.APPEARANCE -> AppearanceScreen(prefs, de, onUpdatePrefs)
+                        SettingsRoute.QUICK_BAR -> QuickBarSettingsScreen(prefs, de, onUpdatePrefs)
+                        SettingsRoute.QUICK_SEARCH -> QuickSearchSettingsScreen(prefs, installedSearchApp, onUpdatePrefs)
+                        SettingsRoute.AUTOFILL -> AutofillSettingsScreen(prefs, hasAutofillProvider, onUpdatePrefs)
+                        SettingsRoute.LANGUAGES -> LanguagesScreen(
+                            prefs = prefs,
+                            de = de,
+                            onOpenImeSystemSettings = {
+                                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                            },
+                            onShowImePicker = {
+                                val imm = context.getSystemService(InputMethodManager::class.java)
+                                imm?.showInputMethodPicker()
+                            },
+                            onUpdatePrefs = onUpdatePrefs
+                        )
+                        SettingsRoute.DICTIONARY -> DictionaryLearningScreen(
+                            prefs = prefs,
+                            de = de,
+                            dictionaryStore = dictionaryStore,
+                            packManager = packManager,
+                            onDictionaryChanged = { dictRevision++ },
+                            onUpdatePrefs = onUpdatePrefs
+                        )
+                        SettingsRoute.CORRECTIONS -> CorrectionsScreen(
+                            prefs = prefs,
+                            de = de,
+                            onOpenQuickBar = { navigateTo(SettingsRoute.QUICK_BAR) },
+                            onUpdatePrefs = onUpdatePrefs
+                        )
+                        SettingsRoute.VOICE -> VoiceSettingsScreen(
+                            prefs, de, modelManager, secureKeyStorage,
+                            onOpenWritingTools = { navigateTo(SettingsRoute.WRITING_TOOLS) },
+                            onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
+                            onUpdatePrefs = onUpdatePrefs
+                        )
+                        SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(
+                            prefs = prefs,
+                            de = de,
+                            secureKeyStorage = secureKeyStorage,
+                            modelManager = modelManager,
+                            onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
+                            onUpdatePrefs = onUpdatePrefs
+                        )
+                        SettingsRoute.API_KEYS -> ApiKeysVaultScreen(
+                            prefs = prefs,
+                            de = de,
+                            secureKeyStorage = secureKeyStorage,
+                            onUpdatePrefs = onUpdatePrefs
+                        )
+                        SettingsRoute.CLIPBOARD -> ClipboardSettingsScreen(prefs, de, onUpdatePrefs)
+                        SettingsRoute.EMOJI -> EmojiSettingsScreen(prefs, de, onUpdatePrefs)
+                        SettingsRoute.STATS -> TypingStatsScreen(
+                            stats = liveStats,
+                            de = de,
+                            onReset = { statsStore.reset() }
+                        )
+                        SettingsRoute.ABOUT -> AboutSettingsScreen(
+                            de = de,
+                            onOpenImeSystemSettings = {
+                                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                            },
+                            onShowImePicker = {
+                                val imm = context.getSystemService(InputMethodManager::class.java)
+                                imm?.showInputMethodPicker()
+                            }
+                        )
                     }
-                )
-            }
-        }
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            val liveStats by statsStore.stats.collectAsState()
-            AnimatedContent(
-                targetState = route,
-                transitionSpec = {
-                    val forward = !navigatingBack
-                    val slideIn = slideInHorizontally(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    ) { width -> if (forward) width / 3 else -width / 3 } + fadeIn(tween(170))
-                    val slideOut = slideOutHorizontally(tween(140)) { width ->
-                        if (forward) -width / 5 else width / 5
-                    } + fadeOut(tween(120))
-                    slideIn togetherWith slideOut
-                },
-                label = "settingsNavigation"
-            ) { activeRoute ->
-                when (activeRoute) {
-                    SettingsRoute.HOME -> HomeSettingsScreen(
-                        prefs = prefs,
-                        de = de,
-                        imeEnabled = imeEnabled,
-                        imeSelected = imeSelected,
-                        savedKeyCount = secureKeyStorage.configuredCloudProviders().size,
-
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { searchQuery = it },
-                        testInputText = testInputText,
-                        onTestInputChange = { testInputText = it },
-                        onOpenImeSystemSettings = {
-                            context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                        },
-                        onShowImePicker = {
-                            val imm = context.getSystemService(InputMethodManager::class.java)
-                            imm?.showInputMethodPicker()
-                        },
-                        onToggleAppleMode = { enabled ->
-                            onUpdatePrefs { it.copy(appleModeEnabled = enabled) }
-                        },
-                        onNavigate = { navigateTo(it) }
-                    )
-                    SettingsRoute.APPEARANCE -> AppearanceScreen(prefs, de, onUpdatePrefs)
-                    SettingsRoute.QUICK_BAR -> QuickBarSettingsScreen(prefs, de, onUpdatePrefs)
-                    SettingsRoute.LANGUAGES -> LanguagesScreen(
-                        prefs = prefs,
-                        de = de,
-                        onOpenImeSystemSettings = {
-                            context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                        },
-                        onShowImePicker = {
-                            val imm = context.getSystemService(InputMethodManager::class.java)
-                            imm?.showInputMethodPicker()
-                        },
-                        onUpdatePrefs = onUpdatePrefs
-                    )
-                    SettingsRoute.DICTIONARY -> DictionaryLearningScreen(
-                        prefs = prefs,
-                        de = de,
-                        dictionaryStore = dictionaryStore,
-                        packManager = packManager,
-                        onDictionaryChanged = { dictRevision++ },
-                        onUpdatePrefs = onUpdatePrefs
-                    )
-                    SettingsRoute.CORRECTIONS -> CorrectionsScreen(
-                        prefs = prefs,
-                        de = de,
-                        onOpenQuickBar = { navigateTo(SettingsRoute.QUICK_BAR) },
-                        onUpdatePrefs = onUpdatePrefs
-                    )
-                    SettingsRoute.VOICE -> VoiceSettingsScreen(
-                        prefs, de, modelManager, secureKeyStorage,
-                        onOpenWritingTools = { navigateTo(SettingsRoute.WRITING_TOOLS) },
-                        onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
-                        onUpdatePrefs = onUpdatePrefs
-                    )
-                    SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(
-                        prefs = prefs,
-                        de = de,
-                        secureKeyStorage = secureKeyStorage,
-                        modelManager = modelManager,
-                        onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
-                        onUpdatePrefs = onUpdatePrefs
-                    )
-                    SettingsRoute.API_KEYS -> ApiKeysVaultScreen(
-                        prefs = prefs,
-                        de = de,
-                        secureKeyStorage = secureKeyStorage,
-                        onUpdatePrefs = onUpdatePrefs
-                    )
-                    SettingsRoute.CLIPBOARD -> ClipboardSettingsScreen(prefs, de, onUpdatePrefs)
-                    SettingsRoute.EMOJI -> EmojiSettingsScreen(prefs, de, onUpdatePrefs)
-                    SettingsRoute.STATS -> TypingStatsScreen(
-                        stats = liveStats,
-                        de = de,
-                        onReset = { statsStore.reset() }
-                    )
-                    SettingsRoute.ABOUT -> AboutSettingsScreen(
-                        de = de,
-                        onOpenImeSystemSettings = {
-                            context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                        },
-                        onShowImePicker = {
-                            val imm = context.getSystemService(InputMethodManager::class.java)
-                            imm?.showInputMethodPicker()
-                        }
-                    )
                 }
             }
         }
     }
 }
 
-private sealed interface HomeRowItem {
-    val keywords: String
-    val title: String
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsHeader(route: SettingsRoute, onBack: () -> Unit) {
+    CenterAlignedTopAppBar(
+        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        title = {
+            Text(stringResource(route.label()), style = MaterialTheme.typography.titleMedium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, stringResource(R.string.cd_back),
+                    tint = MaterialTheme.colorScheme.primary)
+            }
+        },
+        windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
+    )
 }
 
-private data class HomeNavItem(
-    val route: SettingsRoute,
-    override val title: String,
-    val icon: ImageVector,
-    val badgeColor: Color,
-    override val keywords: String,
-    val status: String = ""
-) : HomeRowItem
+private fun SettingsRoute.label(): Int = when (this) {
+    SettingsRoute.HOME -> R.string.settings_title
+    SettingsRoute.APPEARANCE -> R.string.nav_appearance
+    SettingsRoute.QUICK_BAR -> R.string.nav_quick_bar
+    SettingsRoute.QUICK_SEARCH -> R.string.nav_quick_search
+    SettingsRoute.AUTOFILL -> R.string.nav_autofill
+    SettingsRoute.LANGUAGES -> R.string.nav_languages
+    SettingsRoute.DICTIONARY -> R.string.nav_dictionary
+    SettingsRoute.CORRECTIONS -> R.string.nav_corrections
+    SettingsRoute.VOICE -> R.string.nav_voice
+    SettingsRoute.WRITING_TOOLS -> R.string.nav_writing_tools
+    SettingsRoute.API_KEYS -> R.string.nav_api_keys
+    SettingsRoute.CLIPBOARD -> R.string.nav_clipboard
+    SettingsRoute.EMOJI -> R.string.nav_emoji
+    SettingsRoute.STATS -> R.string.nav_typing_stats
+    SettingsRoute.ABOUT -> R.string.nav_about
+}
 
-private data class HomeToggleItem(
-    override val title: String,
-    val checked: Boolean,
+private data class SettingsRow(
+    val route: SettingsRoute,
     val icon: ImageVector,
-    val badgeColor: Color,
-    override val keywords: String,
-    val onCheckedChange: (Boolean) -> Unit
-) : HomeRowItem
+    val keywords: String,
+    val summary: String = ""
+)
 
 @Composable
 private fun HomeSettingsScreen(
     prefs: TapwingPrefs,
-    de: Boolean,
     imeEnabled: Boolean,
     imeSelected: Boolean,
-    savedKeyCount: Int,
+    hasAutofillProvider: Boolean,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     testInputText: String,
     onTestInputChange: (String) -> Unit,
     onOpenImeSystemSettings: () -> Unit,
     onShowImePicker: () -> Unit,
-    onToggleAppleMode: (Boolean) -> Unit,
     onNavigate: (SettingsRoute) -> Unit
 ) {
-    val appearanceItems: List<HomeRowItem> = listOf(
-        HomeToggleItem(
-            title = if (de) "Apple-Stil" else "Apple style",
-            checked = prefs.appleModeEnabled,
-            icon = Icons.Rounded.Smartphone,
-            badgeColor = Color(0xFF5E5CE6),
-            keywords = "apple liquid glass design glas",
-            onCheckedChange = onToggleAppleMode
-        ),
-        HomeNavItem(
-            route = SettingsRoute.APPEARANCE,
-            title = stringResource(R.string.nav_appearance),
-            icon = Icons.Rounded.Palette,
-            badgeColor = Color(0xFFAF52DE),
-            keywords = "theme design farbe größe höhe abstand einhand gboard",
-            status = if (prefs.appleModeEnabled) "Apple" else "Gboard"
-        ),
-        HomeNavItem(
-            route = SettingsRoute.QUICK_BAR,
-            title = stringResource(R.string.nav_quick_bar),
-            icon = Icons.Rounded.Tune,
-            badgeColor = Color(0xFF5AC8FA),
-            keywords = "leiste schnellleiste toolbar symbole icons reihenfolge",
-            status = "${prefs.quickBarActions.size}"
-        ),
-        HomeNavItem(
-            route = SettingsRoute.LANGUAGES,
-            title = stringResource(R.string.nav_languages),
-            icon = Icons.Rounded.Language,
-            badgeColor = Color(0xFF007AFF),
-            keywords = "sprache qwertz qwerty azerty zahlenreihe umlaute leertaste land",
-            status = KeyboardLocales.specFor(prefs.activeLocale).nativeLabel.substringBefore(" ")
-        )
+    val typing = listOf(
+        SettingsRow(SettingsRoute.LANGUAGES, Icons.Rounded.Language, "sprache qwertz qwerty azerty layout",
+            KeyboardLocales.specFor(prefs.activeLocale).nativeLabel.substringBefore(" ")),
+        SettingsRow(SettingsRoute.CORRECTIONS, Icons.Rounded.Spellcheck, "autocorrect autokorrektur rückgängig undo grammatik inkognito enter"),
+        SettingsRow(SettingsRoute.DICTIONARY, Icons.Rounded.Book, "wörter lernen learn zip import export local offline"),
+        SettingsRow(SettingsRoute.VOICE, Icons.Rounded.Mic, "sprachaufnahme mikrofon speech dictation diktat whisper")
     )
-
-    val intelligenceItems: List<HomeRowItem> = listOf(
-        HomeNavItem(
-            route = SettingsRoute.DICTIONARY,
-            title = stringResource(R.string.nav_dictionary),
-            icon = Icons.Rounded.Book,
-            badgeColor = Color(0xFF34C759),
-            keywords = "wörterbuch lernen zip gboard pixelboard kürzel import export"
-        ),
-        HomeNavItem(
-            route = SettingsRoute.CORRECTIONS,
-            title = stringResource(R.string.nav_corrections),
-            icon = Icons.Rounded.Spellcheck,
-            badgeColor = Color(0xFF30B0C7),
-            keywords = "autokorrektur rechner math inkognito undo grammatik swipe wischen zeile enter",
-            status = if (prefs.autoCorrect) (if (de) "Aktiv" else "On") else (if (de) "Aus" else "Off")
-        ),
-        HomeNavItem(
-            route = SettingsRoute.VOICE,
-            title = stringResource(R.string.nav_voice),
-            icon = Icons.Rounded.Mic,
-            badgeColor = Color(0xFFFF9500),
-            keywords = "sprache diktat rambler whisper modell lokal mikrofon prompt",
-            status = when (prefs.voiceEngine) {
-                VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) "Automatisch" else "Auto"
-                VoiceEngineMode.LOCAL_WHISPER, VoiceEngineMode.ON_DEVICE_SPEECH -> "Offline"
-                VoiceEngineMode.GEMINI_LIVE, VoiceEngineMode.CLOUD -> "Cloud"
-                VoiceEngineMode.SYSTEM_SPEECH -> "System"
-            }
-        ),
-        HomeNavItem(
-            route = SettingsRoute.WRITING_TOOLS,
-            title = stringResource(R.string.nav_writing_tools),
-            icon = Icons.Rounded.AutoAwesome,
-            badgeColor = Color(0xFF5856D6),
-            keywords = "ki ai groq gemini nano openai grok openrouter prompt modell fallback",
-            status = when (prefs.aiProvider) {
-                AiProviderType.LOCAL_RULES -> "Offline"
-                AiProviderType.GEMINI_NANO -> "Nano"
-                AiProviderType.GROQ_API -> "Groq"
-                AiProviderType.GEMINI_API -> "Gemini"
-                AiProviderType.OPENROUTER_API -> "OpenRouter"
-                AiProviderType.XAI_API -> "Grok"
-                AiProviderType.OPENAI_COMPATIBLE -> "OpenAI"
-            }
-        ),
-        HomeNavItem(
-            route = SettingsRoute.API_KEYS,
-            title = stringResource(R.string.nav_api_keys),
-            icon = Icons.Rounded.Key,
-            badgeColor = Color(0xFFFF375F),
-            keywords = "api key schlüssel tresor vault gemini groq grok xai openrouter openai kopieren",
-            status = if (savedKeyCount > 0) "$savedKeyCount" else (if (de) "Leer" else "None")
-        )
+    val tools = listOf(
+        SettingsRow(SettingsRoute.QUICK_SEARCH, Icons.Rounded.Search, "browser google duckduckgo bing startpage brave ecosia internet", prefs.quickSearchEngine.label),
+        SettingsRow(SettingsRoute.CLIPBOARD, Icons.Rounded.ContentPaste, "clipboard kopieren copy ocr screenshot kamera"),
+        SettingsRow(SettingsRoute.AUTOFILL, Icons.Rounded.Key, "bitwarden autofill passwort password anmelden login benutzername 2fa otp"),
+        SettingsRow(SettingsRoute.WRITING_TOOLS, Icons.Rounded.AutoAwesome, "ki ai modell model openai groq gemini grok openrouter"),
+        SettingsRow(SettingsRoute.API_KEYS, Icons.Rounded.Key, "anbieter provider API schlüssel key modell model")
     )
-
-    val toolsItems: List<HomeRowItem> = listOf(
-        HomeNavItem(
-            route = SettingsRoute.CLIPBOARD,
-            title = stringResource(R.string.nav_clipboard),
-            icon = Icons.Rounded.ContentPaste,
-            badgeColor = Color(0xFF32ADE6),
-            keywords = "zwischenablage clipboard ocr kamera scan screenshot",
-            status = if (prefs.clipboardEnabled) (if (de) "Aktiv" else "On") else (if (de) "Aus" else "Off")
-        ),
-        HomeNavItem(
-            route = SettingsRoute.EMOJI,
-            title = stringResource(R.string.nav_emoji),
-            icon = Icons.Rounded.EmojiEmotions,
-            badgeColor = Color(0xFFFF9F0A),
-            keywords = "emoji größe vorschläge"
-        ),
-        HomeNavItem(
-            route = SettingsRoute.STATS,
-            title = if (de) "Tastatur-Statistik" else "Typing Statistics",
-            icon = Icons.Rounded.BarChart,
-            badgeColor = Color(0xFF34C759),
-            keywords = "statistik wpm geschwindigkeit wörter gespart zeichen swipe"
-        ),
-        HomeNavItem(
-            route = SettingsRoute.ABOUT,
-            title = stringResource(R.string.nav_about),
-            icon = Icons.Rounded.Info,
-            badgeColor = Color(0xFF8E8E93),
-            keywords = "über info version datenschutz lizenz system"
-        )
+    val keyboard = listOf(
+        SettingsRow(SettingsRoute.APPEARANCE, Icons.Rounded.Palette, "theme apple design farbe größe höhe abstand haptik"),
+        SettingsRow(SettingsRoute.QUICK_BAR, Icons.Rounded.Tune, "toolbar schnellleiste kurzbefehle reihenfolge"),
+        SettingsRow(SettingsRoute.EMOJI, Icons.Rounded.EmojiEmotions, "emoji smileys symbole"),
+        SettingsRow(SettingsRoute.STATS, Icons.Rounded.BarChart, "statistik stats keystrokes"),
+        SettingsRow(SettingsRoute.ABOUT, Icons.Rounded.Info, "datenschutz privacy lizenz version")
     )
-
-    val rows = intelligenceItems + toolsItems + appearanceItems
-    val primaryRoutes = listOf(
-        SettingsRoute.VOICE, SettingsRoute.WRITING_TOOLS, SettingsRoute.API_KEYS,
-        SettingsRoute.CLIPBOARD, SettingsRoute.APPEARANCE, SettingsRoute.LANGUAGES,
-        SettingsRoute.CORRECTIONS
-    )
-    val primary = primaryRoutes.map { route -> rows.filterIsInstance<HomeNavItem>().first { it.route == route } }
-    val extra = rows.filterNot { it in primary }
-    val q = searchQuery.trim().lowercase()
-    var more by rememberSaveable { mutableStateOf(false) }
+    val search = searchQuery.trim().lowercase()
+    val searchRows = (typing + tools + keyboard).filter {
+        stringResource(it.route.label()).lowercase().contains(search) || it.keywords.contains(search)
+    }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 6.dp, bottom = 28.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        contentPadding = PaddingValues(top = 20.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item(key = "search") {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(
-                    text = "Tapwing",
-                    fontSize = 34.sp,
+                    text = stringResource(R.string.settings_title),
+                    style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.6).sp,
-                    modifier = Modifier.padding(start = 4.dp)
+                    letterSpacing = (-0.9).sp,
+                    modifier = Modifier.padding(start = 2.dp)
                 )
-                AppleSearchPill(
-                    query = searchQuery,
-                    onQueryChange = onSearchQueryChange,
-                    placeholder = stringResource(R.string.settings_search_placeholder)
-                )
+                AppleSearchPill(searchQuery, onSearchQueryChange, stringResource(R.string.settings_search_placeholder))
             }
         }
 
-        // Only surface setup banner when Tapwing is not yet enabled or selected
-        if (!imeEnabled || !imeSelected) {
-            item {
-                AppleGroupedSurface {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.WarningAmber,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = if (!imeEnabled) {
-                                    stringResource(R.string.setup_enable_tapwing)
-                                } else {
-                                    stringResource(R.string.setup_select_tapwing)
-                                },
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 15.sp
+        if (search.isNotEmpty()) {
+            item(key = "results") {
+                if (searchRows.isEmpty()) AppleSectionFooter(stringResource(R.string.settings_no_results))
+                else SettingsGroup(null, searchRows, onNavigate)
+            }
+        } else {
+            item(key = "setup") {
+                AnimatedContent(
+                    targetState = imeEnabled to imeSelected,
+                    transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(140)) },
+                    label = "setupStatus"
+                ) { (enabled, selected) ->
+                    if (enabled && selected) {
+                        AppleGroupedSurface {
+                            AppleInlineField(
+                                value = testInputText,
+                                onValueChange = onTestInputChange,
+                                placeholder = stringResource(R.string.settings_test_placeholder),
+                                leadingIcon = Icons.Rounded.Keyboard,
+                                containerAlpha = 0f,
+                                fieldHeight = 54.dp
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(
-                                onClick = onOpenImeSystemSettings,
-                                modifier = Modifier.weight(1f)
+                    } else {
+                        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(20.dp)) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(18.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(if (de) "1. Aktivieren" else "1. Enable", fontSize = 13.sp)
+                                Text(stringResource(R.string.settings_setup_title), style = MaterialTheme.typography.titleMedium)
+                                Text(stringResource(if (!enabled) R.string.setup_enable_tapwing else R.string.setup_select_tapwing),
+                                    style = MaterialTheme.typography.bodyMedium)
+                                Button(onClick = if (!enabled) onOpenImeSystemSettings else onShowImePicker) {
+                                    Text(stringResource(if (!enabled) R.string.settings_enable else R.string.settings_select))
+                                }
                             }
-                            Button(
-                                onClick = onShowImePicker,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (de) "2. Auswählen" else "2. Select", fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+            item(key = "typing") { SettingsGroup(stringResource(R.string.settings_group_typing), typing, onNavigate) }
+            item(key = "tools") { SettingsGroup(stringResource(R.string.settings_group_tools), tools, onNavigate) }
+            item(key = "recommendations") {
+                val recommendation = when {
+                    !prefs.learningEnabled && !prefs.incognitoMode -> SettingsRoute.DICTIONARY to R.string.settings_tip_learning
+                    !hasAutofillProvider || !prefs.inlineAutofillEnabled -> SettingsRoute.AUTOFILL to R.string.settings_tip_autofill
+                    prefs.voiceEngine != VoiceEngineMode.LOCAL_WHISPER -> SettingsRoute.VOICE to R.string.settings_tip_voice
+                    else -> SettingsRoute.QUICK_SEARCH to R.string.settings_tip_search
+                }
+                Column {
+                    AppleSectionHeader(stringResource(R.string.settings_recommendation))
+                    AppleGroupedSurface {
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onNavigate(recommendation.first) }.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(stringResource(recommendation.first.label()), style = MaterialTheme.typography.titleSmall)
+                                Text(stringResource(recommendation.second), style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+            }
+            item(key = "keyboard") { SettingsGroup(stringResource(R.string.settings_group_keyboard), keyboard, onNavigate) }
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(title: String?, rows: List<SettingsRow>, onNavigate: (SettingsRoute) -> Unit) {
+    Column {
+        if (title != null) AppleSectionHeader(title)
+        AppleGroupedSurface {
+            rows.forEachIndexed { index, item ->
+                if (index > 0) AppleHairlineDivider(startIndent = 58.dp)
+                MinimalNavRow(item.icon, MaterialTheme.colorScheme.primary, stringResource(item.route.label()), item.summary) {
+                    onNavigate(item.route)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickSearchSettingsScreen(
+    prefs: TapwingPrefs,
+    installedApp: SearchApp?,
+    onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
+) {
+    val appSelected = installedApp != null && installedApp.packageName == prefs.quickSearchAppPackage
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        item {
+            Column {
+                AppleSectionHeader(stringResource(R.string.search_engine))
+                AppleGroupedSurface {
+                    QuickSearchEngine.entries.forEachIndexed { index, engine ->
+                        if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalCheckRow(engine.label, prefs.quickSearchEngine == engine) {
+                            onUpdatePrefs {
+                                if (it.quickSearchEngine == engine) it
+                                else it.copy(quickSearchEngine = engine, quickSearchAppPackage = "")
                             }
                         }
                     }
                 }
             }
         }
-
-        // Compact 1-line live test input
-        if (q.isEmpty()) {
-            item {
+        item {
+            Column {
+                AppleSectionHeader(stringResource(R.string.search_open_in))
                 AppleGroupedSurface {
-                    AppleInlineField(
-                        value = testInputText,
-                        onValueChange = onTestInputChange,
-                        placeholder = stringResource(R.string.settings_test_placeholder),
-                        leadingIcon = Icons.Rounded.Keyboard,
-                        containerAlpha = 0f,
-                        fieldHeight = 46.dp
-                    )
+                    MinimalCheckRow(stringResource(R.string.search_browser), !appSelected) {
+                        onUpdatePrefs { it.copy(quickSearchAppPackage = "") }
+                    }
+                    if (installedApp != null) {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalCheckRow(stringResource(R.string.search_app, installedApp.label), appSelected) {
+                            onUpdatePrefs { it.copy(quickSearchAppPackage = installedApp.packageName) }
+                        }
+                    }
                 }
+                AppleSectionFooter(stringResource(
+                    if (installedApp == null) R.string.search_app_unavailable else R.string.search_browser_fallback
+                ))
             }
-        }
-
-        val visibleRows = if (q.isEmpty()) primary else rows.filter {
-            it.title.lowercase().contains(q) || it.keywords.contains(q)
-        }
-        if (visibleRows.isNotEmpty()) {
-            item { HomeSettingsRows(visibleRows, onNavigate) }
-        } else {
-            item {
-                AppleSectionFooter(if (de) "Keine passenden Einstellungen gefunden." else "No matching settings.")
-            }
-        }
-
-        if (q.isEmpty()) {
-            item {
-                AppleGroupedSurface {
-                    SettingsDisclosure(if (de) "Weitere Optionen" else "More options", more) { more = !more }
-                }
-            }
-            if (more) item { HomeSettingsRows(extra, onNavigate) }
         }
     }
 }
 
 @Composable
-private fun HomeSettingsRows(rows: List<HomeRowItem>, onNavigate: (SettingsRoute) -> Unit) {
-    AppleGroupedSurface {
-        rows.forEachIndexed { index, item ->
-            if (index > 0) AppleHairlineDivider(startIndent = 58.dp)
-            when (item) {
-                is HomeToggleItem -> MinimalToggleRow(item.title, item.checked, item.icon, item.badgeColor, item.onCheckedChange)
-                is HomeNavItem -> MinimalNavRow(item.icon, item.badgeColor, item.title, item.status) { onNavigate(item.route) }
+private fun AutofillSettingsScreen(
+    prefs: TapwingPrefs,
+    hasAutofillProvider: Boolean,
+    onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
+) {
+    val context = LocalContext.current
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        item {
+            Column {
+                AppleSectionHeader(stringResource(
+                    if (hasAutofillProvider) R.string.autofill_active else R.string.autofill_inactive
+                ))
+                AppleGroupedSurface {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        MinimalToggleRow(stringResource(R.string.autofill_inline_toggle), prefs.inlineAutofillEnabled) { enabled ->
+                            onUpdatePrefs { it.copy(inlineAutofillEnabled = enabled) }
+                        }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                    }
+                    MinimalActionRow(stringResource(R.string.autofill_android_settings), MaterialTheme.colorScheme.primary) {
+                        val settingsIntents = listOf(
+                            Intent("android.settings.CREDENTIAL_PROVIDER"),
+                            Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE, Uri.parse("package:${context.packageName}")),
+                            Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+                            Intent(Settings.ACTION_SETTINGS)
+                        )
+                        settingsIntents.any { runCatching { context.startActivity(it) }.isSuccess }
+                    }
+                }
+                AppleSectionFooter(stringResource(
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) R.string.autofill_help else R.string.autofill_requires_android_11
+                ))
             }
         }
+        item {
+            AppleGroupedSurface {
+                MinimalActionRow(stringResource(R.string.autofill_bitwarden_help), MaterialTheme.colorScheme.primary) {
+                    context.openSettingsLink("https://bitwarden.com/help/auto-fill-android/")
+                }
+            }
+        }
+    }
+}
+
+private fun Context.openSettingsLink(url: String) {
+    if (runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.isFailure) {
+        Toast.makeText(this, R.string.settings_link_unavailable, Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -2109,7 +2069,7 @@ private fun CorrectionsScreen(
                         onUpdatePrefs { it.copy(spellGrammarChips = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow("Proactive Undo", prefs.proactiveUndo) { v ->
+                    MinimalToggleRow(if (de) "Rückgängig anbieten" else "Show undo shortcut", prefs.proactiveUndo) { v ->
                         onUpdatePrefs { it.copy(proactiveUndo = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
@@ -2121,22 +2081,6 @@ private fun CorrectionsScreen(
                         onUpdatePrefs { it.copy(doubleSpacePeriod = v) }
                     }
                 }
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Passwörter und Codes" else "Passwords and codes")
-                AppleGroupedSurface {
-                    MinimalToggleRow(
-                        if (de) "Autofill-Vorschläge anzeigen" else "Show autofill suggestions",
-                        prefs.inlineAutofillEnabled
-                    ) { enabled -> onUpdatePrefs { it.copy(inlineAutofillEnabled = enabled) } }
-                }
-                AppleSectionFooter(
-                    if (de) "Wähle Bitwarden in den Android-Einstellungen als Autofill-Dienst. Stelle in Bitwarden die Anzeige auf „In der Tastatur“. Tapwing zeigt Vorschläge des Dienstes und erkennt kopierte Bestätigungscodes."
-                    else "Choose Bitwarden as your Android autofill service and set its display to Inline. Tapwing shows suggestions from that service and recognises copied verification codes."
-                )
             }
         }
 
@@ -2427,9 +2371,11 @@ private fun VoiceSettingsScreen(
                     AppleGroupedSurface {
                         MinimalValueRow(
                             if (de) "Diktat-Anbieter" else "Dictation provider",
-                            if (useLiveCloud) "Gemini Live (${prefs.dictationModel.ifBlank { CloudDictation.GEMINI_MODEL }})"
-                            else "${AiModelCatalog.displayName(prefs.dictationProvider, de)} (${prefs.dictationModel.ifBlank { AiModelCatalog.defaultAudioModelFor(prefs.dictationProvider) }})"
+                            if (useLiveCloud) "Gemini Live" else AiModelCatalog.displayName(prefs.dictationProvider, de)
                         )
+                        val model = if (useLiveCloud) GeminiLiveDictation.MODEL
+                            else prefs.dictationModel.ifBlank { AiModelCatalog.defaultAudioModelFor(activeDictProviderType) }
+                        AiModelReference(activeDictProviderType, model)
                         AppleHairlineDivider(startIndent = 16.dp)
                         MinimalActionRow(
                             if (de) "API-Schlüssel-Tresor öffnen" else "Open API Keys Vault",
@@ -3153,12 +3099,6 @@ private fun TaskRoutingSection(
                 }
 
                 if (primaryPresets.isNotEmpty() || primaryProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
-                    Text(
-                        text = if (de) "Modell wählen (Free-Account & Empfohlen) oder frei eintippen"
-                        else "Pick a free-tier / recommended model or type any ID",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                     if (primaryPresets.isNotEmpty()) {
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -3182,13 +3122,15 @@ private fun TaskRoutingSection(
                             )
                         }
                     }
+                    AiModelReference(provider = primaryProvider, model = primaryModel)
                     AppleInlineField(
                         value = primaryModel,
                         onValueChange = onPrimaryModelChange,
-                        placeholder = if (de) "Modell-ID (z. B. gemini-3.8-flash)" else "Model ID (e.g. gemini-3.8-flash)"
+                        placeholder = if (de) "Modell-ID eingeben" else "Enter model ID"
                     )
                 }
 
+                if (primaryProvider == AiProviderType.GEMINI_NANO) AiModelReference(primaryProvider)
                 AppleHairlineDivider(startIndent = 0.dp)
                 Row(
                     modifier = Modifier
@@ -3214,44 +3156,72 @@ private fun TaskRoutingSection(
                     )
                 }
 
-                if (showFallback) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        fallbackOptions.forEach { prov ->
-                            FilterChip(
-                                selected = fallbackProvider == prov,
-                                onClick = { onSelectFallbackProvider(prov) },
-                                label = { Text(AiModelCatalog.displayName(prov, de), fontSize = 12.sp) }
-                            )
-                        }
-                    }
-                    if (fallbackPresets.isNotEmpty()) {
+                AnimatedVisibility(visible = showFallback) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            fallbackPresets.forEach { spec ->
+                            fallbackOptions.forEach { prov ->
                                 FilterChip(
-                                    selected = fallbackModel.trim() == spec.id,
-                                    onClick = { onFallbackModelChange(spec.id) },
-                                    label = { Text(spec.label, fontSize = 12.sp) }
+                                    selected = fallbackProvider == prov,
+                                    onClick = { onSelectFallbackProvider(prov) },
+                                    label = { Text(AiModelCatalog.displayName(prov, de), fontSize = 12.sp) }
                                 )
                             }
                         }
-                    }
-                    if (fallbackProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
-                        AppleInlineField(
-                            value = fallbackModel,
-                            onValueChange = onFallbackModelChange,
-                            placeholder = if (de) "Fallback-Modell-ID (optional)" else "Fallback model ID (optional)"
-                        )
+                        if (fallbackPresets.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                fallbackPresets.forEach { spec ->
+                                    FilterChip(
+                                        selected = fallbackModel.trim() == spec.id,
+                                        onClick = { onFallbackModelChange(spec.id) },
+                                        label = { Text(spec.label, fontSize = 12.sp) }
+                                    )
+                                }
+                            }
+                        }
+                        if (fallbackProvider == AiProviderType.GEMINI_NANO) AiModelReference(fallbackProvider)
+                        if (fallbackProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
+                            AiModelReference(provider = fallbackProvider, model = fallbackModel)
+                            AppleInlineField(
+                                value = fallbackModel,
+                                onValueChange = onFallbackModelChange,
+                                placeholder = if (de) "Fallback-Modell-ID (optional)" else "Fallback model ID (optional)"
+                            )
+                        }
                     }
                 }
             }
         }
         AppleSectionFooter(footer)
+    }
+}
+
+@Composable
+private fun AiModelReference(provider: AiProviderType, model: String = "") {
+    val url = AiModelCatalog.modelsUrl(provider) ?: return
+    val context = LocalContext.current
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { context.openSettingsLink(url) }, modifier = Modifier.weight(1f, fill = false)) {
+            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(stringResource(R.string.ai_model_catalog))
+        }
+        if (model.isNotBlank()) {
+            IconButton(onClick = {
+                context.getSystemService(ClipboardManager::class.java)
+                    ?.setPrimaryClip(ClipData.newPlainText("Model ID", model.trim()))
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    Toast.makeText(context, R.string.ai_model_copied, Toast.LENGTH_SHORT).show()
+                }
+            }) {
+                Icon(Icons.Rounded.ContentCopy, contentDescription = stringResource(R.string.ai_model_copy))
+            }
+        }
     }
 }
 
@@ -3327,6 +3297,7 @@ private fun ApiKeysVaultScreen(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            AiModelReference(provider)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -3394,8 +3365,12 @@ private fun ApiKeysVaultScreen(
                                         }
                                         IconButton(
                                             onClick = {
-                                                context.getSystemService(ClipboardManager::class.java)
-                                                    ?.setPrimaryClip(ClipData.newPlainText("Tapwing API Key", savedKey))
+                                                val clip = ClipData.newPlainText("Tapwing API Key", savedKey).apply {
+                                                    description.extras = PersistableBundle().apply {
+                                                        putBoolean(SENSITIVE_CLIP_EXTRA, true)
+                                                    }
+                                                }
+                                                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
                                                 globalNotice = if (de) {
                                                     "${AiModelCatalog.displayName(provider, true)}-Schlüssel kopiert"
                                                 } else {
@@ -4021,7 +3996,7 @@ private fun MinimalNavRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
+            .heightIn(min = 52.dp)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -4032,7 +4007,7 @@ private fun MinimalNavRow(
             text = title,
             fontSize = 15.sp,
             fontWeight = FontWeight.Normal,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
@@ -4041,7 +4016,9 @@ private fun MinimalNavRow(
                 text = value,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
-                maxLines = 1
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 100.dp)
             )
         }
         Icon(
@@ -4064,8 +4041,8 @@ private fun MinimalToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .clickable { onCheckedChange(!checked) }
+            .heightIn(min = 52.dp)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(horizontal = if (icon != null) 14.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -4077,18 +4054,19 @@ private fun MinimalToggleRow(
             text = title,
             fontSize = 15.sp,
             fontWeight = FontWeight.Normal,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        AppleSwitch(checked = checked, onCheckedChange = onCheckedChange)
+        AppleSwitch(checked = checked)
     }
 }
 
 @Composable
 private fun SettingsDisclosure(title: String, expanded: Boolean, onToggle: () -> Unit) {
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, tween(240), label = "disclosureChevron")
     Row(
-        modifier = Modifier.fillMaxWidth().height(48.dp)
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
             .clickable(
                 onClickLabel = if (expanded) stringResource(R.string.settings_collapse) else stringResource(R.string.settings_expand),
                 role = Role.Button,
@@ -4099,8 +4077,9 @@ private fun SettingsDisclosure(title: String, expanded: Boolean, onToggle: () ->
     ) {
         Text(title, modifier = Modifier.weight(1f), fontSize = 15.sp)
         Icon(
-            if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+            Icons.Rounded.ExpandMore,
             contentDescription = null,
+            modifier = Modifier.graphicsLayer { rotationZ = rotation },
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -4135,7 +4114,7 @@ private fun MinimalCheckRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp)
-            .clickable(onClick = onClick)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
