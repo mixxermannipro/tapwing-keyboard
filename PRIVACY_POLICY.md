@@ -17,7 +17,8 @@ Tapwing Keyboard ("Tapwing") is built around local, on-device processing. Tapwin
 The following data is stored exclusively in app-private, device-protected local storage on your Android device:
 - **Keyboard Preferences**: layout, scale, custom quick-action bar configuration, clipboard retention limits (`DataStore Preferences`).
 - **Custom Dictionary & Adaptive Learning**: words, frequency weights, text shortcuts, and bigrams you create or import (for example from a `.zip`, `.txt`, `.tsv`, `.csv`, or `.json` file), plus rejected autocorrections (`tapwing_dictionary_state.json`). You can export or delete this data at any time in *Settings > Dictionary*.
-- **Clipboard History**: copied text snippets up to your configured item limit and retention window (`1 hour` to `30 days` or `Never`). Can be disabled or cleared anytime.
+- **Clipboard history** keeps copied text and locally cached images up to your configured item limit and retention window (`1 hour` to `30 days` or `Never`). Tapwing checks for duplicate content on the device and skips clips marked sensitive by Android. You can disable or clear the history at any time.
+- **Quick search** hands the query to your chosen browser or compatible search app when you open it. Your selected search engine receives the query when that app loads the results.
 - **Optional AI API Key**: if you configure a custom AI key, it is encrypted locally using hardware-backed `AndroidKeyStore` (`AES/GCM/NoPadding`).
 
 ### 3. Optional Device & Network Features (User-Initiated Only)
@@ -50,7 +51,8 @@ For privacy questions regarding Tapwing Keyboard (`com.tapwing.keyboard`), pleas
 Alle folgenden Daten verbleiben ausschließlich lokal im privaten App-Speicher auf deinem Smartphone:
 - **Einstellungen**: Tastaturgröße, Design, belegte Schnellleiste, Aufbewahrungsdauer.
 - **Wörterbuch & adaptives Lernen**: selbst angelegte oder importierte Wörterbücher (`.zip`, `.txt`, `.tsv`/`.csv`, `.json`), Textkürzel und lokal gelernte Wortpaare. Diese Daten lassen sich in den Einstellungen jederzeit exportieren oder vollständig löschen.
-- **Zwischenablage**: lokal gespeicherte Text-Clips gemäß deinem eingestellten Limit und Löschzeitraum.
+- Kopierter Text und zwischengespeicherte Bilder bleiben in der **Zwischenablage** gemäß deinem Limit und Löschzeitraum auf dem Gerät. Tapwing führt gleiche Inhalte lokal zusammen und überspringt Einträge, die Android als vertraulich markiert. Du kannst den Verlauf jederzeit leeren oder ausschalten.
+- Wenn du die **Schnellsuche** öffnest, übergibt Tapwing den Suchbegriff an deinen Browser oder die gewählte Such-App. Deine Suchmaschine erhält den Begriff, sobald die App die Ergebnisse lädt.
 - **Optionaler API-Schlüssel**: wird ausschließlich auf Wunsch mit dem `AndroidKeyStore` (`AES/GCM/NoPadding`) verschlüsselt auf dem Gerät gespeichert.
 
 ### 3. Optionale System- und Netzwerkfunktionen
