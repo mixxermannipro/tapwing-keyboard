@@ -233,7 +233,10 @@ class TapwingInputMethodService :
                     return@launch
                 }
                 val saved = saveClipboardImage(image, getString(R.string.clipboard_copied_image)) ?: return@launch
-                if (key == lastSyncedClipKey && currentPrefs.screenshotSuggestionChip) {
+                val ageSec = (System.currentTimeMillis() - clip.description.timestamp) / 1000L
+                if (key == lastSyncedClipKey && currentPrefs.screenshotSuggestionChip &&
+                    ageSec in 0..SCREENSHOT_LIFETIME_SEC
+                ) {
                     val file = File(requireNotNull(saved.imagePath))
                     recentScreenshot = RecentScreenshot(
                         uri = ScreenshotMonitor.fileProviderUri(this@TapwingInputMethodService, file),

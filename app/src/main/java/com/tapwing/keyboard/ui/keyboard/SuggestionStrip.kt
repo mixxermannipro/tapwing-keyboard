@@ -145,8 +145,8 @@ fun SuggestionStrip(
     val showNextWords = suggestions.any { it.isNextWord }
     val undoAvailable = proactiveUndo != null && prefs.proactiveUndo
     val showUndo = !showVoiceError && !showAutofill && undoAvailable && !showNextWords
-    val showClipboard = !showVoiceError && !showAutofill && !showUndo && !clipboardPreview.isNullOrBlank()
-    val showShot = !showClipboard && !showVoiceError && !showUndo && !showAutofill &&
+    val showClipboard = !showVoiceError && !showAutofill && !undoAvailable && !clipboardPreview.isNullOrBlank()
+    val showShot = !showClipboard && !showVoiceError && !undoAvailable && !showAutofill &&
         recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
     val showSuggestions = !showVoiceError && !showUndo && !showShot && !showAutofill && suggestions.isNotEmpty() &&
         (isTyping || showNextWords || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
