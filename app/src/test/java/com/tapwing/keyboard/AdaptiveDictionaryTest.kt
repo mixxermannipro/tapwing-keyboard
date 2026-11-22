@@ -11,6 +11,21 @@ import org.junit.Test
 class AdaptiveDictionaryTest {
 
     @Test
+    fun nextWordsPreferExactLocalContextAndMergeCaseVariants() {
+        val store = AdaptiveDictionaryStore(null)
+        repeat(40) {
+            store.recordTypedWord("home", "am", true, false, "they", locale = "en", appPackage = "test.chat")
+        }
+        store.recordTypedWord("ready", "am", true, false, "I", locale = "en", appPackage = "test.chat")
+        store.recordTypedWord("Ready", "am", true, false, "I", locale = "en", appPackage = "test.chat")
+        val predictions = store.predictNextWords("am", previousTwoWord = "I", appPackage = "test.chat")
+        assertEquals("ready", predictions.first().lowercase())
+        assertEquals(1, predictions.count { it.equals("ready", ignoreCase = true) })
+        store.recordTypedWord("am", "I", true, false, locale = "en")
+        assertEquals(listOf("am"), store.predictNextWords("I"))
+    }
+
+    @Test
     fun importedWordsProtectFromAutocorrectAndPrioritizeSuggestions() {
         val store = AdaptiveDictionaryStore(storageFile = null)
         store.importText("standart\nTapwingFlow,150\nbrb => Bin gleich zurück")

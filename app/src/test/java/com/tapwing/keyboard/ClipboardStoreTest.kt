@@ -9,6 +9,44 @@ import java.io.File
 class ClipboardStoreTest {
 
     @Test
+    fun copyingTheSameTextKeepsItsIdAndExactWhitespace() {
+        var now = 50_000L
+        val store = ClipboardStore(null) { now }
+        store.addClip("  First line\nSecond line  ")
+        val original = store.items.value.single()
+        now++
+        store.addClip(original.text)
+
+        assertEquals("  First line\nSecond line  ", original.text)
+        assertEquals(original.copy(timestampMs = now), store.items.value.single())
+    }
+
+    @Test
+    fun sameImageAtAnotherPathKeepsPinAndOcrAcrossRestart() {
+        val folder = kotlin.io.path.createTempDirectory("tapwing-clips").toFile()
+        try {
+            val history = File(folder, "history.json")
+            val screenshot = File(folder, "screenshot.png").apply { writeText("same image bytes") }
+            val copy = File(folder, "copied.png").apply { writeText("same image bytes") }
+            val different = File(folder, "other.png").apply { writeText("different bytes") }
+            val store = ClipboardStore(history)
+            val original = requireNotNull(store.addImageClip(screenshot.path, ocrText = "Recognized"))
+            store.togglePin(original.id, ClipboardRetention.NEVER, 100)
+
+            val reloaded = ClipboardStore(history)
+            assertEquals(original.id, reloaded.addImageClip(copy.path)?.id)
+            reloaded.addImageClip(different.path)
+            assertEquals(2, reloaded.items.value.size)
+            assertEquals("Recognized", reloaded.items.value.first().ocrText)
+            assertTrue(reloaded.items.value.first().pinned)
+            assertTrue(screenshot.isFile)
+            assertTrue(!copy.exists())
+        } finally {
+            folder.deleteRecursively()
+        }
+    }
+
+    @Test
     fun storesAllCopiedTextIncludingApiKeysOtpUrlsAndMultiline() {
         val tempFile = File.createTempFile("tapwing_clip_test", ".json")
         tempFile.deleteOnExit()

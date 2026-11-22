@@ -9,6 +9,24 @@ import org.junit.Test
 class SuggestionEngineTest {
 
     @Test
+    fun offlineNextWordsUseThePhraseAndSecondaryLanguage() {
+        assertEquals("verstanden", SuggestionEngine.suggestionsFor("Ich habe ", "de").first().text)
+        assertEquals("vereinbart", SuggestionEngine.suggestionsFor("Wir haben ", "de").first().text)
+        assertEquals("ready", SuggestionEngine.suggestionsFor("I am ", "de", secondaryLocales = listOf("en")).first().text)
+        assertTrue(SuggestionEngine.suggestionsFor("Quarzstein ", "de").isEmpty())
+        assertEquals("heute" to "", SuggestionEngine.extractPreviousTwoWords("Hallo.\nHeute ".lowercase()))
+    }
+
+    @Test
+    fun addressSuggestionsAreExclusiveAndDoNotAddSpaces() {
+        val suggestions = SuggestionEngine.suggestionsFor("test@gmx.", "de", isEmailField = true)
+        assertEquals("gmx.de", suggestions.single().text)
+        assertEquals(4, suggestions.single().replaceCharCount)
+        assertTrue(!suggestions.single().appendSpace)
+        assertTrue(SuggestionEngine.suggestionsFor("hallo", "de", isEmailField = true).isEmpty())
+    }
+
+    @Test
     fun suggestsTypoCorrectionAndCapitalizesGermanNouns() {
         assertEquals("nicht", SuggestionEngine.autoCorrectionFor("nciht", "de"))
         assertEquals("Zeit", SuggestionEngine.autoCorrectionFor("zeit", "de"))

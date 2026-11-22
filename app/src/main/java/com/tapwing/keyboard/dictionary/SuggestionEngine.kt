@@ -12,7 +12,8 @@ data class SuggestionChip(
     val isMath: Boolean = false,
     val isOtp: Boolean = false,
     val isNextWord: Boolean = false,
-    val replaceCharCount: Int = 0
+    val replaceCharCount: Int = 0,
+    val appendSpace: Boolean = true
 )
 
 data class GrammarHint(
@@ -22,6 +23,9 @@ data class GrammarHint(
 )
 
 object SuggestionEngine {
+    private val emailDomains = listOf("gmail.com", "outlook.com", "icloud.com", "gmx.de", "web.de", "yahoo.com", "proton.me")
+    private val sentenceBoundary = Regex("""[.!?](?=\s|$)|[\r\n]""")
+    private val sentenceWord = Regex("""[\p{L}][\p{L}'’-]*""")
 
     fun suggestionsFor(
         textBeforeCursor: String,
@@ -44,6 +48,17 @@ object SuggestionEngine {
 
         // 1. Text shortcuts & Multi-line Snippets with Placeholders (e.g. "mfg", "/sig", "/termin")
         val trailingToken = extractTrailingToken(textBeforeCursor)
+        if (isEmailField) {
+            if ('@' !in trailingToken || trailingToken.count { it == '@' } != 1) return emptyList()
+            val domain = trailingToken.substringAfter('@')
+            return emailDomains.filter { it.startsWith(domain, ignoreCase = true) && !it.equals(domain, ignoreCase = true) }
+                .take(3)
+                .map { SuggestionChip(it, replaceCharCount = domain.length, appendSpace = false) }
+        }
+        if (isUrlField) {
+            if (textBeforeCursor.isBlank()) return listOf("https://", "www.").map { SuggestionChip(it, appendSpace = false) }
+            return emptyList()
+        }
         if (trailingToken.isNotEmpty() && dictionaryStore != null) {
             val snippet = dictionaryStore.lookupSnippet(trailingToken)
             if (snippet != null) {
@@ -96,24 +111,6 @@ object SuggestionEngine {
             }
         }
 
-        // Context chips for Email/URL fields when typing domain suffixes
-        if (isEmailField && trailingToken.contains('@') && !trailingToken.substringAfter('@').contains('.')) {
-            val domainPrefix = trailingToken.substringAfter('@').lowercase()
-            val domains = listOf("gmail.com", "outlook.com", "icloud.com", "gmx.de", "web.de", "yahoo.com")
-            domains.filter { it.startsWith(domainPrefix) }.take(3).forEach { dom ->
-                if (results.size < 3) {
-                    results += SuggestionChip(
-                        text = dom,
-                        replaceCharCount = domainPrefix.length
-                    )
-                }
-            }
-            if (results.isNotEmpty()) return results.take(3)
-        } else if (isUrlField && trailingToken.isEmpty() && textBeforeCursor.isBlank()) {
-            results += SuggestionChip(text = "https://", replaceCharCount = 0)
-            results += SuggestionChip(text = "www.", replaceCharCount = 0)
-        }
-
         val currentWord = extractTrailingWord(textBeforeCursor)
         val atSentenceStart = isAtSentenceStart(textBeforeCursor, currentWord)
         val (prevWord, prevTwoWord) = extractPreviousTwoWords(
@@ -121,35 +118,31 @@ object SuggestionEngine {
         )
 
         if (currentWord.isBlank()) {
-            // Context-aware Trigram + Bigram + Per-App next-word predictions from adaptive learning
-            if (isEmailField || isUrlField) return results.take(3)
-            val nextWord = textBeforeCursor.lastOrNull()?.isWhitespace() == true && prevWord.isNotEmpty()
-            if (nextWord && !atSentenceStart && dictionaryStore != null) {
-                dictionaryStore.predictNextWords(
-                    previousWord = prevWord,
-                    limit = 3,
-                    previousTwoWord = prevTwoWord.takeIf { it.isNotEmpty() },
-                    appPackage = appPackage
-                ).forEach { predicted ->
-                    val safeCased = enforceMidSentenceCasingRule(predicted, locale, atSentenceStart, dictionaryStore)
-                    if (results.size < 3 && results.none { it.text == safeCased }) {
-                        results += SuggestionChip(text = safeCased, isNextWord = true)
-                    }
+            val nextWord = textBeforeCursor.lastOrNull()?.isWhitespace() == true && prevWord.isNotEmpty() && !atSentenceStart
+            val candidates = when {
+                nextWord -> {
+                    val learned = dictionaryStore?.predictNextWords(
+                        previousWord = prevWord,
+                        limit = 6,
+                        previousTwoWord = prevTwoWord,
+                        appPackage = appPackage
+                    ).orEmpty()
+                    val contextual = (listOf(locale) + secondaryLocales).firstNotNullOfOrNull { language ->
+                        LanguageVocabularies.commonNextWords(language, prevWord, prevTwoWord).takeIf { it.isNotEmpty() }
+                    }.orEmpty()
+                    learned + contextual
                 }
+                atSentenceStart -> LanguageVocabularies.defaultEmptyChipsFor(locale)
+                else -> emptyList()
             }
-            val contextual = if (nextWord && !atSentenceStart) {
-                LanguageVocabularies.commonNextWords(locale, prevWord)
-            } else emptyList()
-            val general = LanguageVocabularies.defaultEmptyChipsFor(locale)
-            for (word in contextual + general) {
+            for (word in candidates) {
                 if (results.size >= 3) break
-                if (!atSentenceStart && word.equals(prevWord, ignoreCase = true)) continue
                 val cased = enforceMidSentenceCasingRule(word, locale, atSentenceStart, dictionaryStore)
                 if (results.none { it.text.equals(cased, ignoreCase = true) }) {
                     results += SuggestionChip(text = cased, isNextWord = nextWord)
                 }
             }
-            return results.take(3)
+            return results
         }
 
         val lower = currentWord.lowercase()
@@ -479,13 +472,13 @@ object SuggestionEngine {
     fun isAtSentenceStart(textBeforeCursor: String, currentWord: String = extractTrailingWord(textBeforeCursor)): Boolean {
         val prefix = if (currentWord.isEmpty()) textBeforeCursor else textBeforeCursor.dropLast(currentWord.length)
         if (prefix.isBlank()) return true
-        if (prefix.endsWith("\n")) return true
-        return Regex("""[.!?]\s+$""").containsMatchIn(prefix)
+        val boundary = sentenceBoundary.findAll(prefix).lastOrNull() ?: return false
+        return prefix.substring(boundary.range.last + 1).isBlank()
     }
 
     fun extractTrailingWord(textBeforeCursor: String): String {
         if (textBeforeCursor.isEmpty()) return ""
-        val idx = textBeforeCursor.indexOfLast { !it.isLetter() && it != '\'' && it != '-' }
+        val idx = textBeforeCursor.indexOfLast { !it.isLetter() && it != '\'' && it != '’' && it != '-' }
         return if (idx == -1) textBeforeCursor else textBeforeCursor.substring(idx + 1)
     }
 
@@ -502,12 +495,9 @@ object SuggestionEngine {
     }
 
     fun extractPreviousTwoWords(textBeforeCurrentWord: String): Pair<String, String> {
-        val w1 = extractPreviousWord(textBeforeCurrentWord)
-        if (w1.isEmpty()) return "" to ""
-        val trimmed = textBeforeCurrentWord.trimEnd()
-        val beforeW1 = trimmed.dropLast(w1.length)
-        val w2 = extractPreviousWord(beforeW1)
-        return w1 to w2
+        val sentenceStart = sentenceBoundary.findAll(textBeforeCurrentWord).lastOrNull()?.range?.last?.plus(1) ?: 0
+        val words = sentenceWord.findAll(textBeforeCurrentWord, sentenceStart).map { it.value }.toList()
+        return words.lastOrNull().orEmpty() to words.getOrNull(words.lastIndex - 1).orEmpty()
     }
 
     private fun enforceMidSentenceCasingRule(
@@ -572,11 +562,30 @@ object SuggestionEngine {
         }
     }
 
-    private fun keyGridCoords(locale: String): Map<Char, Pair<Float, Float>> {
-        val baseLang = KeyboardLocales.baseLang(locale)
-        val top = if (baseLang == "de") "qwertzuiop" else "qwertyuiop"
-        val mid = "asdfghjkl"
-        val bot = if (baseLang == "de") "yxcvbnm" else "zxcvbnm"
+    private val coordsByLanguage = java.util.concurrent.ConcurrentHashMap<String, Map<Char, Pair<Float, Float>>>()
+
+    private fun keyGridCoords(locale: String): Map<Char, Pair<Float, Float>> =
+        coordsByLanguage.getOrPut(KeyboardLocales.baseLang(locale)) { buildKeyGrid(KeyboardLocales.baseLang(locale)) }
+
+    private fun buildKeyGrid(baseLang: String): Map<Char, Pair<Float, Float>> {
+        val top = when (baseLang) {
+            "de" -> "qwertzuiop"
+            "fr" -> "azertyuiop"
+            "tr" -> "qwertyuıopğü"
+            else -> "qwertyuiop"
+        }
+        val mid = when (baseLang) {
+            "fr" -> "qsdfghjklm"
+            "es" -> "asdfghjklñ"
+            "tr" -> "asdfghjklşi"
+            else -> "asdfghjkl"
+        }
+        val bot = when (baseLang) {
+            "de" -> "yxcvbnm"
+            "fr" -> "wxcvbn"
+            "tr" -> "zxcvbnmöç"
+            else -> "zxcvbnm"
+        }
         val coords = HashMap<Char, Pair<Float, Float>>(32)
         top.forEachIndexed { idx, ch -> coords[ch] = idx.toFloat() to 0f }
         mid.forEachIndexed { idx, ch -> coords[ch] = (idx + 0.5f) to 1f }

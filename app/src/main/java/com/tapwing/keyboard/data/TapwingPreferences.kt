@@ -126,6 +126,8 @@ data class TapwingPrefs(
     val showClipboardIcon: Boolean = true,
     val showScanTextIcon: Boolean = true,
     val quickBarActions: List<QuickBarAction> = QuickBarAction.DEFAULT_ACTIONS,
+    val quickSearchEngine: QuickSearchEngine = QuickSearchEngine.GOOGLE,
+    val quickSearchAppPackage: String = "",
 
     val voiceMode: VoiceDictationMode = VoiceDictationMode.NATURAL_CLEANUP,
     val voiceEngine: VoiceEngineMode = VoiceEngineMode.AUTO_LOCAL_FIRST,
@@ -219,6 +221,8 @@ class TapwingPreferencesRepository(context: Context) {
         val SHOW_WRITING_TOOLS_ICON = booleanPreferencesKey("show_writing_tools_icon")
         val SHOW_CLIPBOARD_ICON = booleanPreferencesKey("show_clipboard_icon")
         val SHOW_SCAN_TEXT_ICON = booleanPreferencesKey("show_scan_text_icon")
+        val QUICK_SEARCH_ENGINE = stringPreferencesKey("quick_search_engine")
+        val QUICK_SEARCH_APP = stringPreferencesKey("quick_search_app")
         val QUICK_BAR_ACTIONS = stringPreferencesKey("quick_bar_actions")
 
         val VOICE_MODE = stringPreferencesKey("voice_mode")
@@ -336,6 +340,8 @@ class TapwingPreferencesRepository(context: Context) {
             showClipboardIcon = QuickBarAction.CLIPBOARD in resolvedQuickBar,
             showScanTextIcon = QuickBarAction.SCAN_TEXT in resolvedQuickBar,
             quickBarActions = resolvedQuickBar,
+            quickSearchEngine = parseEnum(p[Keys.QUICK_SEARCH_ENGINE], QuickSearchEngine.GOOGLE),
+            quickSearchAppPackage = p[Keys.QUICK_SEARCH_APP].orEmpty(),
 
             voiceMode = parseEnum(p[Keys.VOICE_MODE], VoiceDictationMode.NATURAL_CLEANUP),
             voiceEngine = parseEnum(p[Keys.VOICE_ENGINE], VoiceEngineMode.AUTO_LOCAL_FIRST),
@@ -427,6 +433,8 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.SNIPPET_USER_EMAIL] = next.snippetUserEmail
         mutable[Keys.INLINE_MATH_ENABLED] = next.inlineMathEnabled
         mutable[Keys.SWIPE_BACKSPACE_WORD] = next.swipeBackspaceDeleteWord
+        mutable[Keys.QUICK_SEARCH_ENGINE] = next.quickSearchEngine.name
+        mutable[Keys.QUICK_SEARCH_APP] = next.quickSearchEngine.selectedApp(next.quickSearchAppPackage)?.packageName.orEmpty()
         mutable[Keys.QUICK_BAR_ACTIONS] = QuickBarAction.serialize(next.quickBarActions)
         mutable[Keys.SHOW_WRITING_TOOLS_ICON] = QuickBarAction.WRITING_TOOLS in next.quickBarActions
         mutable[Keys.SHOW_CLIPBOARD_ICON] = QuickBarAction.CLIPBOARD in next.quickBarActions

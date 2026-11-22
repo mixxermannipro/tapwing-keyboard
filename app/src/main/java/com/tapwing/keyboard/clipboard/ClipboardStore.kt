@@ -9,7 +9,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.UUID
+
+internal const val SENSITIVE_CLIP_EXTRA = "android.content.extra.IS_SENSITIVE"
 
 data class ClipboardClip(
     val id: String,
@@ -18,7 +23,8 @@ data class ClipboardClip(
     val pinned: Boolean = false,
     val imagePath: String? = null,
     val mimeType: String? = null,
-    val ocrText: String? = null
+    val ocrText: String? = null,
+    val imageDigest: String? = null
 ) {
     val isImage: Boolean get() = !imagePath.isNullOrBlank()
 }
@@ -43,27 +49,15 @@ class ClipboardStore(
         retention: ClipboardRetention = ClipboardRetention.DAYS_7,
         maxUnpinnedItems: Int = 100
     ) {
-        val text = rawText.trim()
-        if (text.isEmpty()) return
-
+        if (rawText.isBlank()) return
         val now = clockMs()
-        val existingPinned = _items.value.firstOrNull { !it.isImage && it.text == text && it.pinned }
-        if (existingPinned != null) {
-            val updated = _items.value.map {
-                if (it.id == existingPinned.id) it.copy(timestampMs = now) else it
-            }
-            applyAndSave(updated, retention, maxUnpinnedItems, now)
-            return
-        }
-
-        val withoutDup = _items.value.filterNot { !it.isImage && it.text == text }
-        val newClip = ClipboardClip(
+        val existing = _items.value.firstOrNull { !it.isImage && it.text == rawText }
+        val clip = existing?.copy(timestampMs = now) ?: ClipboardClip(
             id = UUID.randomUUID().toString(),
-            text = text,
-            timestampMs = now,
-            pinned = false
+            text = rawText,
+            timestampMs = now
         )
-        applyAndSave(listOf(newClip) + withoutDup, retention, maxUnpinnedItems, now)
+        applyAndSave(listOf(clip) + _items.value.filterNot { it.id == clip.id }, retention, maxUnpinnedItems, now)
     }
 
     fun addImageClip(
@@ -72,24 +66,30 @@ class ClipboardStore(
         displayLabel: String = "Screenshot",
         ocrText: String? = null,
         retention: ClipboardRetention = ClipboardRetention.DAYS_7,
-        maxUnpinnedItems: Int = 100
+        maxUnpinnedItems: Int = 100,
+        imageDigest: String? = null
     ): ClipboardClip? {
         if (imagePath.isBlank()) return null
         val now = clockMs()
-        val existing = _items.value.firstOrNull { it.imagePath == imagePath }
-        if (existing != null) return existing
-
-        val newClip = ClipboardClip(
+        val digest = imageDigest ?: fingerprint(File(imagePath))
+        val existing = _items.value.firstOrNull {
+            it.imagePath == imagePath || (digest != null && it.imageDigest == digest)
+        }
+        val recognized = ocrText?.trim()?.takeIf { it.isNotEmpty() }
+        val clip = existing?.copy(timestampMs = now, ocrText = existing.ocrText ?: recognized) ?: ClipboardClip(
             id = UUID.randomUUID().toString(),
             text = displayLabel,
             timestampMs = now,
-            pinned = false,
             imagePath = imagePath,
             mimeType = mimeType,
-            ocrText = ocrText?.trim()?.takeIf { it.isNotEmpty() }
+            ocrText = recognized,
+            imageDigest = digest
         )
-        applyAndSave(listOf(newClip) + _items.value, retention, maxUnpinnedItems, now)
-        return newClip
+        val saved = applyAndSave(listOf(clip) + _items.value.filterNot { it.id == clip.id },
+            retention, maxUnpinnedItems, now)
+        if (!saved) return null
+        if (clip.imagePath != imagePath) File(imagePath).delete()
+        return clip
     }
 
     fun updateClipOcrText(
@@ -118,7 +118,7 @@ class ClipboardStore(
         val now = clockMs()
         val target = _items.value.firstOrNull { it.id == id }
         val updated = _items.value.filterNot { it.id == id }
-        applyAndSave(updated, retention, maxUnpinnedItems, now)
+        if (!applyAndSave(updated, retention, maxUnpinnedItems, now)) return
         target?.imagePath?.let { path ->
             if (updated.none { it.imagePath == path }) {
                 runCatching { File(path).delete() }
@@ -130,7 +130,7 @@ class ClipboardStore(
         val now = clockMs()
         val kept = _items.value.filter { it.pinned }
         val removed = _items.value.filter { !it.pinned }
-        applyAndSave(kept, retention, maxUnpinnedItems, now)
+        if (!applyAndSave(kept, retention, maxUnpinnedItems, now)) return
         val keptPaths = kept.mapNotNull { it.imagePath }.toSet()
         removed.mapNotNull { it.imagePath }.filter { it !in keptPaths }.forEach { path ->
             runCatching { File(path).delete() }
@@ -146,7 +146,7 @@ class ClipboardStore(
         retention: ClipboardRetention,
         maxUnpinnedItems: Int,
         nowMs: Long
-    ) {
+    ): Boolean {
         val limit = maxUnpinnedItems.coerceIn(1, 200)
         val pinned = rawList
             .filter { it.pinned }
@@ -162,13 +162,14 @@ class ClipboardStore(
             .take(limit)
 
         val merged = pinned + unpinned
+        if (_items.value != merged && !saveToDisk(merged)) return false
         val keptPaths = merged.mapNotNull { it.imagePath }.toSet()
         rawList.mapNotNull { it.imagePath }.filter { it !in keptPaths }.forEach { path ->
             runCatching { File(path).delete() }
         }
 
         _items.value = merged
-        saveToDisk(merged)
+        return true
     }
 
     private fun loadFromDisk() {
@@ -177,29 +178,49 @@ class ClipboardStore(
         runCatching {
             val arr = JSONArray(file.readText())
             val list = ArrayList<ClipboardClip>(arr.length())
+            var needsMigration = false
             for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
+                val obj = arr.optJSONObject(i) ?: continue
+                val id = obj.optString("id").takeIf { it.isNotEmpty() } ?: continue
                 val imgPath = obj.optString("imagePath", "").takeIf { it.isNotBlank() }
                 if (imgPath != null && !File(imgPath).isFile) continue
-                val text = obj.getString("text")
+                val text = obj.optString("text")
+                if (imgPath != null && !obj.has("imageDigest")) needsMigration = true
                 if (text.isBlank() && imgPath == null) continue
                 list += ClipboardClip(
-                    id = obj.getString("id"),
+                    id = id,
                     text = text,
-                    timestampMs = obj.getLong("ts"),
+                    timestampMs = obj.optLong("ts"),
                     pinned = obj.optBoolean("pinned", false),
                     imagePath = imgPath,
                     mimeType = obj.optString("mimeType", "").takeIf { it.isNotBlank() },
-                    ocrText = obj.optString("ocrText", "").takeIf { it.isNotBlank() }
+                    ocrText = obj.optString("ocrText", "").takeIf { it.isNotBlank() },
+                    imageDigest = obj.optString("imageDigest", "").takeIf { it.isNotBlank() }
+                        ?: imgPath?.let { fingerprint(File(it)) }
                 )
             }
-            _items.value = list
+            val merged = list.groupBy { clip ->
+                clip.isImage to (clip.imageDigest ?: clip.imagePath ?: clip.text)
+            }.values.map { copies ->
+                val primary = copies.maxWith(compareBy<ClipboardClip> { it.pinned }.thenBy { it.timestampMs })
+                primary.copy(
+                    timestampMs = copies.maxOf { it.timestampMs },
+                    ocrText = primary.ocrText ?: copies.firstNotNullOfOrNull { it.ocrText }
+                )
+            }.sortedWith(compareByDescending<ClipboardClip> { it.pinned }.thenByDescending { it.timestampMs })
+            _items.value = merged
+            if ((merged.size != list.size || needsMigration) &&
+                saveToDisk(merged)
+            ) {
+                val retainedPaths = merged.mapNotNull { it.imagePath }.toSet()
+                list.mapNotNull { it.imagePath }.distinct().filterNot { it in retainedPaths }.forEach { File(it).delete() }
+            }
         }
     }
 
-    private fun saveToDisk(list: List<ClipboardClip>) {
-        val file = storageFile ?: return
-        runCatching {
+    private fun saveToDisk(list: List<ClipboardClip>): Boolean {
+        val file = storageFile ?: return true
+        return runCatching {
             file.parentFile?.mkdirs()
             val arr = JSONArray()
             for (clip in list) {
@@ -212,19 +233,33 @@ class ClipboardStore(
                         clip.imagePath?.let { put("imagePath", it) }
                         clip.mimeType?.let { put("mimeType", it) }
                         clip.ocrText?.let { put("ocrText", it) }
+                        clip.imageDigest?.let { put("imageDigest", it) }
                     }
                 )
             }
-            file.writeText(arr.toString())
-        }
+            val temporary = File.createTempFile("clipboard-", ".tmp", file.absoluteFile.parentFile)
+            try {
+                temporary.writeText(arr.toString())
+                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } finally {
+                temporary.delete()
+            }
+        }.isSuccess
     }
 
     companion object {
-        // Keep recognizable keys off the keyboard and out of clipboard history.
-        private val apiKeyPattern = Regex("""(?:AIza[0-9A-Za-z_-]{35}|AQ\.[0-9A-Za-z_.-]{24,}|sk-[0-9A-Za-z_-]{24,})""")
-
-        internal fun isApiKey(text: String): Boolean = apiKeyPattern.matches(text.trim())
-
+        internal fun fingerprint(file: File): String? = runCatching {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().buffered().use { stream ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val length = stream.read(buffer)
+                    if (length < 0) break
+                    digest.update(buffer, 0, length)
+                }
+            }
+            digest.digest().toHexString()
+        }.getOrNull()
 
         fun createForContext(context: Context): ClipboardStore {
             val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
@@ -234,3 +269,5 @@ class ClipboardStore(
         }
     }
 }
+
+internal fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }

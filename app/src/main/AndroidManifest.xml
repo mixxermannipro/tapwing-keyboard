@@ -21,6 +21,16 @@
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <package android:name="com.google.android.googlequicksearchbox" />
+        <package android:name="com.duckduckgo.mobile.android" />
+        <package android:name="com.microsoft.bing" />
+        <package android:name="com.brave.browser" />
+        <package android:name="com.ecosia.android" />
     </queries>
 
     <application

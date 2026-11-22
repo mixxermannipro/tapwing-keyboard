@@ -98,6 +98,7 @@ fun TapwingKeyboardRoot(
     onExitOneHanded: () -> Unit,
     onSelectSuggestion: (SuggestionChip) -> Unit,
     onTriggerUndo: () -> Unit,
+    onEditorUndo: () -> Unit,
     onDismissUndo: () -> Unit,
     onTapScreenshotChip: (RecentScreenshot) -> Unit,
     onTapScreenshotOcr: (RecentScreenshot) -> Unit,
@@ -137,7 +138,7 @@ fun TapwingKeyboardRoot(
     onToggleIncognito: () -> Unit,
     onOpenQuickSearch: () -> Unit,
     onInsertSearchLink: (String) -> Unit,
-    onOpenSearchInBrowser: (String) -> Unit,
+    onOpenSearch: (String) -> Unit,
     onToggleAppleMode: () -> Unit,
     onOpenSettings: () -> Unit,
     onStartVoice: () -> Unit,
@@ -213,7 +214,8 @@ fun TapwingKeyboardRoot(
                         mode == KeyboardPanelMode.KEYS ||
                         mode == KeyboardPanelMode.VOICE_ONBOARDING ||
                         mode == KeyboardPanelMode.WRITING_ONBOARDING ||
-                        mode == KeyboardPanelMode.RESIZE
+                        mode == KeyboardPanelMode.RESIZE ||
+                        mode == KeyboardPanelMode.QUICK_SEARCH
                     ) Modifier else Modifier.fillMaxWidth().height(panelHeight)
                     Box(modifier = lockedModifier) {
                         when (mode) {
@@ -321,7 +323,7 @@ fun TapwingKeyboardRoot(
                                     onBack = onCloseSubPanel,
                                     onToggleSelection = onToggleTextEditSelection,
                                     onAction = onTextEditAction,
-                                    onUndo = onTriggerUndo
+                                    onUndo = onEditorUndo
                                 )
                             }
                             KeyboardPanelMode.QUICK_SEARCH -> {
@@ -330,7 +332,8 @@ fun TapwingKeyboardRoot(
                                     initialQuery = quickSearchInitial,
                                     onBack = onCloseSubPanel,
                                     onInsertSearchLink = onInsertSearchLink,
-                                    onOpenInBrowser = onOpenSearchInBrowser
+                                    onOpenSearch = onOpenSearch,
+                                    onSwitchLanguage = onSwitchLanguage
                                 )
                             }
                             KeyboardPanelMode.KEYS -> {
