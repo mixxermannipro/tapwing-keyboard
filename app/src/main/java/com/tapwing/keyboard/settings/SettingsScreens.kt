@@ -135,6 +135,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -241,6 +242,7 @@ fun TapwingSettingsApp(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val focusManager = LocalFocusManager.current
     var backStack by rememberSaveable(stateSaver = listSaver(
         save = { stack: List<SettingsRoute> -> stack.map { it.name } },
         restore = { saved -> saved.map { SettingsRoute.valueOf(it) } }
@@ -299,6 +301,7 @@ fun TapwingSettingsApp(
             navigatingBack = true
             homeTab = SettingsTab.START
         } else if (searchQuery.isNotEmpty()) {
+            focusManager.clearFocus()
             searchQuery = ""
         }
     }
