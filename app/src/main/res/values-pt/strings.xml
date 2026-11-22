@@ -133,4 +133,8 @@
     <string name="ai_model_copy">Copiar ID do modelo</string>
     <string name="ai_model_copied">ID do modelo copiado</string>
     <string name="settings_link_unavailable">Não foi possível abrir este link.</string>
+    <string name="settings_tab_start">Início</string>
+    <string name="settings_tab_writing">Escrita</string>
+    <string name="settings_tab_keyboard">Teclado</string>
+    <string name="settings_tab_tools">Ferramentas</string>
 </resources>

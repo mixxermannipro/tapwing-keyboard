@@ -20,6 +20,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -46,6 +47,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -124,6 +128,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -197,6 +205,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 enum class SettingsRoute {
@@ -217,6 +226,8 @@ enum class SettingsRoute {
     ABOUT
 }
 
+private data class SettingsDestination(val route: SettingsRoute, val tab: SettingsTab)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TapwingSettingsApp(
@@ -236,6 +247,31 @@ fun TapwingSettingsApp(
     )) { mutableStateOf(listOf(SettingsRoute.HOME)) }
     val stateHolder = rememberSaveableStateHolder()
     val route = backStack.last()
+    var homeTab by rememberSaveable { mutableStateOf(SettingsTab.START) }
+    val selectedTab = if (route == SettingsRoute.HOME) homeTab else SettingsTab.forRoute(route)
+    val destination = SettingsDestination(route, selectedTab)
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    var barRevealed by remember(destination) { mutableStateOf(true) }
+    val barVisible = barRevealed && !imeVisible
+    val barSpace by animateDpAsState(
+        targetValue = if (barVisible) settingsBarSpace else 0.dp,
+        animationSpec = tween(settingsBarMotionMillis, easing = FastOutSlowInEasing),
+        label = "settingsBarSpace"
+    )
+    val scrollConnection = remember(destination, density) {
+        val scroll = SettingsBarScroll()
+        val threshold = with(density) { 12.dp.toPx() }
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                val gesture = consumed + available
+                if (source == NestedScrollSource.UserInput && abs(gesture.y) > abs(gesture.x)) {
+                    scroll.update(barRevealed, consumed.y, available.y, threshold)?.let { barRevealed = it }
+                }
+                return Offset.Zero
+            }
+        }
+    }
     var navigatingBack by remember { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var testInputText by remember { mutableStateOf("") }
@@ -259,13 +295,16 @@ fun TapwingSettingsApp(
         if (backStack.size > 1) {
             navigatingBack = true
             backStack = backStack.dropLast(1)
-        } else if (route == SettingsRoute.HOME && searchQuery.isNotEmpty()) {
+        } else if (homeTab != SettingsTab.START) {
+            navigatingBack = true
+            homeTab = SettingsTab.START
+        } else if (searchQuery.isNotEmpty()) {
             searchQuery = ""
         }
     }
 
     BackHandler(
-        enabled = backStack.size > 1 || (route == SettingsRoute.HOME && searchQuery.isNotEmpty())
+        enabled = !imeVisible && (backStack.size > 1 || homeTab != SettingsTab.START || searchQuery.isNotEmpty())
     ) {
         navigateBack()
     }
@@ -310,110 +349,126 @@ fun TapwingSettingsApp(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        AnimatedContent(
-            modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
-            targetState = route,
-            transitionSpec = {
-                val direction = if (navigatingBack) -1 else 1
-                (slideInHorizontally(tween(270, easing = FastOutSlowInEasing)) { direction * it / 8 } +
-                    fadeIn(tween(220))) togetherWith
-                    (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 12 } +
-                        fadeOut(tween(160)))
-            },
-            label = "settingsNavigation"
-        ) { activeRoute ->
-            stateHolder.SaveableStateProvider(activeRoute.name) {
-                Column(Modifier.fillMaxSize()) {
-                    if (activeRoute != SettingsRoute.HOME) SettingsHeader(activeRoute, ::navigateBack)
-                    when (activeRoute) {
-                        SettingsRoute.HOME -> HomeSettingsScreen(
-                            prefs = prefs,
-                            imeEnabled = imeEnabled,
-                            imeSelected = imeSelected,
-                            hasAutofillProvider = hasAutofillProvider,
-                            searchQuery = searchQuery,
-                            onSearchQueryChange = { searchQuery = it },
-                            testInputText = testInputText,
-                            onTestInputChange = { testInputText = it },
-                            onOpenImeSystemSettings = {
-                                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                            },
-                            onShowImePicker = {
-                                val imm = context.getSystemService(InputMethodManager::class.java)
-                                imm?.showInputMethodPicker()
-                            },
-                            onNavigate = { navigateTo(it) }
-                        )
-                        SettingsRoute.APPEARANCE -> AppearanceScreen(prefs, de, onUpdatePrefs)
-                        SettingsRoute.QUICK_BAR -> QuickBarSettingsScreen(prefs, de, onUpdatePrefs)
-                        SettingsRoute.QUICK_SEARCH -> QuickSearchSettingsScreen(prefs, installedSearchApp, onUpdatePrefs)
-                        SettingsRoute.AUTOFILL -> AutofillSettingsScreen(prefs, hasAutofillProvider, onUpdatePrefs)
-                        SettingsRoute.LANGUAGES -> LanguagesScreen(
-                            prefs = prefs,
-                            de = de,
-                            onOpenImeSystemSettings = {
-                                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                            },
-                            onShowImePicker = {
-                                val imm = context.getSystemService(InputMethodManager::class.java)
-                                imm?.showInputMethodPicker()
-                            },
-                            onUpdatePrefs = onUpdatePrefs
-                        )
-                        SettingsRoute.DICTIONARY -> DictionaryLearningScreen(
-                            prefs = prefs,
-                            de = de,
-                            dictionaryStore = dictionaryStore,
-                            packManager = packManager,
-                            onDictionaryChanged = { dictRevision++ },
-                            onUpdatePrefs = onUpdatePrefs
-                        )
-                        SettingsRoute.CORRECTIONS -> CorrectionsScreen(
-                            prefs = prefs,
-                            de = de,
-                            onOpenQuickBar = { navigateTo(SettingsRoute.QUICK_BAR) },
-                            onUpdatePrefs = onUpdatePrefs
-                        )
-                        SettingsRoute.VOICE -> VoiceSettingsScreen(
-                            prefs, de, modelManager, secureKeyStorage,
-                            onOpenWritingTools = { navigateTo(SettingsRoute.WRITING_TOOLS) },
-                            onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
-                            onUpdatePrefs = onUpdatePrefs
-                        )
-                        SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(
-                            prefs = prefs,
-                            de = de,
-                            secureKeyStorage = secureKeyStorage,
-                            modelManager = modelManager,
-                            onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
-                            onUpdatePrefs = onUpdatePrefs
-                        )
-                        SettingsRoute.API_KEYS -> ApiKeysVaultScreen(
-                            prefs = prefs,
-                            de = de,
-                            secureKeyStorage = secureKeyStorage,
-                            onUpdatePrefs = onUpdatePrefs
-                        )
-                        SettingsRoute.CLIPBOARD -> ClipboardSettingsScreen(prefs, de, onUpdatePrefs)
-                        SettingsRoute.EMOJI -> EmojiSettingsScreen(prefs, de, onUpdatePrefs)
-                        SettingsRoute.STATS -> TypingStatsScreen(
-                            stats = liveStats,
-                            de = de,
-                            onReset = { statsStore.reset() }
-                        )
-                        SettingsRoute.ABOUT -> AboutSettingsScreen(
-                            de = de,
-                            onOpenImeSystemSettings = {
-                                context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                            },
-                            onShowImePicker = {
-                                val imm = context.getSystemService(InputMethodManager::class.java)
-                                imm?.showInputMethodPicker()
-                            }
-                        )
+        Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+            AnimatedContent(
+                modifier = Modifier.fillMaxSize().padding(bottom = barSpace).nestedScroll(scrollConnection),
+                targetState = destination,
+                transitionSpec = {
+                    val direction = if (navigatingBack) -1 else 1
+                    (slideInHorizontally(tween(270, easing = FastOutSlowInEasing)) { direction * it / 8 } +
+                        fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 12 } +
+                            fadeOut(tween(160)))
+                },
+                label = "settingsNavigation"
+            ) { active ->
+                val activeRoute = active.route
+                stateHolder.SaveableStateProvider(if (activeRoute == SettingsRoute.HOME) active.tab.name else activeRoute.name) {
+                    Column(Modifier.fillMaxSize()) {
+                        if (activeRoute != SettingsRoute.HOME) SettingsHeader(activeRoute, ::navigateBack)
+                        when (activeRoute) {
+                            SettingsRoute.HOME -> HomeSettingsScreen(
+                                tab = active.tab,
+                                prefs = prefs,
+                                imeEnabled = imeEnabled,
+                                imeSelected = imeSelected,
+                                hasAutofillProvider = hasAutofillProvider,
+                                searchQuery = searchQuery,
+                                onSearchQueryChange = { searchQuery = it },
+                                testInputText = testInputText,
+                                onTestInputChange = { testInputText = it },
+                                onOpenImeSystemSettings = {
+                                    context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                                },
+                                onShowImePicker = {
+                                    val imm = context.getSystemService(InputMethodManager::class.java)
+                                    imm?.showInputMethodPicker()
+                                },
+                                onNavigate = { navigateTo(it) }
+                            )
+                            SettingsRoute.APPEARANCE -> AppearanceScreen(prefs, de, onUpdatePrefs)
+                            SettingsRoute.QUICK_BAR -> QuickBarSettingsScreen(prefs, de, onUpdatePrefs)
+                            SettingsRoute.QUICK_SEARCH -> QuickSearchSettingsScreen(prefs, installedSearchApp, onUpdatePrefs)
+                            SettingsRoute.AUTOFILL -> AutofillSettingsScreen(prefs, hasAutofillProvider, onUpdatePrefs)
+                            SettingsRoute.LANGUAGES -> LanguagesScreen(
+                                prefs = prefs,
+                                de = de,
+                                onOpenImeSystemSettings = {
+                                    context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                                },
+                                onShowImePicker = {
+                                    val imm = context.getSystemService(InputMethodManager::class.java)
+                                    imm?.showInputMethodPicker()
+                                },
+                                onUpdatePrefs = onUpdatePrefs
+                            )
+                            SettingsRoute.DICTIONARY -> DictionaryLearningScreen(
+                                prefs = prefs,
+                                de = de,
+                                dictionaryStore = dictionaryStore,
+                                packManager = packManager,
+                                onDictionaryChanged = { dictRevision++ },
+                                onUpdatePrefs = onUpdatePrefs
+                            )
+                            SettingsRoute.CORRECTIONS -> CorrectionsScreen(
+                                prefs = prefs,
+                                de = de,
+                                onOpenQuickBar = { navigateTo(SettingsRoute.QUICK_BAR) },
+                                onUpdatePrefs = onUpdatePrefs
+                            )
+                            SettingsRoute.VOICE -> VoiceSettingsScreen(
+                                prefs, de, modelManager, secureKeyStorage,
+                                onOpenWritingTools = { navigateTo(SettingsRoute.WRITING_TOOLS) },
+                                onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
+                                onUpdatePrefs = onUpdatePrefs
+                            )
+                            SettingsRoute.WRITING_TOOLS -> WritingToolsSettingsScreen(
+                                prefs = prefs,
+                                de = de,
+                                secureKeyStorage = secureKeyStorage,
+                                modelManager = modelManager,
+                                onOpenApiKeys = { navigateTo(SettingsRoute.API_KEYS) },
+                                onUpdatePrefs = onUpdatePrefs
+                            )
+                            SettingsRoute.API_KEYS -> ApiKeysVaultScreen(
+                                prefs = prefs,
+                                de = de,
+                                secureKeyStorage = secureKeyStorage,
+                                onUpdatePrefs = onUpdatePrefs
+                            )
+                            SettingsRoute.CLIPBOARD -> ClipboardSettingsScreen(prefs, de, onUpdatePrefs)
+                            SettingsRoute.EMOJI -> EmojiSettingsScreen(prefs, de, onUpdatePrefs)
+                            SettingsRoute.STATS -> TypingStatsScreen(
+                                stats = liveStats,
+                                de = de,
+                                onReset = { statsStore.reset() }
+                            )
+                            SettingsRoute.ABOUT -> AboutSettingsScreen(
+                                de = de,
+                                onOpenImeSystemSettings = {
+                                    context.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+                                },
+                                onShowImePicker = {
+                                    val imm = context.getSystemService(InputMethodManager::class.java)
+                                    imm?.showInputMethodPicker()
+                                }
+                            )
+                        }
                     }
                 }
             }
+            SettingsBottomBar(
+                visible = barVisible,
+                selected = selectedTab,
+                onSelect = { tab ->
+                    if (route != SettingsRoute.HOME || tab != homeTab) {
+                        navigatingBack = tab.ordinal < selectedTab.ordinal
+                        homeTab = tab
+                        backStack = listOf(SettingsRoute.HOME)
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 }
@@ -464,6 +519,7 @@ private data class SettingsRow(
 
 @Composable
 private fun HomeSettingsScreen(
+    tab: SettingsTab,
     prefs: TapwingPrefs,
     imeEnabled: Boolean,
     imeSelected: Boolean,
@@ -498,7 +554,9 @@ private fun HomeSettingsScreen(
         SettingsRow(SettingsRoute.ABOUT, Icons.Rounded.Info, "datenschutz privacy lizenz version")
     )
     val search = searchQuery.trim().lowercase()
-    val searchRows = (typing + tools + keyboard).filter {
+    val allRows = typing + tools + keyboard
+    val tabRows = allRows.filter { it.route in tab.routes }
+    val searchRows = allRows.filter {
         stringResource(it.route.label()).lowercase().contains(search) || it.keywords.contains(search)
     }
 
@@ -510,17 +568,21 @@ private fun HomeSettingsScreen(
         item(key = "search") {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(
-                    text = stringResource(R.string.settings_title),
+                    text = stringResource(if (tab == SettingsTab.START) R.string.settings_title else tab.label),
                     style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.9).sp,
                     modifier = Modifier.padding(start = 2.dp)
                 )
-                AppleSearchPill(searchQuery, onSearchQueryChange, stringResource(R.string.settings_search_placeholder))
+                if (tab == SettingsTab.START) {
+                    AppleSearchPill(searchQuery, onSearchQueryChange, stringResource(R.string.settings_search_placeholder))
+                }
             }
         }
 
-        if (search.isNotEmpty()) {
+        if (tab != SettingsTab.START) {
+            item(key = "category") { SettingsGroup(null, tabRows, onNavigate) }
+        } else if (search.isNotEmpty()) {
             item(key = "results") {
                 if (searchRows.isEmpty()) AppleSectionFooter(stringResource(R.string.settings_no_results))
                 else SettingsGroup(null, searchRows, onNavigate)
@@ -560,8 +622,6 @@ private fun HomeSettingsScreen(
                     }
                 }
             }
-            item(key = "typing") { SettingsGroup(stringResource(R.string.settings_group_typing), typing, onNavigate) }
-            item(key = "tools") { SettingsGroup(stringResource(R.string.settings_group_tools), tools, onNavigate) }
             item(key = "recommendations") {
                 val recommendation = when {
                     !prefs.learningEnabled && !prefs.incognitoMode -> SettingsRoute.DICTIONARY to R.string.settings_tip_learning
@@ -588,7 +648,7 @@ private fun HomeSettingsScreen(
                     }
                 }
             }
-            item(key = "keyboard") { SettingsGroup(stringResource(R.string.settings_group_keyboard), keyboard, onNavigate) }
+            item(key = "app") { SettingsGroup(null, tabRows, onNavigate) }
         }
     }
 }

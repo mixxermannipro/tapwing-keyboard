@@ -133,4 +133,8 @@
     <string name="ai_model_copy">Model kimliğini kopyala</string>
     <string name="ai_model_copied">Model kimliği kopyalandı</string>
     <string name="settings_link_unavailable">Bu bağlantı açılamadı.</string>
+    <string name="settings_tab_start">Giriş</string>
+    <string name="settings_tab_writing">Yazma</string>
+    <string name="settings_tab_keyboard">Klavye</string>
+    <string name="settings_tab_tools">Araçlar</string>
 </resources>
