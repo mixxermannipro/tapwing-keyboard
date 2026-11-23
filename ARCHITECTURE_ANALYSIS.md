@@ -1,6 +1,6 @@
 # Architecture & Feature Parity Analysis (Clean-Room Option 1)
 
-Tapwing (`com.tapwing.keyboard`) is an independent, clean-room Android keyboard written in Kotlin and Jetpack Compose under the **Apache-2.0** license (`versionName = 1.2.0`, `versionCode = 4`, `minSdk = 29`, `targetSdk = 36`). It strictly uses official Android SDK APIs, Jetpack libraries, and Google ML Kit — with **zero** binary patching, **zero** signature bypasses, **zero** proprietary binaries/GPL code, and **zero** broad storage permissions.
+This architecture review describes an earlier development snapshot of Tapwing. Check [the app build configuration](app/build.gradle.kts) for current versions and [the licensing notes](docs/licensing.md) for the scope of Apache-2.0 and the source-available terms.
 
 ---
 
