@@ -41,7 +41,7 @@ Running `./scripts/build-release.sh` produces everything required for Google Pla
 
 - **Live Hosted Privacy Policy URL (Cloudflare Workers):** `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`
 - **Live Website / Support URL:** `https://tapwing-keyboard.mixxermannipropvp.workers.dev`
-- **Support Email:** `mixxermannipropvp@gmail.com`
+- **Support Email:** Use the address listed in the [Privacy Policy](PRIVACY_POLICY.md#5-contact).
 
 1. Verify `com.tapwing.keyboard` availability in your **Google Play Console** developer account.
 2. Enter the public Cloudflare Privacy Policy URL (`https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`) under *App Content > Privacy Policy*.

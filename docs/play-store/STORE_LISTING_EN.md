@@ -49,13 +49,14 @@ PRIVACY BY DESIGN
 Typing, dictionary learning, clipboard history, and camera OCR stay locally on your device. No ads, no analytics SDKs, no hidden uploads.
 ```
 
-## Release Notes (`v1.2.0` — max 500 chars)
+## Release Notes (`v2.4.0` — max 500 chars)
 ```text
-What's new in Tapwing 1.2.0:
-• .zip personal dictionary import & export (compatible with tab-separated dictionary.txt archives)
-• Minimalist Settings redesign with proper multi-level back-swipe navigation
-• Reorderable & customizable keyboard quick-actions bar (in-keyboard & in Settings)
-• Privacy-first Photo Picker OCR removing broad gallery storage permissions
+What's new in Tapwing 2.4.0:
+• Refined pill-key design with centered secondary hints & glitch-free symbol/letter switching
+• Smart contextual bottom-right key (Search/Go in browsers, paragraph newline in chats with Send buttons)
+• Reliable clipboard capture for every copied item & native-style inline autofill chips (e.g. Bitwarden)
+• Multi-provider API Keys Vault (Gemini, Groq, OpenRouter, Grok, OpenAI) with free-tier presets & fallback routing
+• 500+ diverse emojis + smarter per-app & proximity-aware predictions
 ```
 
 ## Category & Tags

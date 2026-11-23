@@ -26,7 +26,7 @@ sealed interface ModelInstallState {
 }
 
 /**
- * Downloads, imports, validates, and deletes on-device Whisper (.bin) & LLM (.gguf) models
+ * Downloads, imports, validates, and deletes on-device Whisper (.bin) speech models
  * inside app-private noBackupFilesDir so models persist locally without draining cloud backup.
  */
 class LocalModelManager(context: Context) {
@@ -40,6 +40,10 @@ class LocalModelManager(context: Context) {
     val states: StateFlow<Map<String, ModelInstallState>> = _states.asStateFlow()
 
     init {
+        runCatching {
+            val legacyLlmDir = File(modelsRoot, "llm")
+            if (legacyLlmDir.exists()) legacyLlmDir.deleteRecursively()
+        }
         refreshStates()
     }
 
@@ -65,8 +69,7 @@ class LocalModelManager(context: Context) {
     }
 
     fun modelFileFor(spec: LocalModelSpec): File {
-        val dirName = if (spec.kind == LocalModelKind.WHISPER_STT) "whisper" else "llm"
-        val dir = File(modelsRoot, dirName)
+        val dir = File(modelsRoot, "whisper")
         if (!dir.exists()) dir.mkdirs()
         return File(dir, spec.fileName)
     }
@@ -83,8 +86,7 @@ class LocalModelManager(context: Context) {
             val f = installedModelFile(preferred.id)
             if (f != null) return preferred to f
         }
-        val list = if (kind == LocalModelKind.WHISPER_STT) LocalModelCatalog.whisperModels else LocalModelCatalog.llmModels
-        for (spec in list) {
+        for (spec in LocalModelCatalog.whisperModels) {
             val f = installedModelFile(spec.id)
             if (f != null) return spec to f
         }
@@ -166,7 +168,7 @@ class LocalModelManager(context: Context) {
 
             if (!part.isFile || part.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(part, spec.kind)) {
                 part.delete()
-                updateState(spec.id, ModelInstallState.Error("Selected file is not a valid Whisper/GGUF model"))
+                updateState(spec.id, ModelInstallState.Error("Selected file is not a valid Whisper speech model"))
                 return@withContext false
             }
             if (target.exists()) target.delete()
@@ -258,7 +260,6 @@ class LocalModelManager(context: Context) {
                 }
                 val s = String(hdr, Charsets.US_ASCII)
                 when (kind) {
-                    LocalModelKind.CLEANUP_LLM -> s == "GGUF"
                     LocalModelKind.WHISPER_STT -> s in setOf("lmgg", "ggml", "fmgg", "ggmf", "tjgg", "ggjt", "GGUF")
                 }
             }.getOrDefault(false)

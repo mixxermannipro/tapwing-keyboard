@@ -1,6 +1,7 @@
 package com.tapwing.keyboard.data
 
 import com.tapwing.keyboard.ai.LocalModelCatalog
+import com.tapwing.keyboard.ai.LocalModelKind
 import com.tapwing.keyboard.ui.keyboard.KeyboardLayoutPage
 import com.tapwing.keyboard.ui.keyboard.KeyboardLayouts
 import org.junit.Assert.assertEquals
@@ -28,10 +29,9 @@ class KeyboardLocalesTest {
     }
 
     @Test
-    fun modelCatalogHasRecommendedModelsWithHttpsUrls() {
+    fun modelCatalogHasRecommendedWhisperModelsWithHttpsUrlsAndNoLlms() {
         assertTrue(LocalModelCatalog.recommendedWhisper().downloadUrl.startsWith("https://"))
-        assertTrue(LocalModelCatalog.recommendedLlm().downloadUrl.startsWith("https://"))
         assertTrue(LocalModelCatalog.whisperModels.size >= 3)
-        assertTrue(LocalModelCatalog.llmModels.size >= 3)
+        assertTrue(LocalModelCatalog.allModels.all { it.kind == LocalModelKind.WHISPER_STT })
     }
 }

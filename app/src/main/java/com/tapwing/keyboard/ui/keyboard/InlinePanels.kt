@@ -591,71 +591,6 @@ private fun EditActionTile(
  * In-keyboard Web Search panel (restores one of the most missed Gboard features on Android).
  */
 @Composable
-fun QuickSearchPanel(
-    prefs: TapwingPrefs,
-    initialQuery: String,
-    onBack: () -> Unit,
-    onInsertSearchLink: (String) -> Unit,
-    onOpenInBrowser: (String) -> Unit
-) {
-    val kbColors = LocalTapwingKeyboardColors.current
-    val de = prefs.activeLocale == "de"
-    var query by remember(initialQuery) { mutableStateOf(initialQuery) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.cd_back), tint = kbColors.keyText)
-            }
-            Text(
-                text = if (de) "Schnellsuche in Tastatur" else "Quick Search",
-                color = kbColors.keyText,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            placeholder = {
-                Text(if (de) "Suchbegriff eingeben oder aus Feld übernehmen…" else "Enter query or use current text…")
-            }
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                onClick = { onInsertSearchLink(query) },
-                enabled = query.isNotBlank(),
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(if (de) "Link einfügen" else "Insert link", fontSize = 12.sp)
-            }
-            Button(
-                onClick = { onOpenInBrowser(query) },
-                enabled = query.isNotBlank(),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Rounded.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(if (de) "Im Browser" else "Open web", fontSize = 12.sp)
-            }
-        }
-    }
-}
-
-@Composable
 fun WritingToolsPanel(
     prefs: TapwingPrefs,
     sourceText: String,
@@ -1260,14 +1195,32 @@ fun SnippetsPanel(
 @Composable
 fun EmojiPanel(
     prefs: TapwingPrefs,
+    recentEmojis: List<String> = emptyList(),
     onBack: () -> Unit,
     onInsertEmoji: (String) -> Unit,
     onBackspace: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
-    var selectedCategoryId by remember { mutableStateOf(EmojiCatalog.categories.first().id) }
-    val activeCategory = remember(selectedCategoryId) {
-        EmojiCatalog.categories.firstOrNull { it.id == selectedCategoryId } ?: EmojiCatalog.categories.first()
+    val allCategories = remember(recentEmojis) {
+        if (recentEmojis.isNotEmpty()) {
+            listOf(
+                com.tapwing.keyboard.emoji.EmojiCategory(
+                    id = "recent",
+                    icon = "🕒",
+                    titleDe = "Zuletzt",
+                    titleEn = "Recent",
+                    emojis = recentEmojis.map { it to "" }
+                )
+            ) + EmojiCatalog.categories
+        } else {
+            EmojiCatalog.categories
+        }
+    }
+    var selectedCategoryId by remember(recentEmojis.isNotEmpty()) {
+        mutableStateOf(allCategories.first().id)
+    }
+    val activeCategory = remember(selectedCategoryId, allCategories) {
+        allCategories.firstOrNull { it.id == selectedCategoryId } ?: allCategories.first()
     }
 
     Column(
@@ -1289,7 +1242,7 @@ fun EmojiPanel(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                EmojiCatalog.categories.forEach { cat ->
+                allCategories.forEach { cat ->
                     val selected = cat.id == activeCategory.id
                     Surface(
                         shape = RoundedCornerShape(14.dp),

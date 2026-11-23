@@ -4,10 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-# Prefer JDK 21 (required by Android Gradle Plugin 8.13)
-if [ -d "/home/manuelblasaditsch/.local/share/rea/jdk-21.0.13" ]; then
-    export JAVA_HOME="/home/manuelblasaditsch/.local/share/rea/jdk-21.0.13"
-elif [ -d "/usr/lib/jvm/java-21-openjdk" ]; then
+# Keep an explicitly configured JDK and otherwise use the standard JDK 21 installation.
+if [ -z "${JAVA_HOME:-}" ] && [ -d "/usr/lib/jvm/java-21-openjdk" ]; then
     export JAVA_HOME="/usr/lib/jvm/java-21-openjdk"
 fi
 if [ -n "${JAVA_HOME:-}" ]; then

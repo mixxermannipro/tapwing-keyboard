@@ -463,13 +463,58 @@ object LanguageVocabularies {
         "and" to listOf("then", "the", "I")
     )
 
-    fun commonNextWords(locale: String, previousWord: String): List<String> {
-        val words = when (KeyboardLocales.baseLang(locale)) {
-            "de" -> germanNextWords
-            "en" -> englishNextWords
-            else -> return emptyList()
-        }
-        return words[previousWord.lowercase()].orEmpty()
+    private val nextWordPhrases = mapOf(
+        "de" to mapOf(
+            "ich bin" to listOf("gleich", "unterwegs", "fertig"),
+            "ich habe" to listOf("verstanden", "noch", "Zeit"),
+            "wir haben" to listOf("vereinbart", "noch", "Zeit"),
+            "ich kann" to listOf("dir", "morgen", "gerne"),
+            "kannst du" to listOf("mir", "bitte", "kurz"),
+            "ich melde" to listOf("mich"),
+            "vielen dank" to listOf("für", "nochmal"),
+            "ich freue" to listOf("mich"),
+            "bis morgen" to listOf("früh", "dann"),
+            "ich komme" to listOf("gleich", "später", "morgen"),
+            "ich würde" to listOf("gerne", "vorschlagen", "das"),
+            "wir sehen" to listOf("uns", "dann"),
+            "ich wünsche" to listOf("dir", "euch", "Ihnen"),
+            "einen schönen" to listOf("Tag", "Abend", "Sonntag"),
+            "im anhang" to listOf("findest", "finden", "ist"),
+            "danke für" to listOf("deine", "Ihre", "die")
+        ),
+        "en" to mapOf(
+            "i am" to listOf("ready", "on", "going"),
+            "on my" to listOf("way", "phone", "own"),
+            "i have" to listOf("a", "to", "been"),
+            "we have" to listOf("time", "to", "been"),
+            "let me" to listOf("know", "check", "see"),
+            "can you" to listOf("please", "send", "help"),
+            "thank you" to listOf("for", "so", "again"),
+            "see you" to listOf("soon", "tomorrow", "later"),
+            "i will" to listOf("be", "send", "check"),
+            "looking forward" to listOf("to"),
+            "i would" to listOf("like", "love", "suggest"),
+            "please let" to listOf("me", "us")
+        ),
+        "fr" to mapOf("je suis" to listOf("en", "prêt", "désolé"), "merci pour" to listOf("votre", "ton", "tout")),
+        "es" to mapOf("muchas gracias" to listOf("por", "de"), "yo estoy" to listOf("bien", "en", "listo")),
+        "it" to mapOf("grazie per" to listOf("il", "la", "tutto"), "ci vediamo" to listOf("domani", "presto", "dopo")),
+        "pt" to mapOf("até logo" to listOf("então"), "eu estou" to listOf("bem", "em", "pronto")),
+        "nl" to mapOf("ik ben" to listOf("er", "onderweg", "klaar"), "dank je" to listOf("wel", "voor")),
+        "pl" to mapOf("dziękuję za" to listOf("pomoc", "wiadomość", "wszystko"), "do zobaczenia" to listOf("jutro", "wkrótce")),
+        "tr" to mapOf("teşekkür ederim" to listOf("yardımınız", "her"), "iyi ki" to listOf("varsın", "geldin"))
+    )
+
+    fun commonNextWords(locale: String, previousWord: String, previousTwoWord: String = ""): List<String> {
+        val language = KeyboardLocales.baseLang(locale)
+        val word = previousWord.lowercase()
+        val phrase = "${previousTwoWord.lowercase()} $word"
+        nextWordPhrases[language]?.get(phrase)?.let { return it }
+        return when (language) {
+            "de" -> germanNextWords[word]
+            "en" -> englishNextWords[word]
+            else -> null
+        }.orEmpty()
     }
 
     fun defaultEmptyChipsFor(locale: String): List<String> = when (KeyboardLocales.baseLang(locale)) {

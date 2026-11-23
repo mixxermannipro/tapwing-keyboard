@@ -8,13 +8,9 @@ plugins {
 
 fun loadExternalSigningProperties(): Properties {
     val props = Properties()
-    val candidates = listOf(
-        file("/home/manuelblasaditsch/.tapwing-signing/keystore.properties"),
-        file("${System.getProperty("user.home")}/.tapwing-signing/keystore.properties")
-    )
-    val existing = candidates.firstOrNull { it.isFile }
-    if (existing != null) {
-        existing.inputStream().use { props.load(it) }
+    val config = file("${System.getProperty("user.home")}/.tapwing-signing/keystore.properties")
+    if (config.isFile) {
+        config.inputStream().use { props.load(it) }
     }
     return props
 }
@@ -44,8 +40,8 @@ android {
         applicationId = "com.tapwing.keyboard"
         minSdk = 29
         targetSdk = 36
-        versionCode = 9
-        versionName = "2.2.0"
+        versionCode = 12
+        versionName = "2.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -77,6 +73,7 @@ android {
             )
             ndk {
                 debugSymbolLevel = "SYMBOL_TABLE"
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
             }
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
@@ -141,6 +138,9 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.llamatik:library-android:1.10.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.mlkit:genai-proofreading:1.0.0-beta1")
+    implementation("com.google.mlkit:genai-rewriting:1.0.0-beta1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")

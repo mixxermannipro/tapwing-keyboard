@@ -11,6 +11,21 @@ import org.junit.Test
 class AdaptiveDictionaryTest {
 
     @Test
+    fun nextWordsPreferExactLocalContextAndMergeCaseVariants() {
+        val store = AdaptiveDictionaryStore(null)
+        repeat(40) {
+            store.recordTypedWord("home", "am", true, false, "they", locale = "en", appPackage = "test.chat")
+        }
+        store.recordTypedWord("ready", "am", true, false, "I", locale = "en", appPackage = "test.chat")
+        store.recordTypedWord("Ready", "am", true, false, "I", locale = "en", appPackage = "test.chat")
+        val predictions = store.predictNextWords("am", previousTwoWord = "I", appPackage = "test.chat")
+        assertEquals("ready", predictions.first().lowercase())
+        assertEquals(1, predictions.count { it.equals("ready", ignoreCase = true) })
+        store.recordTypedWord("am", "I", true, false, locale = "en")
+        assertEquals(listOf("am"), store.predictNextWords("I"))
+    }
+
+    @Test
     fun importedWordsProtectFromAutocorrectAndPrioritizeSuggestions() {
         val store = AdaptiveDictionaryStore(storageFile = null)
         store.importText("standart\nTapwingFlow,150\nbrb => Bin gleich zurück")
@@ -129,5 +144,47 @@ class AdaptiveDictionaryTest {
 
         store.recordAppWritingAction("com.whatsapp", WritingAction.CONCISE, learningEnabled = true, incognito = false)
         assertEquals(WritingAction.CONCISE, store.preferredToneForApp("com.whatsapp"))
+    }
+
+    @Test
+    fun perAppBigramsPersonalCorrectionsAndRecentEmojisPersist() {
+        val tempFile = java.io.File.createTempFile("tapwing_dict_test", ".json")
+        tempFile.deleteOnExit()
+        val store = AdaptiveDictionaryStore(storageFile = tempFile)
+
+        repeat(3) {
+            store.recordTypedWord(
+                word = "Alter",
+                previousWord = "hallo",
+                learningEnabled = true,
+                incognito = false,
+                locale = "de",
+                appPackage = "com.whatsapp"
+            )
+            store.recordTypedWord(
+                word = "Kollegen",
+                previousWord = "hallo",
+                learningEnabled = true,
+                incognito = false,
+                locale = "de",
+                appPackage = "com.google.android.gm"
+            )
+        }
+
+        assertEquals("Alter", store.predictNextWords("hallo", appPackage = "com.whatsapp").first())
+        assertEquals("Kollegen", store.predictNextWords("hallo", appPackage = "com.google.android.gm").first())
+
+        store.recordChosenCorrection("proejkt", "Projekt", learningEnabled = true, incognito = false)
+        assertEquals("Projekt", SuggestionEngine.autoCorrectionFor("proejkt", "de", store))
+
+        store.recordRecentEmoji("🚀", learningEnabled = true, incognito = false)
+        store.recordRecentEmoji("🔥", learningEnabled = true, incognito = false)
+        store.recordTextBatch("Morgen treffen wir uns", learningEnabled = true, incognito = false, locale = "de")
+
+        val reloaded = AdaptiveDictionaryStore(storageFile = tempFile)
+        assertEquals(listOf("🔥", "🚀"), reloaded.listRecentEmojis())
+        assertEquals("Projekt", reloaded.preferredCorrectionFor("proejkt"))
+        assertEquals("Alter", reloaded.predictNextWords("hallo", appPackage = "com.whatsapp").first())
+        assertTrue(reloaded.isKnownWord("treffen") || reloaded.allKnownVocabularyWords().any { it.equals("treffen", ignoreCase = true) })
     }
 }

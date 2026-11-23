@@ -78,7 +78,7 @@
     <string name="tools_edit_bar">Leiste</string>
 
     <!-- Einstellungen -->
-    <string name="settings_subtitle">Offline-KI-Tastatur · v2.0</string>
+    <string name="settings_subtitle">Datenschutz-KI-Tastatur · v2.4</string>
     <string name="settings_search_placeholder">Einstellungen suchen</string>
     <string name="settings_test_placeholder">Hier Tastatur testen…</string>
     <string name="nav_appearance">Design &amp; Größe</string>
@@ -87,7 +87,8 @@
     <string name="nav_dictionary">Wörterbuch &amp; Lernen</string>
     <string name="nav_corrections">Tippen &amp; Autokorrektur</string>
     <string name="nav_voice">Diktat</string>
-    <string name="nav_writing_tools">Schreibhilfe</string>
+    <string name="nav_writing_tools">Schreibhilfe und KI</string>
+    <string name="nav_api_keys">API-Schlüssel</string>
     <string name="nav_clipboard">Zwischenablage &amp; Screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Über Tapwing</string>
@@ -103,4 +104,47 @@
     <string name="settings_expand">Aufklappen</string>
     <string name="settings_collapse">Zuklappen</string>
     <string name="clipboard_verification_code">Code %1$s</string>
+    <string name="clipboard_copied_image">Kopiertes Bild</string>
+    <string name="settings_title">Einstellungen</string>
+    <string name="settings_group_typing">Schreiben</string>
+    <string name="settings_group_tools">Werkzeuge</string>
+    <string name="settings_group_keyboard">Tastatur und App</string>
+    <string name="settings_setup_title">Tapwing einrichten</string>
+    <string name="settings_enable">Tastatur aktivieren</string>
+    <string name="settings_select">Tapwing auswählen</string>
+    <string name="settings_no_results">Keine passenden Einstellungen gefunden.</string>
+    <string name="settings_recommendation">Für dich</string>
+    <string name="settings_tip_learning">Tapwing kann deine häufigen Wörter lernen. Die Daten bleiben auf diesem Gerät.</string>
+    <string name="settings_tip_autofill">Zeige Anmeldedaten aus deinem Passwortmanager über den Tasten.</string>
+    <string name="settings_tip_voice">Lade Whisper herunter, um ohne Internet zu diktieren.</string>
+    <string name="settings_tip_search">Lege fest, wo Tapwing deine Websuchen öffnet.</string>
+    <string name="nav_quick_search">Schnellsuche</string>
+    <string name="nav_autofill">Passwörter und Autofill</string>
+    <string name="nav_typing_stats">Schreibstatistik</string>
+    <string name="search_query_label">Mit %1$s suchen</string>
+    <string name="search_insert_link">Link einfügen</string>
+    <string name="search_clear">Suchbegriff löschen</string>
+    <string name="search_open">Suchen</string>
+    <string name="search_engine">Suchmaschine</string>
+    <string name="search_open_in">Ergebnisse öffnen in</string>
+    <string name="search_browser">Standardbrowser</string>
+    <string name="search_app">%1$s-App</string>
+    <string name="search_app_unavailable">Sobald eine passende App installiert ist, kannst du sie hier auswählen. Aktuell öffnet Tapwing den Browser.</string>
+    <string name="search_browser_fallback">Falls die ausgewählte App fehlt, öffnet Tapwing die Suche im Browser.</string>
+    <string name="search_no_browser">Kein Browser konnte die Suche öffnen.</string>
+    <string name="autofill_inline_toggle">Vorschläge über den Tasten anzeigen</string>
+    <string name="autofill_android_settings">Passwortmanager in Android auswählen</string>
+    <string name="autofill_active">Android-Autofill ist aktiv</string>
+    <string name="autofill_inactive">Wähle einen Autofill-Dienst in Android</string>
+    <string name="autofill_requires_android_11">Vorschläge in der Tastatur benötigen Android 11 oder neuer.</string>
+    <string name="autofill_help">Wähle deinen Passwortmanager in Android. Aktiviere in Bitwarden „Automatisch ausfüllen“ und wähle „In der Tastatur“. Die Vorschläge erscheinen, sobald du ein unterstütztes Anmeldefeld auswählst.</string>
+    <string name="autofill_bitwarden_help">Bitwarden-Anleitung</string>
+    <string name="ai_model_catalog">Modellübersicht des Anbieters</string>
+    <string name="ai_model_copy">Modell-ID kopieren</string>
+    <string name="ai_model_copied">Modell-ID kopiert</string>
+    <string name="settings_link_unavailable">Der Link konnte nicht geöffnet werden.</string>
+    <string name="settings_tab_start">Start</string>
+    <string name="settings_tab_writing">Schreiben</string>
+    <string name="settings_tab_keyboard">Tastatur</string>
+    <string name="settings_tab_tools">Werkzeuge</string>
 </resources>

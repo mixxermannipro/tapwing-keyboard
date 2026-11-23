@@ -78,7 +78,7 @@
     <string name="tools_edit_bar">Edit bar</string>
 
     <!-- Settings Titles & Sections -->
-    <string name="settings_subtitle">Privacy-first AI keyboard · v2.0</string>
+    <string name="settings_subtitle">Privacy-first AI keyboard · v2.4</string>
     <string name="settings_search_placeholder">Search settings</string>
     <string name="settings_test_placeholder">Test keyboard here…</string>
     <string name="nav_appearance">Theme &amp; Size</string>
@@ -87,7 +87,8 @@
     <string name="nav_dictionary">Dictionary &amp; Learning</string>
     <string name="nav_corrections">Typing &amp; Autocorrect</string>
     <string name="nav_voice">Dictation</string>
-    <string name="nav_writing_tools">Writing tools</string>
+    <string name="nav_writing_tools">Writing and AI</string>
+    <string name="nav_api_keys">API keys</string>
     <string name="nav_clipboard">Clipboard &amp; Screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">About Tapwing</string>
@@ -103,4 +104,47 @@
     <string name="settings_expand">Expand</string>
     <string name="settings_collapse">Collapse</string>
     <string name="clipboard_verification_code">Code %1$s</string>
+    <string name="clipboard_copied_image">Copied image</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_group_typing">Typing</string>
+    <string name="settings_group_tools">Tools</string>
+    <string name="settings_group_keyboard">Keyboard and app</string>
+    <string name="settings_setup_title">Set up Tapwing</string>
+    <string name="settings_enable">Enable keyboard</string>
+    <string name="settings_select">Choose Tapwing</string>
+    <string name="settings_no_results">No settings match your search.</string>
+    <string name="settings_recommendation">For you</string>
+    <string name="settings_tip_learning">Teach Tapwing the words you use. Learning stays on this device.</string>
+    <string name="settings_tip_autofill">Show logins from your password manager above the keys.</string>
+    <string name="settings_tip_voice">Download Whisper to dictate without an internet connection.</string>
+    <string name="settings_tip_search">Choose where web searches from Tapwing open.</string>
+    <string name="nav_quick_search">Quick search</string>
+    <string name="nav_autofill">Passwords and autofill</string>
+    <string name="nav_typing_stats">Typing statistics</string>
+    <string name="search_query_label">Search with %1$s</string>
+    <string name="search_insert_link">Insert link</string>
+    <string name="search_clear">Clear search</string>
+    <string name="search_open">Search</string>
+    <string name="search_engine">Search engine</string>
+    <string name="search_open_in">Open results in</string>
+    <string name="search_browser">Default browser</string>
+    <string name="search_app">%1$s app</string>
+    <string name="search_app_unavailable">When a compatible app is installed, you can choose it here. Tapwing currently uses your browser.</string>
+    <string name="search_browser_fallback">If the selected app is unavailable, Tapwing opens the search in your browser.</string>
+    <string name="search_no_browser">No browser could open this search.</string>
+    <string name="autofill_inline_toggle">Show suggestions above the keys</string>
+    <string name="autofill_android_settings">Choose password manager in Android</string>
+    <string name="autofill_active">Android autofill is on</string>
+    <string name="autofill_inactive">Choose an autofill service in Android</string>
+    <string name="autofill_requires_android_11">Suggestions in the keyboard require Android 11 or later.</string>
+    <string name="autofill_help">Select your password manager in Android. In Bitwarden, enable Autofill and choose Inline. Suggestions appear as you select a supported sign-in field.</string>
+    <string name="autofill_bitwarden_help">Bitwarden setup guide</string>
+    <string name="ai_model_catalog">Provider model list</string>
+    <string name="ai_model_copy">Copy model ID</string>
+    <string name="ai_model_copied">Model ID copied</string>
+    <string name="settings_link_unavailable">This link could not be opened.</string>
+    <string name="settings_tab_start">Home</string>
+    <string name="settings_tab_writing">Writing</string>
+    <string name="settings_tab_keyboard">Keyboard</string>
+    <string name="settings_tab_tools">Tools</string>
 </resources>

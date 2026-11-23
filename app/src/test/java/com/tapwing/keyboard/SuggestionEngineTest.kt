@@ -9,6 +9,24 @@ import org.junit.Test
 class SuggestionEngineTest {
 
     @Test
+    fun offlineNextWordsUseThePhraseAndSecondaryLanguage() {
+        assertEquals("verstanden", SuggestionEngine.suggestionsFor("Ich habe ", "de").first().text)
+        assertEquals("vereinbart", SuggestionEngine.suggestionsFor("Wir haben ", "de").first().text)
+        assertEquals("ready", SuggestionEngine.suggestionsFor("I am ", "de", secondaryLocales = listOf("en")).first().text)
+        assertTrue(SuggestionEngine.suggestionsFor("Quarzstein ", "de").isEmpty())
+        assertEquals("heute" to "", SuggestionEngine.extractPreviousTwoWords("Hallo.\nHeute ".lowercase()))
+    }
+
+    @Test
+    fun addressSuggestionsAreExclusiveAndDoNotAddSpaces() {
+        val suggestions = SuggestionEngine.suggestionsFor("test@gmx.", "de", isEmailField = true)
+        assertEquals("gmx.de", suggestions.single().text)
+        assertEquals(4, suggestions.single().replaceCharCount)
+        assertTrue(!suggestions.single().appendSpace)
+        assertTrue(SuggestionEngine.suggestionsFor("hallo", "de", isEmailField = true).isEmpty())
+    }
+
+    @Test
     fun suggestsTypoCorrectionAndCapitalizesGermanNouns() {
         assertEquals("nicht", SuggestionEngine.autoCorrectionFor("nciht", "de"))
         assertEquals("Zeit", SuggestionEngine.autoCorrectionFor("zeit", "de"))
@@ -76,5 +94,24 @@ class SuggestionEngineTest {
         assertTrue(SuggestionEngine.suggestionsFor("I am ", "en", isUrlField = true).none { it.isNextWord })
         assertTrue(SuggestionEngine.suggestionsFor("Ich bi", "de").none { it.isNextWord })
         assertTrue(SuggestionEngine.suggestionsFor("Ich bin. ", "de").none { it.text == "gleich" })
+    }
+
+    @Test
+    fun keyboardProximityRanksAdjacentKeyTyposHigherThanDistantTypos() {
+        val adjDist = SuggestionEngine.weightedKeyboardDistance("hsllo", "hallo", "de")
+        val farDist = SuggestionEngine.weightedKeyboardDistance("hpllo", "hallo", "de")
+        assertTrue("Expected adjacent s<->a distance ($adjDist) < distant p<->a ($farDist)", adjDist < farDist)
+
+        val chips = SuggestionEngine.suggestionsFor("hsllo", "de", includeEmoji = false)
+        assertTrue(chips.any { it.text.equals("hallo", ignoreCase = true) })
+    }
+
+    @Test
+    fun matchesGermanUmlautWordsFromAsciiTyping() {
+        val uberChips = SuggestionEngine.suggestionsFor("uber", "de", includeEmoji = false)
+        assertTrue(uberChips.any { it.text == "über" })
+
+        val fuerChips = SuggestionEngine.suggestionsFor("fuer", "de", includeEmoji = false)
+        assertTrue(fuerChips.any { it.text == "für" })
     }
 }
