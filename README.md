@@ -1,75 +1,90 @@
-# Tapwing Keyboard (`com.tapwing.keyboard`)
+<div align="center">
 
-**Tapwing** is an independent **Material 3 Expressive + Apple Liquid Glass** Android keyboard built in Kotlin and Jetpack Compose on top of official Android APIs (`InputMethodService`, `SpeechRecognizer`, CameraX + ML Kit Text Recognition, System Photo Picker, AndroidX DataStore, and hardware-backed `AndroidKeyStore`).
+<img src="docs/screenshots/tapwing-header.jpg" width="900" alt="Tapwing Keyboard mit der lavendelfarbenen Tastatur und Wortvorschlägen" />
 
----
+# Tippen, diktieren und Text bearbeiten
 
-## Highlights
+Tapwing verbindet Wortvorschläge, Spracheingabe, Schreibhilfe und eine anpassbare Werkzeugleiste. Schreiben, Lernen und viele Werkzeuge laufen direkt auf deinem Gerät.
 
-- **1:1 Pixel Slate & Material 3 Expressive Capsule UI**: Full stadium-pill keycaps with centered top symbol hints (`% \ | = [ ] < > { }`, `@ # € _ & - + ( )`, `* " ' : ; ! ?`), dedicated `1–0` number row, clean unmarked spacebar, 5 themes (`Pixel Slate`, `Expressive Lavender`, `Material You Dynamic`, `Pixel Blue`, `AMOLED Dark`), and a borderless bottom-right dismiss chevron (`⌄`).
-- **Apple Mode (Liquid Glass)**: Toggleable translucent glass keycaps with vertical specular highlights, spring keycap animations, and floating preview bubbles — while preserving the exact same 1:1 key layout.
-- Use the floating tab bar in **Settings** to switch between Home, Writing, Keyboard, and Tools. Home includes global search, the keyboard test field, and setup recommendations. On scrollable pages, the bar slides away as you move down and returns when you scroll back up.
-- **Customizable & Reorderable Quick-Actions Strip**: Choose and reorder up to 8 shortcuts above the keyboard (`QuickBarAction`), either directly inline via long-press / *Tools Hub > Edit bar* (`QuickBarCustomizePanel`) with horizontal drag-swap and move controls, or in *Settings > Quick Bar* (`QuickBarSettingsScreen`).
-- **Gboard/PixelBoard `.zip` Dictionary Import/Export & Adaptive Learning**: 1:1 `.zip` (`dictionary.txt` with `# Gboard Dictionary version:1` / `version:2`), `.txt`, `.csv`/`.tsv`, `key => phrase`, and `.json` import plus `.zip` & `.json` export. Automatically learns unigrams, next-word bigrams, shortcuts (`/datum`, `/date`, `/zeit`, `/time`), and rejected autocorrections on-device.
-- **Dynamic Live Resizing & Power Tools**: Smooth continuous height slider (`75%–135%`) + live interactive drag-border resizer, bottom offset control, **Cursor & Text Edit D-Pad** (`← ↑ ↓ →`, `Select`, `Copy/Cut/Paste`), **One-Handed Mode** (Left/Right), **Inline Math** (`24*7=` → `168`), **Swipe-Backspace Word Delete**, **In-Keyboard Quick Search**, and **Incognito Mode**.
-- **Dictation**: Use Android offline for live text when your device has a supported language pack, or download Whisper to process audio on the device. Whisper can process completed phrases during recording when it detects clear pauses. For optional live cloud dictation, choose Gemini Live and save your own Google API key. The separate cloud mode sends audio after you stop, using your Gemini or OpenAI key. The key field includes setup instructions.
-- Tap a **next-word suggestion** to insert it with a space and see likely continuations. Tapwing uses the current sentence, learned word sequences, and app-specific usage on the device. Turn off app-specific learning under Dictionary & Learning.
-- **Undo** restores the text changed by a correction, suggestion, dictation, writing action, or paste while the edit still matches the current field. The clipboard keeps one entry per identical text or image. It preserves pinned items and skips clips Android marks as sensitive.
-- **Autofill** on Android 11+ shows suggestions supplied by your password manager above the keys. In *Settings > Passwords and autofill*, open Android’s credential settings. For Bitwarden, select it as Android’s autofill service and enable Inline in Bitwarden. The site or app must expose supported sign-in fields.
-- Choose a search engine and where to open results under *Settings > Quick search*. The default browser is used unless you choose a compatible installed app. You can also insert the search link into the current editor.
-- **AI Writing Tools (Offline + Bring-Your-Own-Key)**: Inline *Proofread*, *Professional*, *Casual*, *Concise*, *Emotive*, and *Rephrase* modes via offline rules (`LocalWritingAssistant`) or optional **Google Gemini** / **OpenAI-compatible** API key encrypted in `AndroidKeyStore`. The AI settings link to provider model lists and let you copy the configured model ID.
-- **Privacy-First OCR & Extended Clipboard**: Keeps up to 200 (default 100) unpinned + pinned clips with configurable retention (`1h` to `Never`), live CameraX + ML Kit OCR, and Android System Photo Picker single-image OCR (zero gallery storage permissions required).
+![Version 2.2.0](https://img.shields.io/badge/Version-2.2.0-6750A4?style=flat-square)
+![Android 10+](https://img.shields.io/badge/Android-10%2B-307D5D?style=flat-square&logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7451BD?style=flat-square&logo=kotlin&logoColor=white)
+![Apache 2.0](https://img.shields.io/badge/Lizenz-Apache%202.0-405773?style=flat-square)
 
----
+[Google Play · Geschlossener Test](https://play.google.com/apps/testing/com.tapwing.keyboard) · [Screenshots](#screenshots) · [Funktionen](#funktionen) · [Datenschutz](#verarbeitung-und-datenschutz) · [Build](#lokal-bauen) · [English](docs/README.en.md)
 
-## Project Structure
+</div>
 
-```text
-Tapwing/
-├── app/src/main/java/com/tapwing/keyboard/
-│   ├── ai/          # LocalWritingAssistant, CloudAiClient, WritingToolsEngine
-│   ├── clipboard/   # ClipboardStore, ScreenshotMonitor (Photo Picker OCR helper)
-│   ├── data/        # QuickBarAction, TapwingPreferences (DataStore), SecureKeyStorage
-│   ├── dictionary/  # CustomDictionaryParser (.zip/tsv/json), AdaptiveDictionaryStore, SuggestionEngine
-│   ├── emoji/       # EmojiCatalog
-│   ├── ime/         # TapwingInputMethodService, PermissionBridgeActivity
-│   ├── ocr/         # ScanTextActivity (CameraX + ML Kit + PickVisualMedia), OcrResultBus
-│   ├── settings/    # SettingsActivity, AppleSettingsComponents, SettingsScreens
-│   ├── ui/keyboard/ # KeyboardGrid, SuggestionStrip, QuickBarCustomizePanel & Inline Panels
-│   ├── ui/theme/    # Material 3 Expressive & Apple Liquid Glass palettes
-│   ├── undo/        # UndoManager & Proactive Undo stack
-│   └── voice/       # NaturalVoiceCleaner & TapwingVoiceController
-├── app/src/test/    # JUnit unit tests for the core engines
-├── docs/play-store/ # Store listings (DE/EN) & Play Console Data Safety checklist
-├── scripts/         # Automated test, build, sign, 16KB ELF align check & checksum script
-├── ARCHITECTURE_ANALYSIS.md
-├── PLAY_STORE_GUIDE.md
-└── PRIVACY_POLICY.md
+> [!NOTE]
+> Tapwing 2.2.0 ist im geschlossenen Google-Play-Test. Der Installationslink setzt einen freigeschalteten Testerzugang voraus.
+
+## Screenshots
+
+Echte Aufnahmen von Tapwing 2.2.0 auf einem Android-16-Emulator mit Beispieldaten.
+
+| Tippen | Diktat | Werkzeuge |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/tippen.jpg" width="230" alt="Deutsches QWERTZ-Layout mit Vorschlägen nach dem Wort Ich" /> | <img src="docs/screenshots/diktat.jpg" width="230" alt="Diktat-Einstellungen mit Android offline, Whisper und Gemini Live" /> | <img src="docs/screenshots/werkzeuge.jpg" width="230" alt="Geöffnete Werkzeugübersicht mit Schreibhilfe, Scannen und Text-Edit" /> |
+
+| Design | Zwischenablage | Schreibhilfe |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/themen.jpg" width="230" alt="Design-Einstellungen mit Höhenregler und ausgewähltem Lavendel-Farbschema" /> | <img src="docs/screenshots/zwischenablage.jpg" width="230" alt="Dunkle Tastatur mit einem Einfügevorschlag für einen kopierten Beispielsatz" /> | <img src="docs/screenshots/schreibhilfe.jpg" width="230" alt="Einstellungen für lokale und optionale Cloud-Schreibhilfe" /> |
+
+## Funktionen
+
+| Bereich | Was du damit tun kannst |
+| --- | --- |
+| **Tippen** | Zwischen Sprache und Layout wechseln, per Wischgeste tippen, Folgewörter übernehmen und Autokorrekturen zurücknehmen. Tapwing lernt Wortpaare auf dem Gerät und kann Vorschläge pro App anpassen. |
+| **Diktat** | Per Android-Sprachdienst oder lokal mit Whisper diktieren. Mit einem unterstützten Android-Offline-Sprachpaket erscheint der Text beim Sprechen. Whisper kann fertige Abschnitte in deutlichen Sprechpausen verarbeiten. |
+| **Schreibhilfe** | Text korrigieren, kürzen und umformulieren. Die Optionen umfassen eingebaute Regeln, herunterladbare lokale Sprachmodelle und Cloud-Dienste mit eigenem Schlüssel. |
+| **Zwischenablage** | Kopierte Texte direkt einfügen, häufig genutzte Einträge anheften und die Aufbewahrung einstellen. Kopierte Bestätigungscodes können kurz zum Einfügen angeboten werden. |
+| **Text scannen** | Text mit der Kamera oder aus einem einzeln ausgewählten Foto erkennen und ins Schreibfeld übernehmen. |
+| **Wörterbuch und Textbausteine** | Offline-Wörterbücher herunterladen, eigene Wörter importieren und exportieren sowie Kürzel wie `/datum` oder eigene Textbausteine einsetzen. |
+| **Layout und Schnellleiste** | Höhe, Design und Schnellaktionen anpassen. Einhand- und geteiltes Layout stehen zur Auswahl. Das Steuerkreuz hilft beim Navigieren, Markieren und Kopieren. |
+| **Weitere Werkzeuge** | Rechnungen wie `24*7=` im Eingabefeld lösen, Tippstatistiken ansehen und Android-Autofill (automatisches Ausfüllen durch den gewählten Dienst) ab Android 11 nutzen. |
+
+### Neu in 2.2.0
+
+- **Live-Diktat:** Android-Offline-Diktat zeigt Text beim Sprechen. Whisper kann in Sprechpausen bereits abgeschlossene Abschnitte verarbeiten. Für optionales Cloud-Streaming steht Gemini Live zur Verfügung.
+- **Wortvorschläge:** Ein Tipp auf einen Vorschlag setzt das Wort mit Leerzeichen ein und zeigt passende Folgewörter an.
+- **Einfügevorschläge:** Kopierter Text kann direkt in der Vorschlagsleiste erscheinen. Private Felder und von Android als sensibel markierte Clips werden ausgefiltert.
+
+## Erste Schritte
+
+1. Tapwing über den [geschlossenen Google-Play-Test](https://play.google.com/apps/testing/com.tapwing.keyboard) installieren oder [lokal bauen](#lokal-bauen).
+2. Tapwing öffnen und über **Aktivieren** in den Android-Tastatureinstellungen einschalten.
+3. Über **Auswählen** zu Tapwing wechseln und im Testfeld tippen.
+4. Für Diktat unter **Spracheingabe** eine Methode wählen. Android offline braucht ein passendes System-Sprachpaket. Für Whisper das gewünschte Modell in Tapwing herunterladen.
+
+## Verarbeitung und Datenschutz
+
+| Auswahl | Was mit den Daten passiert |
+| --- | --- |
+| **Tippen, Wörterbuch, Zwischenablage und Texterkennung** | Die Verarbeitung findet auf dem Gerät statt. Der Inkognito-Modus setzt Lernen und Zwischenablage-Verlauf aus. |
+| **Android offline und Whisper** | Audio wird auf dem Gerät verarbeitet. Sprachpakete und herunterladbare Modelle müssen vorher verfügbar sein. |
+| **Android-Sprachdienst** | Abhängig von Gerät und Sprachdienst kann die Erkennung eine Internetverbindung nutzen. |
+| **Gemini Live** | Wenn du den Modus mit eigenem Schlüssel einrichtest, sendet Tapwing Audio während des Diktats an Google. |
+| **Cloud-Diktat und Cloud-Schreibhilfe** | Beim separaten Cloud-Diktat geht die Aufnahme nach dem Stopp an den gewählten Anbieter. Bei optionaler Cloud-Textbearbeitung wird der zu bearbeitende Text übertragen. |
+
+Tapwing enthält keine Werbung oder Analyse-SDKs. Die [Datenschutzerklärung](PRIVACY_POLICY.md) erklärt Berechtigungen, Speicherorte und Löschmöglichkeiten.
+
+## Lokal bauen
+
+Voraussetzungen sind **JDK 21**, **Android SDK 36** und **Build-Tools 36.0.0**. Der Gradle-Wrapper liegt im Projekt. Android Studio kann den SDK-Pfad in `local.properties` eintragen. Alternativ setzt du dort `sdk.dir=/pfad/zum/Android/sdk`.
+
+```bash
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
----
+Die installierbare Debug-Datei liegt unter `app/build/outputs/apk/debug/app-debug.apk`. Für signierte APK- und AAB-Dateien beschreibt der [Play-Store-Leitfaden](PLAY_STORE_GUIDE.md) die Einrichtung. Das Skript `./scripts/build-release.sh` schreibt seine Ausgaben nach `dist/`.
 
-## Building Locally (APK & AAB)
+## Projektstruktur und Dokumentation
 
-Requirements: **JDK 21**, **Android SDK (API 36, Build-Tools 36.0.0)**.
+| Pfad | Inhalt |
+| --- | --- |
+| [`app/src/main/`](app/src/main/) | Android-Tastatur, Compose-Oberfläche, Diktat, Wörterbuch, Schreibhilfe und Texterkennung |
+| [`app/src/test/`](app/src/test/) | Tests für Sprachverarbeitung, Vorschläge, Wischgesten, Zwischenablage und weitere Kernfunktionen |
+| [`docs/play-store/`](docs/play-store/) | Store-Texte und Hinweise für die Play Console |
+| [`ARCHITECTURE_ANALYSIS.md`](ARCHITECTURE_ANALYSIS.md) | Technischer Hintergrund zu Tastatur, KI und Android-Schnittstellen |
 
-1. Create `local.properties` (excluded from Git):
-   ```properties
-   sdk.dir=/path/to/Android/sdk
-   ```
-2. Optional release signing outside the repository (`~/.tapwing-signing/keystore.properties` or env vars `TAPWING_KEYSTORE_PATH`, `TAPWING_STORE_PASSWORD`, `TAPWING_KEY_ALIAS`, `TAPWING_KEY_PASSWORD`).
-3. Run unit tests and build a debug APK using `./gradlew testDebugUnitTest assembleDebug`. With release signing configured, build and verify the signed APK and AAB:
-   ```bash
-   ./scripts/build-release.sh
-   ```
-   Release artifacts are written to `dist/` and named with the version from `app/build.gradle.kts`. The script also writes `dist/SHA256SUMS.txt`.
-
----
-
-## Documentation & License
-
-- [ARCHITECTURE_ANALYSIS.md](ARCHITECTURE_ANALYSIS.md) — Clean-room mapping & on-device vs. cloud AI breakdown
-- [PLAY_STORE_GUIDE.md](PLAY_STORE_GUIDE.md) & [docs/play-store/](docs/play-store/) — Signing, Store Listings, Data Safety & Google Play submission checklist
-- [PRIVACY_POLICY.md](PRIVACY_POLICY.md) — Bilingual EN/DE Privacy Policy
-- [LICENSE](LICENSE) and [licensing notes](docs/licensing.md) explain which material is source-available and which remains under Apache-2.0.
-- [CONTRIBUTING](CONTRIBUTING.md) explains how to submit a pull request. [SECURITY](SECURITY.md) explains how to report vulnerabilities privately.
+Fehler und Vorschläge kannst du auf [GitHub Issues](https://github.com/mixxermannipro/tapwing-keyboard/issues) melden. Tapwing steht unter der [Apache-Lizenz 2.0](LICENSE).
