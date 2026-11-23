@@ -1,10 +1,10 @@
 # Tapwing Keyboard (`com.tapwing.keyboard`)
 
-**Tapwing** is a clean-room, Apache-2.0 **Material 3 Expressive + Apple Liquid Glass** Android keyboard built in Kotlin and Jetpack Compose on top of official Android APIs (`InputMethodService`, `SpeechRecognizer`, CameraX + ML Kit Text Recognition, System Photo Picker, AndroidX DataStore, and hardware-backed `AndroidKeyStore`).
+**Tapwing** is an independent **Material 3 Expressive + Apple Liquid Glass** Android keyboard built in Kotlin and Jetpack Compose on top of official Android APIs (`InputMethodService`, `SpeechRecognizer`, CameraX + ML Kit Text Recognition, System Photo Picker, AndroidX DataStore, and hardware-backed `AndroidKeyStore`).
 
 ---
 
-## Highlights (`v1.2.0`)
+## Highlights
 
 - **1:1 Pixel Slate & Material 3 Expressive Capsule UI**: Full stadium-pill keycaps with centered top symbol hints (`% \ | = [ ] < > { }`, `@ # € _ & - + ( )`, `* " ' : ; ! ?`), dedicated `1–0` number row, clean unmarked spacebar, 5 themes (`Pixel Slate`, `Expressive Lavender`, `Material You Dynamic`, `Pixel Blue`, `AMOLED Dark`), and a borderless bottom-right dismiss chevron (`⌄`).
 - **Apple Mode (Liquid Glass)**: Toggleable translucent glass keycaps with vertical specular highlights, spring keycap animations, and floating preview bubbles — while preserving the exact same 1:1 key layout.
@@ -39,7 +39,7 @@ Tapwing/
 │   ├── ui/theme/    # Material 3 Expressive & Apple Liquid Glass palettes
 │   ├── undo/        # UndoManager & Proactive Undo stack
 │   └── voice/       # NaturalVoiceCleaner & TapwingVoiceController
-├── app/src/test/    # JUnit unit tests (23 tests across all core engines)
+├── app/src/test/    # JUnit unit tests for the core engines
 ├── docs/play-store/ # Store listings (DE/EN) & Play Console Data Safety checklist
 ├── scripts/         # Automated test, build, sign, 16KB ELF align check & checksum script
 ├── ARCHITECTURE_ANALYSIS.md
@@ -58,11 +58,11 @@ Requirements: **JDK 21**, **Android SDK (API 36, Build-Tools 36.0.0)**.
    sdk.dir=/path/to/Android/sdk
    ```
 2. Optional release signing outside the repository (`~/.tapwing-signing/keystore.properties` or env vars `TAPWING_KEYSTORE_PATH`, `TAPWING_STORE_PASSWORD`, `TAPWING_KEY_ALIAS`, `TAPWING_KEY_PASSWORD`).
-3. Run tests, build signed APK + AAB, verify signatures & 16 KB ELF alignment:
+3. Run unit tests and build a debug APK using `./gradlew testDebugUnitTest assembleDebug`. With release signing configured, build and verify the signed APK and AAB:
    ```bash
    ./scripts/build-release.sh
    ```
-   Outputs are written to `dist/Tapwing-v1.2.0-release.apk`, `dist/Tapwing-v1.2.0-release.aab`, `dist/Tapwing-v1.2.0-mapping.txt`, and `dist/SHA256SUMS.txt`.
+   Release artifacts are written to `dist/` and named with the version from `app/build.gradle.kts`. The script also writes `dist/SHA256SUMS.txt`.
 
 ---
 
@@ -71,4 +71,5 @@ Requirements: **JDK 21**, **Android SDK (API 36, Build-Tools 36.0.0)**.
 - [ARCHITECTURE_ANALYSIS.md](ARCHITECTURE_ANALYSIS.md) — Clean-room mapping & on-device vs. cloud AI breakdown
 - [PLAY_STORE_GUIDE.md](PLAY_STORE_GUIDE.md) & [docs/play-store/](docs/play-store/) — Signing, Store Listings, Data Safety & Google Play submission checklist
 - [PRIVACY_POLICY.md](PRIVACY_POLICY.md) — Bilingual EN/DE Privacy Policy
-- [LICENSE](LICENSE) — Apache License 2.0
+- [LICENSE](LICENSE) and [licensing notes](docs/licensing.md) explain which material is source-available and which remains under Apache-2.0.
+- [CONTRIBUTING](CONTRIBUTING.md) explains how to submit a pull request. [SECURITY](SECURITY.md) explains how to report vulnerabilities privately.

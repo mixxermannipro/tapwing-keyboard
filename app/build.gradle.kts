@@ -8,13 +8,9 @@ plugins {
 
 fun loadExternalSigningProperties(): Properties {
     val props = Properties()
-    val candidates = listOf(
-        file("/home/manuelblasaditsch/.tapwing-signing/keystore.properties"),
-        file("${System.getProperty("user.home")}/.tapwing-signing/keystore.properties")
-    )
-    val existing = candidates.firstOrNull { it.isFile }
-    if (existing != null) {
-        existing.inputStream().use { props.load(it) }
+    val config = file("${System.getProperty("user.home")}/.tapwing-signing/keystore.properties")
+    if (config.isFile) {
+        config.inputStream().use { props.load(it) }
     }
     return props
 }

@@ -1,13 +1,29 @@
 # Contributing to Tapwing
 
-Thank you for your interest in improving Tapwing. Please open an issue before undertaking substantial changes, then submit a focused pull request describing the change, testing, and any third-party code or assets.
+Open an issue for substantial proposals. Submit focused pull requests and
+describe the change, what you tested and the origin of any third-party code
+or assets. Before submitting code, run:
 
-Only submit code and assets you have the right to contribute. Do not include secrets, personal data, proprietary material, or copied code from other projects without compatible permissions.
+```sh
+./gradlew testDebugUnitTest assembleDebug
+git diff --check
+```
 
-## Licensing notice
+## Contribution rights
 
-The repository currently contains an Apache License 2.0 notice. Existing rights granted under that license are not withdrawn by this contribution guide. The maintainers are reviewing a potential future source-available licensing model; do not assume that this guide changes the current license.
+See the [license](LICENSE) and [licensing notes](docs/licensing.md) for the
+Apache-2.0 baseline and the source-available terms for marked new material.
+Submissions intended for the source-available project use the express terms
+below, including when they add new portions to an Apache-2.0 file.
 
-By submitting a contribution, you confirm that you have authority to submit it under the applicable project license and agree that it may be reviewed and incorporated under the project's current licensing terms. Any proposed relicensing of your contribution requires separate permission where applicable.
+You retain ownership of your contribution. By intentionally submitting a pull
+request for inclusion, you grant the project maintainer a perpetual,
+worldwide, non-exclusive, royalty-free license to review, reproduce, modify,
+incorporate, maintain and distribute your contribution as part of the project,
+including under the published source-available terms and in the project's
+official releases. Only submit material for which you can grant these
+permissions. Identify any separately licensed portions and their notices
+in the pull request. Previously granted rights remain valid.
 
-For vulnerabilities, please report privately to the repository maintainer instead of opening a public issue.
+Keep keys, signing files and personal data out of commits and screenshots.
+Use the [private reporting process](SECURITY.md) for vulnerabilities.
