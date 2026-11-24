@@ -119,6 +119,17 @@ private const val PASTE_CHIP_LIFETIME_MS = 20_000L
 private const val VERIFICATION_CODE_LIFETIME_MS = 90_000L
 private const val SCREENSHOT_LIFETIME_SEC = 180L
 
+private val PASTE_DISMISS_KEYS = setOf(
+    KeyActionType.CHAR,
+    KeyActionType.SPACE,
+    KeyActionType.ENTER,
+    KeyActionType.BACKSPACE,
+    KeyActionType.COMMA,
+    KeyActionType.PERIOD
+)
+private val PUNCTUATION_OUTPUTS = setOf(".", ",", "!", "?", ":", ";")
+private val WORD_DELETE_REGEX = Regex("""\s*\S+\s*$""")
+
 class TapwingInputMethodService :
     InputMethodService(),
     LifecycleOwner,
@@ -201,6 +212,7 @@ class TapwingInputMethodService :
     private var writingJob: Job? = null
     private var writingTarget: WritingTarget? = null
     private var lastWordBeforeEmoji: String = ""
+    private var lastSuggestionKey: String = ""
 
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         syncSystemClipboard(updateStrip = inputViewActive)
@@ -468,7 +480,7 @@ class TapwingInputMethodService :
                     quickSearchInitial = quickSearchInitial,
                     onKeyPress = ::handleKeyPress,
                     onSwipeWord = ::handleSwipeWord,
-                    onCursorMoveSteps = ::moveCursorBy,
+                    onCursorMove = ::moveCursor2D,
                     onDeletePreviousWord = ::deletePreviousWordWithUndo,
                     onSwitchLanguage = ::toggleLocale,
                     onToggleOneHandedSide = ::swapOneHandedSide,
@@ -618,6 +630,7 @@ class TapwingInputMethodService :
             cancelVoice()
             undoManager.clear()
             proactiveUndoState = null
+            lastSuggestionKey = ""
             clearAutofillSuggestions()
         }
         if (currentEditorInfo != null && privateEditor && !nextPrivate) {
@@ -675,6 +688,7 @@ class TapwingInputMethodService :
         pendingSmartUndoPair = null
         pendingSuggestionSpace = null
         lastSpaceTapMs = 0L
+        lastSuggestionKey = ""
 
         consumePendingOcrText()
         refreshContextAndSuggestions()
@@ -695,6 +709,8 @@ class TapwingInputMethodService :
         inputViewActive = false
         pasteExpiryJob?.cancel()
         pasteSuggestion = null
+        if (::dictionaryStore.isInitialized) dictionaryStore.flush()
+        if (::statsStore.isInitialized) statsStore.flush()
         if (finishingInput) clearAutofillSuggestions()
         cancelVoice(keepRotationResume = !finishingInput)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
@@ -868,6 +884,8 @@ class TapwingInputMethodService :
     }
 
     override fun onDestroy() {
+        if (::dictionaryStore.isInitialized) dictionaryStore.flush()
+        if (::statsStore.isInitialized) statsStore.flush()
         runCatching {
             val cm = getSystemService(ClipboardManager::class.java)
             cm?.removePrimaryClipChangedListener(clipboardListener)
@@ -915,13 +933,12 @@ class TapwingInputMethodService :
     private fun handleKeyPress(key: KeySpec, output: String) {
         voiceController.clearError()
         val ic = currentInputConnection ?: return
-        if (key.type in setOf(KeyActionType.CHAR, KeyActionType.SPACE, KeyActionType.ENTER,
-                KeyActionType.BACKSPACE, KeyActionType.COMMA, KeyActionType.PERIOD)
-        ) {
+        if (key.type in PASTE_DISMISS_KEYS) {
             pasteSuggestion?.takeUnless { it.verificationCode }?.let { dismissPasteSuggestion(it.timestamp) }
         }
         when (key.type) {
             KeyActionType.SHIFT -> {
+                if (tryCycleSelectedTextCase(ic)) return
                 shiftState = when (shiftState) {
                     ShiftState.OFF -> ShiftState.ONCE
                     ShiftState.ONCE -> ShiftState.CAPS_LOCK
@@ -939,7 +956,7 @@ class TapwingInputMethodService :
                     KeyboardLayoutPage.LETTERS
                 }
                 if (layoutPage == KeyboardLayoutPage.LETTERS) {
-                    refreshContextAndSuggestions()
+                    refreshContextAndSuggestions(force = true)
                 }
             }
             KeyActionType.SYMBOLS_EXT_TOGGLE -> {
@@ -983,7 +1000,7 @@ class TapwingInputMethodService :
                 pendingSmartUndoPair = null
                 var correction: Pair<String, String>? = null
                 if (key.type == KeyActionType.PERIOD || key.type == KeyActionType.COMMA ||
-                    output in listOf(".", ",", "!", "?", ":", ";")
+                    output in PUNCTUATION_OUTPUTS
                 ) {
                     // Remove only the space inserted by Tapwing at this caret position.
                     val spaceAnchor = pendingSuggestionSpace
@@ -1009,6 +1026,30 @@ class TapwingInputMethodService :
         }
     }
 
+    private fun tryCycleSelectedTextCase(ic: android.view.inputmethod.InputConnection): Boolean {
+        val selected = ic.getSelectedText(0)?.toString().orEmpty()
+        if (selected.isEmpty() || selected.none(Char::isLetter)) return false
+        val cycled = SelectedTextCaseCycler.cycle(selected, currentPrefs.activeLocale)
+        if (cycled == selected) return false
+
+        val selectionStart = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ic.getSurroundingText(0, 0, 0)?.let { s ->
+                if (s.offset >= 0 && s.selectionStart >= 0) s.offset + s.selectionStart else null
+            }
+        } else null
+
+        ic.beginBatchEdit()
+        try {
+            if (!ic.commitText(cycled, 1)) return false
+            if (selectionStart != null) {
+                ic.setSelection(selectionStart, selectionStart + cycled.length)
+            }
+        } finally {
+            ic.endBatchEdit()
+        }
+        return true
+    }
+
     private fun handleSwipeWord(points: List<SwipePoint>, keyCenters: List<KeyCenter>) {
         if (!languageToolsAllowed || !currentPrefs.glideTypingEnabled) return
         val ic = currentInputConnection ?: return
@@ -1024,7 +1065,7 @@ class TapwingInputMethodService :
             dictionaryStore = dictionaryStore.takeUnless { currentPrefs.incognitoMode },
             secondaryLocales = secondaryLocales(),
             atSentenceStart = atStart,
-            offlinePack = offlinePackManager.getLoadedPack(currentPrefs.activeLocale)
+            offlinePack = offlinePackManager.getCachedPack(currentPrefs.activeLocale)
         )
         val top = candidates.firstOrNull() ?: return
         val needsSpace = before.isNotEmpty() && !before.last().isWhitespace()
@@ -1154,7 +1195,7 @@ class TapwingInputMethodService :
             dictionaryStore = dictionaryStore.takeUnless { currentPrefs.incognitoMode },
             atSentenceStart = atStart,
             secondaryLocales = secondaryLocales(),
-            offlinePack = offlinePackManager.getLoadedPack(currentPrefs.activeLocale)
+            offlinePack = offlinePackManager.getCachedPack(currentPrefs.activeLocale)
         )
         if (correction != null && correction != trailing &&
             ic.getSelectedText(0).isNullOrEmpty() &&
@@ -1181,8 +1222,9 @@ class TapwingInputMethodService :
         if (currentPrefs.smartBackspaceUndo && performUndo(smartBackspace = true)) return
         pendingSmartUndoPair = null
 
-        ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
-        ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+        val now = SystemClock.uptimeMillis()
+        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0, 0))
+        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0, 0))
         refreshContextAndSuggestions()
     }
 
@@ -1191,7 +1233,7 @@ class TapwingInputMethodService :
         pendingSuggestionSpace = null
         val ic = currentInputConnection ?: return
         val before = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
-        val match = Regex("""\s*\S+\s*$""").find(before) ?: return
+        val match = WORD_DELETE_REGEX.find(before) ?: return
         val deleted = match.value
         if (!ic.getSelectedText(0).isNullOrEmpty() || !ic.deleteSurroundingText(deleted.length, 0)) return
         val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
@@ -1205,13 +1247,25 @@ class TapwingInputMethodService :
         refreshContextAndSuggestions()
     }
 
-    private fun moveCursorBy(steps: Int) {
-        if (steps == 0) return
+    private fun moveCursor2D(dx: Int, dy: Int) {
+        if (dx == 0 && dy == 0) return
         val ic = currentInputConnection ?: return
-        val keyCode = if (steps > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
-        repeat(kotlin.math.abs(steps)) {
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
-            ic.sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+        pendingSmartUndoPair = null
+        pendingSuggestionSpace = null
+        fun sendDpad(code: Int, count: Int) {
+            repeat(count) {
+                val now = SystemClock.uptimeMillis()
+                ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, 0))
+                ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0, 0))
+            }
+        }
+        if (dx != 0) {
+            val hCode = if (dx > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT
+            sendDpad(hCode, kotlin.math.abs(dx))
+        }
+        if (dy != 0) {
+            val vCode = if (dy > 0) KeyEvent.KEYCODE_DPAD_DOWN else KeyEvent.KEYCODE_DPAD_UP
+            sendDpad(vCode, kotlin.math.abs(dy))
         }
     }
 
@@ -1346,17 +1400,22 @@ class TapwingInputMethodService :
         return true
     }
 
-    private fun refreshContextAndSuggestions() {
+    private fun refreshContextAndSuggestions(force: Boolean = false) {
         val ic = currentInputConnection
         if (privateEditor || (!languageToolsAllowed && !isEmailField && !isUrlField) ||
             !ic?.getSelectedText(0).isNullOrEmpty()
         ) {
+            lastSuggestionKey = ""
             if (shiftState == ShiftState.ONCE) shiftState = ShiftState.OFF
             isTyping = false
             suggestions = emptyList()
             return
         }
         val before = ic?.getTextBeforeCursor(160, 0)?.toString().orEmpty()
+        val contextKey = "${currentPrefs.activeLocale}|${currentPrefs.incognitoMode}|$isEmailField|$isUrlField|$before"
+        if (!force && contextKey == lastSuggestionKey) return
+        lastSuggestionKey = contextKey
+
         val trailing = SuggestionEngine.extractTrailingWord(before)
         isTyping = trailing.isNotEmpty() || isEmailField || isUrlField
         val latestClipText = if (clipboardAllowed()) {
@@ -1372,7 +1431,7 @@ class TapwingInputMethodService :
             secondaryLocales = secondaryLocales(),
             isEmailField = isEmailField,
             isUrlField = isUrlField,
-            offlinePack = offlinePackManager.getLoadedPack(currentPrefs.activeLocale),
+            offlinePack = offlinePackManager.getCachedPack(currentPrefs.activeLocale),
             appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null,
             latestClipboardText = latestClipText,
             userName = currentPrefs.snippetUserName,

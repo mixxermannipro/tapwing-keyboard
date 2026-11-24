@@ -104,7 +104,7 @@ fun KeyboardGrid(
     imeActionLabel: KeyActionLabel,
     onKeyPress: (KeySpec, String) -> Unit,
     onSwipeWord: (List<SwipePoint>, List<KeyCenter>) -> Unit = { _, _ -> },
-    onCursorMoveSteps: (Int) -> Unit,
+    onCursorMove: (Int, Int) -> Unit,
     onDeletePreviousWord: () -> Unit,
     onSwitchLanguage: () -> Unit,
     onToggleOneHandedSide: () -> Unit = {},
@@ -125,9 +125,11 @@ fun KeyboardGrid(
         )
     }
 
+    val gestureScope = rememberCoroutineScope()
     var altPopup by remember { mutableStateOf<AlternatePopup?>(null) }
     var lastAltPopup by remember { mutableStateOf<AlternatePopup?>(null) }
     var activePreview by remember { mutableStateOf<KeyPreviewBubble?>(null) }
+    var trackpadModeActive by remember { mutableStateOf(false) }
     var gridLeftRoot by remember { mutableFloatStateOf(0f) }
     var gridTopRoot by remember { mutableFloatStateOf(0f) }
     var gridWidthPx by remember { mutableFloatStateOf(0f) }
@@ -141,6 +143,10 @@ fun KeyboardGrid(
     val deadZonePx = with(density) { 14.dp.toPx() }
     val popupRaisePx = with(density) { 48.dp.roundToPx() }
     val swipeSlopPx = with(density) { 26.dp.toPx() }
+    val cursorStepXPx = with(density) { 10.dp.toPx() }
+    val cursorStepYPx = with(density) { 22.dp.toPx() }
+    val cursorSlopPx = with(density) { 8.dp.toPx() }
+    val backspaceSwipeWordPx = with(density) { 28.dp.toPx() }
     if (altPopup != null) lastAltPopup = altPopup
 
     val currentLayoutPage by rememberUpdatedState(layoutPage)
@@ -148,10 +154,17 @@ fun KeyboardGrid(
     val currentPrefs by rememberUpdatedState(prefs)
     val currentOnSwipeWord by rememberUpdatedState(onSwipeWord)
 
+    val gridKeysAlpha by animateFloatAsState(
+        targetValue = if (trackpadModeActive) 0.28f else 1f,
+        animationSpec = tween(140, easing = FastOutSlowInEasing),
+        label = "trackpadKeysAlpha"
+    )
+
     LaunchedEffect(layoutPage, prefs.activeLocale, prefs.showNumberRow, prefs.showGermanUmlautKeys) {
         activePreview = null
         altPopup = null
         lastAltPopup = null
+        trackpadModeActive = false
         swipeTrail.clear()
         keyCenterMap.clear()
     }
@@ -195,6 +208,7 @@ fun KeyboardGrid(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .graphicsLayer { alpha = gridKeysAlpha }
                     .padding(horizontal = 2.5.dp, vertical = 1.dp)
             ) {
                 rows.forEachIndexed { rowIndex, row ->
@@ -230,6 +244,7 @@ fun KeyboardGrid(
                                             .height(rowHeight + rowGap),
                                         innerPaddingHorizontal = 2.5.dp,
                                         innerPaddingVertical = if (prefs.roundedExpressiveKeys) 3.dp else halfRowGap,
+                                        gestureScope = gestureScope,
                                         keyIdentity = keyIdentity,
                                         key = keySpec,
                                         prefs = prefs,
@@ -237,6 +252,10 @@ fun KeyboardGrid(
                                         imeActionLabel = imeActionLabel,
                                         canSwipeFromKey = isLetterCharKey && prefs.glideTypingEnabled,
                                         swipeSlopPx = swipeSlopPx,
+                                        cursorStepXPx = cursorStepXPx,
+                                        cursorStepYPx = cursorStepYPx,
+                                        cursorSlopPx = cursorSlopPx,
+                                        backspaceSwipeWordPx = backspaceSwipeWordPx,
                                         onCenterMeasured = { cx, cy ->
                                             if (isLetterCharKey) {
                                                 keyCenterMap[keySpec.label] = KeyCenter(
@@ -270,7 +289,6 @@ fun KeyboardGrid(
                                         },
                                         onLongPress = { centerX ->
                                             when {
-                                                keySpec.type == KeyActionType.SPACE -> onSwitchLanguage()
                                                 keySpec.alternates.size == 1 -> {
                                                     onKeyPress(keySpec, applyShiftCase(keySpec.alternates.first(), currentShiftState))
                                                 }
@@ -344,7 +362,14 @@ fun KeyboardGrid(
                                             }
                                         },
                                         onSwipeCancel = { swipeTrail.clear() },
-                                        onCursorMoveSteps = onCursorMoveSteps,
+                                        onCursorMove = onCursorMove,
+                                        onTrackpadModeChanged = { active ->
+                                            trackpadModeActive = active
+                                            if (active) {
+                                                activePreview = null
+                                                altPopup = null
+                                            }
+                                        },
                                         onSwipeBackspaceWord = onDeletePreviousWord
                                     )
                                     }
@@ -352,6 +377,30 @@ fun KeyboardGrid(
                             }
                         }
                     }
+                }
+            }
+
+            // 2D Spacebar Trackpad overlay badge
+            androidx.compose.animation.AnimatedVisibility(
+                visible = trackpadModeActive,
+                enter = fadeIn(tween(110)) + scaleIn(initialScale = 0.94f, animationSpec = tween(140)),
+                exit = fadeOut(tween(100)),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = kbColors.cardSurface.copy(alpha = 0.94f),
+                    border = BorderStroke(1.dp, kbColors.actionSurface.copy(alpha = 0.45f)),
+                    shadowElevation = 8.dp
+                ) {
+                    val isDe = com.tapwing.keyboard.data.KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+                    Text(
+                        text = if (isDe) "Cursor-Trackpad  ← ↑ ↓ →" else "Cursor Trackpad  ← ↑ ↓ →",
+                        color = kbColors.keyText,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                    )
                 }
             }
 
@@ -426,7 +475,7 @@ fun KeyboardGrid(
             // Per-key positioned floating preview bubble
             val preview = activePreview
             androidx.compose.animation.AnimatedVisibility(
-                visible = preview != null && altPopup == null && swipeTrail.isEmpty(),
+                visible = preview != null && altPopup == null && swipeTrail.isEmpty() && !trackpadModeActive,
                 enter = fadeIn(tween(60)) + scaleIn(initialScale = 0.88f, animationSpec = tween(80)),
                 exit = fadeOut(tween(70)),
                 modifier = Modifier.offset {
@@ -517,11 +566,22 @@ enum class KeyActionLabel {
     GO
 }
 
+private val MODIFIER_KEY_TYPES = setOf(
+    KeyActionType.SHIFT,
+    KeyActionType.BACKSPACE,
+    KeyActionType.SYMBOLS_TOGGLE,
+    KeyActionType.SYMBOLS_EXT_TOGGLE,
+    KeyActionType.COMMA,
+    KeyActionType.EMOJI_PANEL,
+    KeyActionType.PERIOD
+)
+
 @Composable
 private fun ExpressiveKeyCap(
     modifier: Modifier,
     innerPaddingHorizontal: androidx.compose.ui.unit.Dp,
     innerPaddingVertical: androidx.compose.ui.unit.Dp,
+    gestureScope: kotlinx.coroutines.CoroutineScope,
     keyIdentity: String,
     key: KeySpec,
     prefs: TapwingPrefs,
@@ -529,6 +589,10 @@ private fun ExpressiveKeyCap(
     imeActionLabel: KeyActionLabel,
     canSwipeFromKey: Boolean,
     swipeSlopPx: Float,
+    cursorStepXPx: Float,
+    cursorStepYPx: Float,
+    cursorSlopPx: Float,
+    backspaceSwipeWordPx: Float,
     onCenterMeasured: (Float, Float) -> Unit,
     onPressStateChanged: (Boolean, Float, Float) -> Unit,
     onKeySound: () -> Unit,
@@ -540,12 +604,13 @@ private fun ExpressiveKeyCap(
     onSwipeMove: (Float, Float) -> Unit,
     onSwipeFinish: () -> Unit,
     onSwipeCancel: () -> Unit,
-    onCursorMoveSteps: (Int) -> Unit,
+    onCursorMove: (Int, Int) -> Unit,
+    onTrackpadModeChanged: (Boolean) -> Unit,
     onSwipeBackspaceWord: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val view = LocalView.current
-    val scope = rememberCoroutineScope()
+    val scope = gestureScope
     var pressed by remember(keyIdentity) { mutableStateOf(false) }
     var keyLeftRoot by remember { mutableFloatStateOf(0f) }
     var keyTopRoot by remember { mutableFloatStateOf(0f) }
@@ -567,7 +632,8 @@ private fun ExpressiveKeyCap(
     val currentOnSwipeMove by rememberUpdatedState(onSwipeMove)
     val currentOnSwipeFinish by rememberUpdatedState(onSwipeFinish)
     val currentOnSwipeCancel by rememberUpdatedState(onSwipeCancel)
-    val currentOnCursorMoveSteps by rememberUpdatedState(onCursorMoveSteps)
+    val currentOnCursorMove by rememberUpdatedState(onCursorMove)
+    val currentOnTrackpadModeChanged by rememberUpdatedState(onTrackpadModeChanged)
     val currentOnSwipeBackspaceWord by rememberUpdatedState(onSwipeBackspaceWord)
 
     val pressScale by animateFloatAsState(
@@ -580,15 +646,7 @@ private fun ExpressiveKeyCap(
     )
 
     val isActionKey = key.type == KeyActionType.ENTER
-    val isModifierKey = key.type in setOf(
-        KeyActionType.SHIFT,
-        KeyActionType.BACKSPACE,
-        KeyActionType.SYMBOLS_TOGGLE,
-        KeyActionType.SYMBOLS_EXT_TOGGLE,
-        KeyActionType.COMMA,
-        KeyActionType.EMOJI_PANEL,
-        KeyActionType.PERIOD
-    )
+    val isModifierKey = key.type in MODIFIER_KEY_TYPES
 
     val cornerShape: Shape = when {
         kbColors.appleLiquidGlass || prefs.roundedExpressiveKeys -> RoundedCornerShape(percent = 50)
@@ -645,20 +703,22 @@ private fun ExpressiveKeyCap(
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 }
                 currentOnKeySound()
-                var triggeredLong = false
-                var cursorSwiping = false
-                var dragAccum = 0f
+                val tracker = SpacebarTrackpadTracker(
+                    horizontalStepPx = cursorStepXPx,
+                    verticalStepPx = cursorStepYPx,
+                    activationSlopPx = cursorSlopPx
+                )
                 var lastX = down.position.x
-                val stepPx = 22f
+                var lastY = down.position.y
 
                 val longJob: Job = scope.launch {
-                    delay(currentPrefs.longPressDelayMs.toLong() + 140L)
-                    if (!cursorSwiping) {
-                        triggeredLong = true
+                    delay(currentPrefs.longPressDelayMs.toLong() + 80L)
+                    if (!tracker.isQuickHorizontalSwiping) {
+                        tracker.activate2DTrackpad()
+                        currentOnTrackpadModeChanged(true)
                         if (currentPrefs.hapticFeedback) {
                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                         }
-                        currentOnLongPress(keyLeftRoot + keyWidthPx / 2f)
                     }
                 }
                 try {
@@ -667,31 +727,33 @@ private fun ExpressiveKeyCap(
                         val change = event.changes.firstOrNull { it.id == pid } ?: break
                         if (!change.pressed) break
                         val dx = change.position.x - lastX
+                        val dy = change.position.y - lastY
                         lastX = change.position.x
-                        if (!triggeredLong) {
-                            dragAccum += dx
-                            if (!cursorSwiping && kotlin.math.abs(change.position.x - down.position.x) > 16f) {
-                                cursorSwiping = true
-                                longJob.cancel()
-                            }
-                            if (cursorSwiping) {
-                                while (dragAccum >= stepPx) {
-                                    currentOnCursorMoveSteps(1)
-                                    dragAccum -= stepPx
-                                }
-                                while (dragAccum <= -stepPx) {
-                                    currentOnCursorMoveSteps(-1)
-                                    dragAccum += stepPx
-                                }
-                                change.consume()
+                        lastY = change.position.y
+
+                        val step = tracker.onDragDelta(dx, dy)
+                        if (tracker.isQuickHorizontalSwiping) {
+                            longJob.cancel()
+                        }
+                        if (step.hasMovement) {
+                            currentOnCursorMove(step.dx, step.dy)
+                            if (currentPrefs.hapticFeedback) {
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                             }
                         }
+                        if (tracker.is2DTrackpadActive || tracker.isQuickHorizontalSwiping) {
+                            change.consume()
+                        }
                     }
-                    if (!triggeredLong && !cursorSwiping) {
+                    if (!tracker.is2DTrackpadActive && !tracker.isQuickHorizontalSwiping) {
                         currentOnPress(" ")
                     }
                 } finally {
                     longJob.cancel()
+                    if (tracker.is2DTrackpadActive) {
+                        currentOnTrackpadModeChanged(false)
+                    }
+                    tracker.reset()
                     pressed = false
                 }
             }
@@ -725,7 +787,7 @@ private fun ExpressiveKeyCap(
                         if (!change.pressed) break
                         if (currentPrefs.swipeBackspaceDeleteWord) {
                             val dx = change.position.x - anchorX
-                            if (dx <= -42f) {
+                            if (dx <= -backspaceSwipeWordPx) {
                                 holdJob.cancel()
                                 triggeredRepeatOrSwipe = true
                                 anchorX = change.position.x

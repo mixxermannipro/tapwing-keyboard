@@ -69,7 +69,7 @@ class OfflineDictionaryPackManager(context: Context) {
     private val packsDir: File = File(appContext.noBackupFilesDir ?: appContext.filesDir, "tapwing_dictionaries")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeJobs = mutableMapOf<String, Job>()
-    private val loadedCache = mutableMapOf<String, LoadedDictionaryPack>()
+    private val loadedCache = java.util.concurrent.ConcurrentHashMap<String, LoadedDictionaryPack>()
 
     private val _states = MutableStateFlow<Map<String, PackInstallState>>(emptyMap())
     val states: StateFlow<Map<String, PackInstallState>> = _states.asStateFlow()
@@ -101,6 +101,17 @@ class OfflineDictionaryPackManager(context: Context) {
         val base = KeyboardLocales.baseLang(langCode)
         if (!packsDir.exists()) packsDir.mkdirs()
         return File(packsDir, "${base}_50k.txt")
+    }
+
+    /**
+     * Non-blocking cache lookup for hot UI-thread typing paths. Triggers async preload if the pack
+     * is installed on disk but not yet parsed in memory.
+     */
+    fun getCachedPack(locale: String): LoadedDictionaryPack? {
+        val base = KeyboardLocales.baseLang(locale)
+        loadedCache[base]?.let { return it }
+        preloadLocaleAsync(base)
+        return null
     }
 
     @Synchronized

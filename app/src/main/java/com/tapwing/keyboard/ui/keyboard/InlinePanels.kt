@@ -409,7 +409,7 @@ fun KeyboardResizePanel(
                     shiftState = shiftState,
                     imeActionLabel = imeActionLabel,
                     onKeyPress = { _, _ -> },
-                    onCursorMoveSteps = {},
+                    onCursorMove = { _, _ -> },
                     onDeletePreviousWord = {},
                     onSwitchLanguage = {}
                 )

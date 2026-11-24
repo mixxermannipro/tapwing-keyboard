@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 data class TypingStats(
@@ -30,17 +33,22 @@ data class TypingStats(
 
 /**
  * Privacy-first local keyboard statistics store (stored strictly on-device in device-protected storage).
- * Pauses automatically in Incognito Mode.
+ * Pauses automatically in Incognito Mode. Uses debounced atomic background writes in production
+ * so keystrokes never block the IME main thread on disk I/O.
  */
 class TypingStatsStore(
     private val storageFile: File?,
-    private val clockMs: () -> Long = { System.currentTimeMillis() }
+    private val clockMs: () -> Long = { System.currentTimeMillis() },
+    private val synchronousPersistence: Boolean = true
 ) {
     private val _stats = MutableStateFlow(TypingStats())
     val stats: StateFlow<TypingStats> = _stats.asStateFlow()
 
     private var lastKeystrokeMs: Long = 0L
     private var lastLoadedModMs: Long = -1L
+    @Volatile
+    private var dirty: Boolean = false
+    private var pendingFlush: ScheduledFuture<*>? = null
 
     init {
         loadFromDisk()
@@ -48,6 +56,7 @@ class TypingStatsStore(
 
     @Synchronized
     fun reloadIfModifiedOnDisk() {
+        if (dirty) return
         val file = storageFile ?: return
         if (!file.isFile) return
         val mod = file.lastModified()
@@ -131,12 +140,78 @@ class TypingStatsStore(
     fun reset() {
         lastKeystrokeMs = 0L
         _stats.value = TypingStats()
-        saveToDisk()
+        dirty = true
+        persistNow()
+    }
+
+    fun flush() {
+        val snapshotJson: String?
+        val file = storageFile ?: return
+        synchronized(this) {
+            pendingFlush?.cancel(false)
+            pendingFlush = null
+            if (!dirty) return
+            snapshotJson = serializeStats(_stats.value)
+            dirty = false
+        }
+        if (snapshotJson != null) {
+            writeSnapshot(file, snapshotJson)
+        }
     }
 
     private fun update(transform: (TypingStats) -> TypingStats) {
         _stats.value = transform(_stats.value)
-        saveToDisk()
+        dirty = true
+        scheduleSave()
+    }
+
+    private fun scheduleSave() {
+        val file = storageFile ?: return
+        if (synchronousPersistence) {
+            persistNow()
+            return
+        }
+        pendingFlush?.cancel(false)
+        pendingFlush = ioExecutor.schedule({
+            val json = synchronized(this) {
+                if (!dirty) return@schedule
+                dirty = false
+                serializeStats(_stats.value)
+            }
+            writeSnapshot(file, json)
+        }, PERSIST_DEBOUNCE_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun persistNow() {
+        val file = storageFile ?: return
+        pendingFlush?.cancel(false)
+        pendingFlush = null
+        val json = serializeStats(_stats.value)
+        dirty = false
+        writeSnapshot(file, json)
+    }
+
+    private fun serializeStats(s: TypingStats): String {
+        val obj = JSONObject().apply {
+            put("wordsTyped", s.wordsTyped)
+            put("charactersTyped", s.charactersTyped)
+            put("autocorrectionsApplied", s.autocorrectionsApplied)
+            put("suggestionsAccepted", s.suggestionsAccepted)
+            put("swipesDecoded", s.swipesDecoded)
+            put("voiceDictations", s.voiceDictations)
+            put("snippetsInserted", s.snippetsInserted)
+            put("charactersSaved", s.charactersSaved)
+            put("activeTypingMs", s.activeTypingMs)
+        }
+        return obj.toString()
+    }
+
+    private fun writeSnapshot(file: File, json: String) {
+        if (AtomicFileWriter.writeTextAtomically(file, json, tempPrefix = "stats-")) {
+            synchronized(this) {
+                lastLoadedModMs = file.lastModified()
+            }
+        }
     }
 
     private fun loadFromDisk() {
@@ -159,32 +234,21 @@ class TypingStatsStore(
         }
     }
 
-    private fun saveToDisk() {
-        val file = storageFile ?: return
-        runCatching {
-            file.parentFile?.mkdirs()
-            val s = _stats.value
-            val obj = JSONObject().apply {
-                put("wordsTyped", s.wordsTyped)
-                put("charactersTyped", s.charactersTyped)
-                put("autocorrectionsApplied", s.autocorrectionsApplied)
-                put("suggestionsAccepted", s.suggestionsAccepted)
-                put("swipesDecoded", s.swipesDecoded)
-                put("voiceDictations", s.voiceDictations)
-                put("snippetsInserted", s.snippetsInserted)
-                put("charactersSaved", s.charactersSaved)
-                put("activeTypingMs", s.activeTypingMs)
-            }
-            file.writeText(obj.toString())
-            lastLoadedModMs = file.lastModified()
-        }
-    }
-
     companion object {
+        private const val PERSIST_DEBOUNCE_MS = 2_000L
+        private val ioExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "tapwing-stats-io").apply { isDaemon = true }
+        }
+        private val stores = mutableMapOf<String, TypingStatsStore>()
+
+        @Synchronized
         fun createForContext(context: Context): TypingStatsStore {
             val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
                 ?: context.applicationContext
-            return TypingStatsStore(File(safeCtx.filesDir, "tapwing_typing_stats.json"))
+            val file = File(safeCtx.filesDir, "tapwing_typing_stats.json")
+            return stores.getOrPut(file.absolutePath) {
+                TypingStatsStore(file, synchronousPersistence = false)
+            }
         }
     }
 }

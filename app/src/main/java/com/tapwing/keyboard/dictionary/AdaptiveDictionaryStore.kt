@@ -38,7 +38,10 @@ data class ImportSummary(
  * while strictly separating sentence-start capitalization from mid-sentence casing so words
  * like "und" are never erroneously capitalized mid-sentence.
  */
-class AdaptiveDictionaryStore(private val storageFile: File?) {
+class AdaptiveDictionaryStore(
+    private val storageFile: File?,
+    private val synchronousPersistence: Boolean = true
+) {
 
     private val customWords = linkedMapOf<String, Int>()
     private val customWordsLower = linkedMapOf<String, String>()
@@ -65,6 +68,9 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
     private val rejectedCorrections = linkedSetOf<String>()
 
     private var lastLoadedModMs: Long = -1L
+    @Volatile
+    private var dirty: Boolean = false
+    private var pendingFlush: java.util.concurrent.ScheduledFuture<*>? = null
 
     init {
         seedDefaultShortcutsIfEmpty()
@@ -74,6 +80,7 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
 
     @Synchronized
     fun reloadIfModifiedOnDisk() {
+        if (dirty) return
         val file = storageFile ?: return
         if (!file.isFile) return
         val mod = file.lastModified()
@@ -975,90 +982,131 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         }
     }
 
-    private fun saveToDisk() {
+    fun flush() {
         val file = storageFile ?: return
-        runCatching {
-            file.parentFile?.mkdirs()
-            val root = JSONObject()
-
-            root.put("customWords", JSONObject().apply {
-                customWords.forEach { (k, v) -> put(k, v) }
-            })
-            root.put("shortcuts", JSONObject().apply {
-                shortcuts.forEach { (k, v) -> put(k, v) }
-            })
-            root.put("entryLocales", JSONObject().apply {
-                entryLocales.forEach { (k, v) -> put(k, v) }
-            })
-            root.put("learnedUnigrams", JSONObject().apply {
-                learnedUnigrams.forEach { (k, v) -> put(k, v) }
-            })
-            root.put("midSentenceCases", JSONObject().apply {
-                midSentenceCaseCounts.forEach { (lower, sub) ->
-                    put(lower, JSONObject().apply { sub.forEach { (f, c) -> put(f, c) } })
-                }
-            })
-            root.put("recencyClock", recencyClock)
-            root.put("wordRecency", JSONObject().apply {
-                wordRecency.forEach { (k, v) -> put(k, v) }
-            })
-            root.put("learnedBigrams", JSONObject().apply {
-                learnedBigrams.forEach { (prev, sub) ->
-                    put(prev, JSONObject().apply { sub.forEach { (next, count) -> put(next, count) } })
-                }
-            })
-            root.put("learnedTrigrams", JSONObject().apply {
-                learnedTrigrams.forEach { (ctx, sub) ->
-                    put(ctx, JSONObject().apply { sub.forEach { (next, count) -> put(next, count) } })
-                }
-            })
-            root.put("learnedEmojis", JSONObject().apply {
-                learnedEmojis.forEach { (w, sub) ->
-                    put(w, JSONObject().apply { sub.forEach { (e, c) -> put(e, c) } })
-                }
-            })
-            root.put("perAppUnigrams", JSONObject().apply {
-                perAppUnigrams.forEach { (pkg, sub) ->
-                    put(pkg, JSONObject().apply { sub.forEach { (w, c) -> put(w, c) } })
-                }
-            })
-            root.put("perAppBigrams", JSONObject().apply {
-                perAppBigrams.forEach { (pkg, heads) ->
-                    put(pkg, JSONObject().apply {
-                        heads.forEach { (prev, sub) ->
-                            put(prev, JSONObject().apply { sub.forEach { (next, c) -> put(next, c) } })
-                        }
-                    })
-                }
-            })
-            root.put("learnedCorrections", JSONObject().apply {
-                learnedCorrections.forEach { (k, v) -> put(k, v) }
-            })
-            root.put("recentEmojis", JSONArray().apply {
-                recentEmojis.forEach { put(it) }
-            })
-            root.put("perAppTones", JSONObject().apply {
-                perAppTones.forEach { (pkg, tone) -> put(pkg, tone) }
-            })
-            root.put("snippets", JSONArray().apply {
-                snippets.forEach { s ->
-                    put(JSONObject().apply {
-                        put("id", s.id)
-                        put("trigger", s.trigger)
-                        put("title", s.title)
-                        put("body", s.body)
-                    })
-                }
-            })
-            root.put("rejected", JSONArray().apply {
-                rejectedCorrections.forEach { put(it) }
-            })
-            file.writeText(root.toString())
-            lastLoadedModMs = file.lastModified()
+        val json: String?
+        synchronized(this) {
+            pendingFlush?.cancel(false)
+            pendingFlush = null
+            if (!dirty) return
+            json = serializeStateLocked()
+            dirty = false
+        }
+        if (json != null) {
+            writeSnapshot(file, json)
         }
     }
 
+    private fun saveToDisk() {
+        val file = storageFile ?: return
+        dirty = true
+        if (synchronousPersistence) {
+            pendingFlush?.cancel(false)
+            pendingFlush = null
+            val json = serializeStateLocked()
+            dirty = false
+            writeSnapshot(file, json)
+            return
+        }
+        pendingFlush?.cancel(false)
+        pendingFlush = ioExecutor.schedule({
+            val json = synchronized(this) {
+                if (!dirty) return@schedule
+                dirty = false
+                serializeStateLocked()
+            }
+            writeSnapshot(file, json)
+        }, PERSIST_DEBOUNCE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
+    private fun writeSnapshot(file: File, json: String) {
+        if (com.tapwing.keyboard.data.AtomicFileWriter.writeTextAtomically(file, json, tempPrefix = "dict-")) {
+            synchronized(this) {
+                lastLoadedModMs = file.lastModified()
+            }
+        }
+    }
+
+    private fun serializeStateLocked(): String {
+        val root = JSONObject()
+
+        root.put("customWords", JSONObject().apply {
+            customWords.forEach { (k, v) -> put(k, v) }
+        })
+        root.put("shortcuts", JSONObject().apply {
+            shortcuts.forEach { (k, v) -> put(k, v) }
+        })
+        root.put("entryLocales", JSONObject().apply {
+            entryLocales.forEach { (k, v) -> put(k, v) }
+        })
+        root.put("learnedUnigrams", JSONObject().apply {
+            learnedUnigrams.forEach { (k, v) -> put(k, v) }
+        })
+        root.put("midSentenceCases", JSONObject().apply {
+            midSentenceCaseCounts.forEach { (lower, sub) ->
+                put(lower, JSONObject().apply { sub.forEach { (f, c) -> put(f, c) } })
+            }
+        })
+        root.put("recencyClock", recencyClock)
+        root.put("wordRecency", JSONObject().apply {
+            wordRecency.forEach { (k, v) -> put(k, v) }
+        })
+        root.put("learnedBigrams", JSONObject().apply {
+            learnedBigrams.forEach { (prev, sub) ->
+                put(prev, JSONObject().apply { sub.forEach { (next, count) -> put(next, count) } })
+            }
+        })
+        root.put("learnedTrigrams", JSONObject().apply {
+            learnedTrigrams.forEach { (ctx, sub) ->
+                put(ctx, JSONObject().apply { sub.forEach { (next, count) -> put(next, count) } })
+            }
+        })
+        root.put("learnedEmojis", JSONObject().apply {
+            learnedEmojis.forEach { (w, sub) ->
+                put(w, JSONObject().apply { sub.forEach { (e, c) -> put(e, c) } })
+            }
+        })
+        root.put("perAppUnigrams", JSONObject().apply {
+            perAppUnigrams.forEach { (pkg, sub) ->
+                put(pkg, JSONObject().apply { sub.forEach { (w, c) -> put(w, c) } })
+            }
+        })
+        root.put("perAppBigrams", JSONObject().apply {
+            perAppBigrams.forEach { (pkg, heads) ->
+                put(pkg, JSONObject().apply {
+                    heads.forEach { (prev, sub) ->
+                        put(prev, JSONObject().apply { sub.forEach { (next, c) -> put(next, c) } })
+                    }
+                })
+            }
+        })
+        root.put("learnedCorrections", JSONObject().apply {
+            learnedCorrections.forEach { (k, v) -> put(k, v) }
+        })
+        root.put("recentEmojis", JSONArray().apply {
+            recentEmojis.forEach { put(it) }
+        })
+        root.put("perAppTones", JSONObject().apply {
+            perAppTones.forEach { (pkg, tone) -> put(pkg, tone) }
+        })
+        root.put("snippets", JSONArray().apply {
+            snippets.forEach { s ->
+                put(JSONObject().apply {
+                    put("id", s.id)
+                    put("trigger", s.trigger)
+                    put("title", s.title)
+                    put("body", s.body)
+                })
+            }
+        })
+        root.put("rejected", JSONArray().apply {
+            rejectedCorrections.forEach { put(it) }
+        })
+        return root.toString()
+    }
+
     companion object {
+        private const val PERSIST_DEBOUNCE_MS = 1_500L
         private const val MAX_UNIGRAMS = 8_000
         private const val MAX_BIGRAM_HEADS = 3_000
         private const val MAX_FOLLOWERS_PER_HEAD = 30
@@ -1070,6 +1118,9 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
         private const val MAX_LEARNED_CORRECTIONS = 300
         private const val MAX_RECENT_EMOJIS = 28
 
+        private val ioExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "tapwing-dict-io").apply { isDaemon = true }
+        }
         private val stores = mutableMapOf<String, AdaptiveDictionaryStore>()
 
         @Synchronized
@@ -1077,7 +1128,9 @@ class AdaptiveDictionaryStore(private val storageFile: File?) {
             val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
                 ?: context.applicationContext
             val file = File(safeCtx.filesDir, "tapwing_dictionary_state.json")
-            return stores.getOrPut(file.absolutePath) { AdaptiveDictionaryStore(file) }
+            return stores.getOrPut(file.absolutePath) {
+                AdaptiveDictionaryStore(file, synchronousPersistence = false)
+            }
         }
     }
 }
