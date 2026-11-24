@@ -1,13 +1,17 @@
 package com.tapwing.keyboard.settings
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,11 +40,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -50,6 +57,29 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+/**
+ * Applies a silky spring scale feedback on press for butter-smooth tactile UI feel.
+ */
+fun Modifier.springPressScale(
+    interactionSource: MutableInteractionSource,
+    enabled: Boolean = true,
+    pressedScale: Float = 0.982f
+): Modifier = composed {
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (enabled && pressed) pressedScale else 1f,
+        animationSpec = spring(
+            dampingRatio = 0.72f,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "springPressScale"
+    )
+    graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+}
 
 /**
  * Material 3 Expressive segmented list item shape (Android 16 / Pixel Gboard Settings).
@@ -218,7 +248,14 @@ fun AppleGroupedSurface(
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = 0.86f,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
     ) {
         Column(content = content)
     }
@@ -406,14 +443,16 @@ fun ExpressiveNavCard(
     swatchColor: Color? = null,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
         modifier = Modifier
             .fillMaxWidth()
+            .springPressScale(interactionSource, pressedScale = 0.985f)
             .clip(shape)
-            .clickable(onClick = onClick)
+            .clickable(interactionSource = interactionSource, indication = androidx.compose.material3.ripple(), onClick = onClick)
     ) {
         Row(
             modifier = Modifier
@@ -479,16 +518,30 @@ fun ExpressiveThemeTile(
     modifier: Modifier = Modifier
 ) {
     val scheme = MaterialTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    val tileBg by animateColorAsState(
+        targetValue = if (selected) scheme.primaryContainer.copy(alpha = 0.45f) else scheme.surfaceContainerLow,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "themeTileBg"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (selected) scheme.primary else scheme.outlineVariant.copy(alpha = 0.45f),
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "themeTileBorder"
+    )
+    val borderWidth by animateDpAsState(
+        targetValue = if (selected) 2.dp else 0.75.dp,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMedium),
+        label = "themeTileBorderWidth"
+    )
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = if (selected) scheme.primaryContainer.copy(alpha = 0.45f) else scheme.surfaceContainerLow,
-        border = BorderStroke(
-            width = if (selected) 2.dp else 0.75.dp,
-            color = if (selected) scheme.primary else scheme.outlineVariant.copy(alpha = 0.45f)
-        ),
+        color = tileBg,
+        border = BorderStroke(width = borderWidth, color = borderColor),
         modifier = modifier
+            .springPressScale(interactionSource, pressedScale = 0.97f)
             .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
+            .clickable(interactionSource = interactionSource, indication = androidx.compose.material3.ripple(), onClick = onClick)
     ) {
         Column(
             modifier = Modifier.padding(12.dp),

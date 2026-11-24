@@ -20,6 +20,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -27,6 +29,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -59,16 +62,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -84,6 +91,7 @@ import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.SuggestionChip
+import com.tapwing.keyboard.settings.springPressScale
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
 import com.tapwing.keyboard.undo.UndoSnapshot
 import com.tapwing.keyboard.voice.VoiceUiState
@@ -161,8 +169,11 @@ fun SuggestionStrip(
     AnimatedContent(
         targetState = voiceActive && !showAutofill,
         transitionSpec = {
-            fadeIn(tween(200, delayMillis = 40, easing = FastOutSlowInEasing)) togetherWith
-                fadeOut(tween(120, easing = FastOutSlowInEasing))
+            (fadeIn(tween(180, delayMillis = 25, easing = FastOutSlowInEasing)) +
+                scaleIn(
+                    initialScale = 0.96f,
+                    animationSpec = spring(dampingRatio = 0.84f, stiffness = Spring.StiffnessMedium)
+                )) togetherWith fadeOut(tween(110, easing = FastOutSlowInEasing))
         },
         label = "stripVoiceSwitch"
     ) { voice ->
@@ -214,8 +225,11 @@ fun SuggestionStrip(
                     targetState = middleKind,
                     modifier = Modifier.weight(1f),
                     transitionSpec = {
-                        fadeIn(tween(180, delayMillis = 30, easing = FastOutSlowInEasing)) togetherWith
-                            fadeOut(tween(110, easing = FastOutSlowInEasing))
+                        (fadeIn(tween(180, delayMillis = 25, easing = FastOutSlowInEasing)) +
+                            scaleIn(
+                                initialScale = 0.96f,
+                                animationSpec = spring(dampingRatio = 0.84f, stiffness = Spring.StiffnessMedium)
+                            )) togetherWith fadeOut(tween(110, easing = FastOutSlowInEasing))
                     },
                     label = "stripMiddle"
                 ) { kind ->
@@ -739,8 +753,31 @@ private fun VoiceToolbarRow(
     val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
     val pulseBg by animateColorAsState(
         targetValue = if (voiceState.isListening) kbColors.actionSurface else kbColors.modifierSurface,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow),
         label = "voicePulseBg"
     )
+    val doneBreathScale = if (voiceState.isListening) {
+        val pulseTransition = rememberInfiniteTransition(label = "voiceDonePulse")
+        val breath by pulseTransition.animateFloat(
+            initialValue = 1.0f,
+            targetValue = 1.045f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "voiceDoneBreath"
+        )
+        breath
+    } else {
+        1.0f
+    }
+    val cancelInteraction = remember { MutableInteractionSource() }
+    val minInteraction = remember { MutableInteractionSource() }
+    val doneInteraction = remember { MutableInteractionSource() }
+    val previewScroll = rememberScrollState()
+    val badgeText = voiceState.engineLabel?.takeIf { it.isNotBlank() }
+        ?: if (voiceState.isCloud) "Cloud" else if (de) "Lokal" else "Local"
+
     val timerText = if (voiceState.isListening) {
         val m = voiceState.elapsedSeconds / 60
         val s = voiceState.elapsedSeconds % 60
@@ -756,6 +793,12 @@ private fun VoiceToolbarRow(
         else -> "$timerText${stringResource(R.string.voice_hint_finish)}"
     }
 
+    LaunchedEffect(statusText, voiceState.partialText) {
+        if (voiceState.partialText.isNotBlank()) {
+            previewScroll.animateScrollTo(previewScroll.maxValue)
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -767,9 +810,10 @@ private fun VoiceToolbarRow(
         Box(
             modifier = Modifier
                 .size(34.dp)
+                .springPressScale(cancelInteraction, pressedScale = 0.92f)
                 .clip(CircleShape)
                 .background(kbColors.keySurface)
-                .clickable {
+                .clickable(interactionSource = cancelInteraction, indication = ripple()) {
                     view.tapHaptic(prefs.hapticFeedback)
                     onCancelVoice()
                 },
@@ -785,38 +829,58 @@ private fun VoiceToolbarRow(
 
         RamblerWaveform(rmsDb = voiceState.rmsDb, isListening = voiceState.isListening)
 
-        if (voiceState.isLocalWhisper || voiceState.isCloud || voiceState.isAndroidOffline) {
+        if (voiceState.isLocalWhisper || voiceState.isCloud || voiceState.isAndroidOffline || !voiceState.engineLabel.isNullOrBlank()) {
             Surface(
                 shape = RoundedCornerShape(10.dp),
                 color = kbColors.actionSurface.copy(alpha = 0.22f)
             ) {
                 Text(
-                    text = if (voiceState.isCloud) "Cloud" else if (de) "Lokal" else "Local",
+                    text = badgeText,
                     color = kbColors.keyText,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
         }
 
-        Text(
-            text = statusText,
-            color = kbColors.keyText,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
+        if (voiceState.partialText.isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(previewScroll),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    text = statusText,
+                    color = kbColors.keyText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        } else {
+            Text(
+                text = statusText,
+                color = kbColors.keyText,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+        }
 
         if (prefs.voiceMinimizeButton) {
             Box(
                 modifier = Modifier
                     .size(32.dp)
+                    .springPressScale(minInteraction, pressedScale = 0.92f)
                     .clip(CircleShape)
                     .background(kbColors.modifierSurface)
-                    .clickable {
+                    .clickable(interactionSource = minInteraction, indication = ripple()) {
                         view.tapHaptic(prefs.hapticFeedback)
                         onToggleMinimize()
                     },
@@ -838,9 +902,14 @@ private fun VoiceToolbarRow(
         Box(
             modifier = Modifier
                 .size(width = 44.dp, height = 36.dp)
+                .graphicsLayer {
+                    scaleX = doneBreathScale
+                    scaleY = doneBreathScale
+                }
+                .springPressScale(doneInteraction, pressedScale = 0.92f)
                 .clip(RoundedCornerShape(percent = 50))
                 .background(pulseBg)
-                .clickable {
+                .clickable(interactionSource = doneInteraction, indication = ripple()) {
                     view.confirmHaptic(prefs.hapticFeedback)
                     onFinishVoice()
                 },

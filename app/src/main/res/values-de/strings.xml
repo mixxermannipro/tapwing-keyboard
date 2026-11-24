@@ -42,7 +42,7 @@
     <string name="voice_onboarding_f2_title">In eigenen Worten bearbeiten</string>
     <string name="voice_onboarding_f2_desc">Sage z. B. „mach es freundlicher“, „kürzer“ oder korrigiere dich mitten im Satz</string>
     <string name="voice_onboarding_f3_title" formatted="false">Ohne Internet diktieren</string>
-    <string name="voice_onboarding_f3_desc">Mit einem Android-Sprachpaket oder Whisper bleibt die Aufnahme auf dem Gerät.</string>
+    <string name="voice_onboarding_f3_desc">Lade schnelle Sherpa-ONNX- oder Whisper-Modelle herunter, um blitzschnell und privat auf dem Gerät zu diktieren.</string>
     <string name="voice_onboarding_privacy">Unter Diktat wählst du, wie Tapwing deine Aufnahme verarbeitet.</string>
     <string name="btn_get_started">Loslegen</string>
     <string name="btn_no_thanks">Nein, danke</string>
@@ -78,7 +78,7 @@
     <string name="tools_edit_bar">Leiste</string>
 
     <!-- Einstellungen -->
-    <string name="settings_subtitle">Datenschutz-KI-Tastatur · v2.4</string>
+    <string name="settings_subtitle">Datenschutz-KI-Tastatur · v2.6</string>
     <string name="settings_search_placeholder">Einstellungen suchen</string>
     <string name="settings_test_placeholder">Hier Tastatur testen…</string>
     <string name="nav_appearance">Design &amp; Größe</string>
@@ -116,7 +116,7 @@
     <string name="settings_recommendation">Für dich</string>
     <string name="settings_tip_learning">Tapwing kann deine häufigen Wörter lernen. Die Daten bleiben auf diesem Gerät.</string>
     <string name="settings_tip_autofill">Zeige Anmeldedaten aus deinem Passwortmanager über den Tasten.</string>
-    <string name="settings_tip_voice">Lade Whisper herunter, um ohne Internet zu diktieren.</string>
+    <string name="settings_tip_voice">Lade Sherpa-ONNX oder Whisper herunter, um blitzschnell und ohne Internet zu diktieren.</string>
     <string name="settings_tip_search">Lege fest, wo Tapwing deine Websuchen öffnet.</string>
     <string name="nav_quick_search">Schnellsuche</string>
     <string name="nav_autofill">Passwörter und Autofill</string>
