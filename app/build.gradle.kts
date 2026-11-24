@@ -73,7 +73,7 @@ android {
             )
             ndk {
                 debugSymbolLevel = "SYMBOL_TABLE"
-                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+                abiFilters += listOf("arm64-v8a")
             }
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
