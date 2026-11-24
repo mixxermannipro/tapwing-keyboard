@@ -143,7 +143,7 @@ class VoiceReliabilityAndBenchmarkTest {
     fun groqCloudProviderAndSmartBypassBehaveCorrectlyWithoutLocalLlms() {
         assertEquals(CloudSpeechProvider.GROQ, CloudSpeechProvider.from(AiProviderType.GROQ_API, ""))
         assertEquals(CloudSpeechProvider.GEMINI, CloudSpeechProvider.from(AiProviderType.GEMINI_API, ""))
-        assertTrue(LocalModelCatalog.allModels.none { it.kind != LocalModelKind.WHISPER_STT })
+        assertTrue(LocalModelCatalog.allModels.all { it.kind.isSpeechModel })
 
         assertTrue(WritingToolsEngine.shouldSkipCloudPolish("Hallo wie geht es", "Hallo wie geht es?"))
         assertTrue(WritingToolsEngine.shouldSkipCloudPolish("Ok bin gleich da", "Ok bin gleich da."))
