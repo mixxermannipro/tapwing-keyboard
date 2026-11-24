@@ -35,11 +35,11 @@ object SwipeGestureDecoder {
 
         val startPt = points.first()
         val endPt = points.last()
-        val startCandidates = nearestKeys(startPt, keyCenters, count = 2)
-        val endCandidates = nearestKeys(endPt, keyCenters, count = 2)
+        val startCandidates = nearestKeys(startPt, keyCenters, count = 3)
+        val endCandidates = nearestKeys(endPt, keyCenters, count = 3)
         if (startCandidates.isEmpty() || endCandidates.isEmpty()) return emptyList()
 
-        val centerByChar = keyCenters.associateBy { it.char.lowercaseChar() }
+        val centerByChar = buildEffectiveKeyMap(keyCenters)
         val resampled = resamplePath(points, targetCount = 24)
         val pathLength = computePathLength(resampled).coerceAtLeast(1f)
 
@@ -65,8 +65,8 @@ object SwipeGestureDecoder {
             val lower = clean.lowercase()
             if (!lower.all { centerByChar.containsKey(it) }) continue
 
-            val firstChar = lower.first()
-            val lastChar = lower.last()
+            val firstChar = baseSwipeChar(lower.first(), centerByChar)
+            val lastChar = baseSwipeChar(lower.last(), centerByChar)
             val startRank = startCandidates.indexOfFirst { it.first == firstChar }
             val endRank = endCandidates.indexOfFirst { it.first == lastChar }
             if (startRank == -1 || endRank == -1) continue
@@ -101,6 +101,33 @@ object SwipeGestureDecoder {
             .map { it.first }
             .distinct()
             .take(3)
+    }
+
+    private fun buildEffectiveKeyMap(centers: List<KeyCenter>): Map<Char, KeyCenter> {
+        val map = HashMap<Char, KeyCenter>(centers.size + 16)
+        for (kc in centers) {
+            map[kc.char.lowercaseChar()] = kc
+        }
+        // Fallback coordinates for umlauts/accents when the keyboard layout doesn't have dedicated keys
+        val fallbacks = arrayOf(
+            'ä' to 'a', 'á' to 'a', 'à' to 'a', 'â' to 'a', 'ã' to 'a', 'ą' to 'a',
+            'ö' to 'o', 'ó' to 'o', 'ò' to 'o', 'ô' to 'o', 'õ' to 'o',
+            'ü' to 'u', 'ú' to 'u', 'ù' to 'u', 'û' to 'u',
+            'é' to 'e', 'è' to 'e', 'ê' to 'e', 'ë' to 'e', 'ę' to 'e',
+            'í' to 'i', 'ì' to 'i', 'î' to 'i', 'ï' to 'i', 'ı' to 'i',
+            'ß' to 's', 'ś' to 's', 'ş' to 's', 'š' to 's',
+            'ç' to 'c', 'ć' to 'c', 'ñ' to 'n', 'ń' to 'n', 'ğ' to 'g', 'ł' to 'l', 'ż' to 'z', 'ź' to 'z'
+        )
+        for ((accented, base) in fallbacks) {
+            if (!map.containsKey(accented)) {
+                map[base]?.let { map[accented] = it }
+            }
+        }
+        return map
+    }
+
+    private fun baseSwipeChar(ch: Char, centerByChar: Map<Char, KeyCenter>): Char {
+        return centerByChar[ch]?.char?.lowercaseChar() ?: ch
     }
 
     private fun nearestKeys(pt: SwipePoint, centers: List<KeyCenter>, count: Int): List<Pair<Char, Float>> {

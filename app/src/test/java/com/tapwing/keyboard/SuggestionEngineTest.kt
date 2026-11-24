@@ -114,4 +114,37 @@ class SuggestionEngineTest {
         val fuerChips = SuggestionEngine.suggestionsFor("fuer", "de", includeEmoji = false)
         assertTrue(fuerChips.any { it.text == "für" })
     }
+
+    @Test
+    fun doesNotMangleValidGermanWordsLikeSchonOrKonnte() {
+        assertNull(SuggestionEngine.autoCorrectionFor("schon", "de"))
+        assertNull(SuggestionEngine.autoCorrectionFor("konnte", "de"))
+        assertEquals("schön", SuggestionEngine.autoCorrectionFor("schoen", "de"))
+        assertEquals("wäre", SuggestionEngine.autoCorrectionFor("waere", "de"))
+        assertEquals("hätte", SuggestionEngine.autoCorrectionFor("haette", "de"))
+    }
+
+    @Test
+    fun autoCapitalizesStandaloneEnglishIAndContractions() {
+        assertEquals("I", SuggestionEngine.autoCorrectionFor("i", "en"))
+        assertNull(SuggestionEngine.autoCorrectionFor("i", "de"))
+        assertEquals("doesn't", SuggestionEngine.autoCorrectionFor("doesnt", "en"))
+        assertEquals("that's", SuggestionEngine.autoCorrectionFor("thats", "en"))
+    }
+
+    @Test
+    fun highConfidenceFuzzyAutocorrectFixesClearTranspositions() {
+        assertEquals("heute", SuggestionEngine.autoCorrectionFor("huete", "de"))
+        assertEquals("hallo", SuggestionEngine.autoCorrectionFor("hsllo", "de"))
+    }
+
+    @Test
+    fun earlyAbortDistanceMatchesFullDistanceForCloseWords() {
+        val full = SuggestionEngine.weightedKeyboardDistance("hsllo", "hallo", "de")
+        val pruned = SuggestionEngine.weightedKeyboardDistance("hsllo", "hallo", "de", maxDistance = 2.15)
+        assertEquals(full, pruned, 0.0001)
+
+        val far = SuggestionEngine.weightedKeyboardDistance("zzzzzz", "hallo", "de", maxDistance = 1.5)
+        assertTrue("Expected early-abort far distance >= 99.0, got $far", far >= 99.0)
+    }
 }

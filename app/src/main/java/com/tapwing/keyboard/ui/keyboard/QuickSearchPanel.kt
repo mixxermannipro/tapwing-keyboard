@@ -126,8 +126,10 @@ fun QuickSearchPanel(
                 }
             },
             onSwipeWord = { _, _ -> },
-            onCursorMoveSteps = { steps ->
-                query = query.copy(selection = TextRange((query.selection.end + steps).coerceIn(0, query.text.length)))
+            onCursorMove = { dx, _ ->
+                if (dx != 0) {
+                    query = query.copy(selection = TextRange((query.selection.end + dx).coerceIn(0, query.text.length)))
+                }
             },
             onDeletePreviousWord = {
                 val start = trailingQueryWord.find(query.text.take(query.selection.min))?.range?.first

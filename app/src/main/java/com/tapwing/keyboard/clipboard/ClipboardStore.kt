@@ -237,14 +237,12 @@ class ClipboardStore(
                     }
                 )
             }
-            val temporary = File.createTempFile("clipboard-", ".tmp", file.absoluteFile.parentFile)
-            try {
-                temporary.writeText(arr.toString())
-                Files.move(temporary.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } finally {
-                temporary.delete()
-            }
-        }.isSuccess
+            return com.tapwing.keyboard.data.AtomicFileWriter.writeTextAtomically(
+                target = file,
+                content = arr.toString(),
+                tempPrefix = "clipboard-"
+            )
+        }.getOrDefault(false)
     }
 
     companion object {

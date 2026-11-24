@@ -26,6 +26,9 @@ object SuggestionEngine {
     private val emailDomains = listOf("gmail.com", "outlook.com", "icloud.com", "gmx.de", "web.de", "yahoo.com", "proton.me")
     private val sentenceBoundary = Regex("""[.!?](?=\s|$)|[\r\n]""")
     private val sentenceWord = Regex("""[\p{L}][\p{L}'’-]*""")
+    private val dupWordRegex = Regex("""\b(\p{L}{2,})\s+\1$""", RegexOption.IGNORE_CASE)
+    private val missingSentenceCapRegex = Regex("""([.!?]\s+)(\p{Ll}\p{L}*)$""")
+    private val spaceBeforePunctRegex = Regex("""(\p{L}+)\s+([,.!?])$""")
 
     fun suggestionsFor(
         textBeforeCursor: String,
@@ -217,23 +220,44 @@ object SuggestionEngine {
         // Active language stock vocabulary + 50k offline pack prefix completions + umlaut-insensitive matching
         val vocab = LanguageVocabularies.vocabularyFor(locale)
         val packPrefixes = offlinePack?.prefixMatches(lower, limit = 6).orEmpty()
-        val normLower = normalizeForUmlautMatch(lower, baseLocale)
-        val umlautMatches = if (baseLocale == "de" && lower.length >= 3) {
-            (vocab + offlinePack?.topSwipePool?.take(4_000).orEmpty())
-                .asSequence()
-                .filter { cand ->
+        val normLower = if (baseLocale == "de" && lower.length >= 3) normalizeForUmlautMatch(lower, "de") else ""
+        val umlautMatches = if (normLower.isNotEmpty()) {
+            val found = ArrayList<String>(4)
+            fun scanForUmlauts(source: List<String>, maxScan: Int) {
+                var scanned = 0
+                for (cand in source) {
+                    if (found.size >= 4 || scanned >= maxScan) break
+                    scanned++
                     val cl = cand.lowercase()
-                    cl != lower && (cl.contains('ä') || cl.contains('ö') || cl.contains('ü') || cl.contains('ß')) &&
-                        normalizeForUmlautMatch(cl, "de").startsWith(normLower)
+                    if (cl != lower && hasGermanSpecialChar(cl) && normalizeForUmlautMatch(cl, "de").startsWith(normLower)) {
+                        if (cand !in found) found += cand
+                    }
                 }
-                .take(4)
-                .toList()
+            }
+            scanForUmlauts(vocab, vocab.size)
+            if (found.size < 4 && offlinePack != null) {
+                scanForUmlauts(offlinePack.topSwipePool, 2_500)
+            }
+            found
         } else emptyList()
-        val prefixMatches = (vocab
-            .asSequence()
-            .filter { it.lowercase().startsWith(lower) && it != currentWord }
-            .take(5)
-            .toList() + packPrefixes + umlautMatches).distinct()
+
+        val contextualBoostWords = if (prevWord.isNotEmpty()) {
+            LanguageVocabularies.commonNextWords(locale, prevWord, prevTwoWord).map { it.lowercase() }.toSet()
+        } else emptySet()
+
+        val vocabPrefixMatches = ArrayList<String>(5)
+        for (word in vocab) {
+            if (vocabPrefixMatches.size >= 5) break
+            if (word.length > lower.length && word.startsWith(lower, ignoreCase = true) && word != currentWord) {
+                vocabPrefixMatches += word
+            }
+        }
+        val prefixMatches = (vocabPrefixMatches + packPrefixes + umlautMatches)
+            .distinct()
+            .let { list ->
+                if (contextualBoostWords.isEmpty()) list
+                else list.sortedByDescending { if (it.lowercase() in contextualBoostWords) 1 else 0 }
+            }
 
         for (match in prefixMatches) {
             if (results.size >= 3) break
@@ -265,7 +289,7 @@ object SuggestionEngine {
                 val secVocab = LanguageVocabularies.vocabularyFor(sec)
                 for (match in secVocab) {
                     if (results.size >= 3) break
-                    if (match.lowercase().startsWith(lower) && match != currentWord) {
+                    if (match.length > lower.length && match.startsWith(lower, ignoreCase = true) && match != currentWord) {
                         val adjusted = adjustCandidateCase(currentWord, match, sec, atSentenceStart, dictionaryStore)
                         if (results.none { it.text == adjusted }) {
                             results += SuggestionChip(
@@ -279,27 +303,40 @@ object SuggestionEngine {
             }
         }
 
-        // Keyboard-proximity weighted Damerau-Levenshtein matching
+        // Keyboard-proximity weighted Damerau-Levenshtein matching with early-abort DP
         if (results.size < 3 && lower.length >= 3 && !knownByUser && offlinePack?.contains(lower) != true) {
-            val customFuzzyPool = dictionaryStore?.allKnownVocabularyWords().orEmpty()
-            val packPool = offlinePack?.topSwipePool?.take(4_000).orEmpty()
-            val secondaryPool = secondaryLocales
-                .filter { KeyboardLocales.baseLang(it) != baseLocale }
-                .flatMap { LanguageVocabularies.vocabularyFor(it) }
-            val combinedPool = (customFuzzyPool + vocab + packPool + secondaryPool).distinct()
+            val seen = HashSet<String>(512)
+            val fuzzy = ArrayList<Triple<String, Double, Int>>(16)
+            val maxDist = 2.15
 
-            val fuzzy = combinedPool
-                .asSequence()
-                .filter { kotlin.math.abs(it.length - lower.length) <= 2 }
-                .map { word ->
-                    val dist = weightedKeyboardDistance(lower, word.lowercase(), locale)
-                    val personalBoost = dictionaryStore?.wordScore(word) ?: 0
-                    Triple(word, dist, personalBoost)
+            fun considerPool(pool: Iterable<String>, maxItems: Int) {
+                var count = 0
+                for (word in pool) {
+                    if (count >= maxItems) break
+                    count++
+                    if (kotlin.math.abs(word.length - lower.length) > 2) continue
+                    if (word == currentWord) continue
+                    val wl = word.lowercase()
+                    if (!seen.add(wl)) continue
+                    val dist = weightedKeyboardDistance(lower, wl, locale, maxDistance = maxDist)
+                    if (dist > 0.0 && dist <= maxDist) {
+                        val contextBonus = if (wl in contextualBoostWords) 80 else 0
+                        val personalBoost = (dictionaryStore?.wordScore(word) ?: 0) + contextBonus
+                        fuzzy += Triple(word, dist, personalBoost)
+                    }
                 }
-                .filter { (word, dist, _) -> dist > 0.0 && dist <= 2.15 && word != currentWord }
-                .sortedWith(compareBy<Triple<String, Double, Int>> { it.second }.thenByDescending { it.third })
-                .take(4)
-                .toList()
+            }
+
+            dictionaryStore?.allKnownVocabularyWords()?.let { considerPool(it, 2_000) }
+            considerPool(vocab, vocab.size)
+            offlinePack?.topSwipePool?.let { considerPool(it, 2_500) }
+            for (sec in secondaryLocales) {
+                if (KeyboardLocales.baseLang(sec) != baseLocale) {
+                    considerPool(LanguageVocabularies.vocabularyFor(sec), 800)
+                }
+            }
+
+            fuzzy.sortWith(compareBy<Triple<String, Double, Int>> { it.second }.thenByDescending { it.third })
 
             for ((word, _, _) in fuzzy) {
                 if (results.size >= 3) break
@@ -325,13 +362,15 @@ object SuggestionEngine {
         secondaryLocales: List<String> = emptyList(),
         offlinePack: LoadedDictionaryPack? = null
     ): String? {
+        val baseLocale = KeyboardLocales.baseLang(locale)
+        // Standalone English pronoun "i" -> "I"
+        if (word == "i" && baseLocale == "en") return "I"
         if (word.length < 2) return null
         if (dictionaryStore?.isKnownWord(word) == true) {
             // Even if known, NEVER auto-capitalize mid-sentence function words
             return null
         }
         val lower = word.lowercase()
-        val baseLocale = KeyboardLocales.baseLang(locale)
 
         // Respect explicit custom words or consistently mid-sentence capitalized terms,
         // while NEVER letting sentence-start capitalization ("Und") leak into mid-sentence ("und").
@@ -369,7 +408,8 @@ object SuggestionEngine {
         }
 
         // If the word is already valid in stock vocab or downloaded 50k pack, don't force fuzzy change
-        if (LanguageVocabularies.vocabularyFor(locale).any { it.equals(word, ignoreCase = false) } ||
+        val primaryVocab = LanguageVocabularies.vocabularyFor(locale)
+        if (primaryVocab.any { it.equals(word, ignoreCase = true) } ||
             offlinePack?.contains(word) == true
         ) {
             return null
@@ -380,7 +420,7 @@ object SuggestionEngine {
             val learnedMatch = dictionaryStore.allKnownVocabularyWords()
                 .asSequence()
                 .filter { kotlin.math.abs(it.length - word.length) <= 1 && dictionaryStore.wordScore(it) >= 15 }
-                .map { it to weightedKeyboardDistance(lower, it.lowercase(), locale) }
+                .map { it to weightedKeyboardDistance(lower, it.lowercase(), locale, maxDistance = 0.85) }
                 .filter { (_, dist) -> dist > 0.0 && dist <= 0.85 }
                 .minWithOrNull(compareBy<Pair<String, Double>> { it.second }.thenByDescending { dictionaryStore.wordScore(it.first) })
                 ?.first
@@ -389,7 +429,39 @@ object SuggestionEngine {
             }
         }
 
+        // Safe high-confidence proximity/transposition autocorrect against primary vocabulary
+        // (e.g. "huete" -> "heute", "hsllo" -> "hallo", "raelly" -> "really").
+        // Requires a single unambiguous winner (distance <= 0.68 and clear margin over runner-up).
+        if (word.length >= 4) {
+            var bestWord: String? = null
+            var bestDist = 99.0
+            var secondDist = 99.0
+            for (cand in primaryVocab) {
+                if (kotlin.math.abs(cand.length - word.length) > 1) continue
+                val dist = weightedKeyboardDistance(lower, cand.lowercase(), locale, maxDistance = 0.95)
+                if (dist <= 0.0 || dist >= 0.95) continue
+                if (dist < bestDist) {
+                    secondDist = bestDist
+                    bestDist = dist
+                    bestWord = cand
+                } else if (dist < secondDist) {
+                    secondDist = dist
+                }
+            }
+            if (bestWord != null && bestDist <= 0.68 && (secondDist - bestDist) >= 0.20) {
+                return adjustCandidateCase(word, bestWord, locale, atSentenceStart, dictionaryStore)
+            }
+        }
+
         return null
+    }
+
+    private fun hasGermanSpecialChar(s: String): Boolean {
+        for (i in s.indices) {
+            val ch = s[i]
+            if (ch == 'ä' || ch == 'ö' || ch == 'ü' || ch == 'ß') return true
+        }
+        return false
     }
 
     fun detectGrammarHint(textBeforeCursor: String, locale: String): GrammarHint? {
@@ -397,8 +469,7 @@ object SuggestionEngine {
         val base = KeyboardLocales.baseLang(locale)
 
         // Duplicate adjacent word e.g. "der der" or "the the"
-        val dupRegex = Regex("""\b(\p{L}{2,})\s+\1$""", RegexOption.IGNORE_CASE)
-        val dupMatch = dupRegex.find(textBeforeCursor)
+        val dupMatch = dupWordRegex.find(textBeforeCursor)
         if (dupMatch != null) {
             val word = dupMatch.groupValues[1]
             return GrammarHint(
@@ -409,8 +480,7 @@ object SuggestionEngine {
         }
 
         // Missing capitalization right after sentence boundary (e.g. "Hallo. wie")
-        val capRegex = Regex("""([.!?]\s+)(\p{Ll}\p{L}*)$""")
-        val capMatch = capRegex.find(textBeforeCursor)
+        val capMatch = missingSentenceCapRegex.find(textBeforeCursor)
         if (capMatch != null) {
             val sep = capMatch.groupValues[1]
             val word = capMatch.groupValues[2]
@@ -425,8 +495,7 @@ object SuggestionEngine {
         }
 
         // Extra space before punctuation e.g. "Hallo ,"
-        val spacePunctRegex = Regex("""(\p{L}+)\s+([,.!?])$""")
-        val spacePunctMatch = spacePunctRegex.find(textBeforeCursor)
+        val spacePunctMatch = spaceBeforePunctRegex.find(textBeforeCursor)
         if (spacePunctMatch != null) {
             val word = spacePunctMatch.groupValues[1]
             val punct = spacePunctMatch.groupValues[2]
@@ -597,41 +666,47 @@ object SuggestionEngine {
         return coords
     }
 
-    private val umlautPairs = setOf(
-        'a' to 'ä', 'ä' to 'a',
-        'o' to 'ö', 'ö' to 'o',
-        'u' to 'ü', 'ü' to 'u',
-        's' to 'ß', 'ß' to 's',
-        'c' to 'ç', 'ç' to 'c',
-        'n' to 'ñ', 'ñ' to 'n'
-    )
+    private fun isUmlautPair(ca: Char, cb: Char): Boolean =
+        (ca == 'a' && cb == 'ä') || (ca == 'ä' && cb == 'a') ||
+            (ca == 'o' && cb == 'ö') || (ca == 'ö' && cb == 'o') ||
+            (ca == 'u' && cb == 'ü') || (ca == 'ü' && cb == 'u') ||
+            (ca == 's' && cb == 'ß') || (ca == 'ß' && cb == 's') ||
+            (ca == 'c' && cb == 'ç') || (ca == 'ç' && cb == 'c') ||
+            (ca == 'n' && cb == 'ñ') || (ca == 'ñ' && cb == 'n')
 
-    fun weightedKeyboardDistance(a: String, b: String, locale: String = "de"): Double {
+    fun weightedKeyboardDistance(
+        a: String,
+        b: String,
+        locale: String = "de",
+        maxDistance: Double = Double.MAX_VALUE
+    ): Double {
         if (a == b) return 0.0
         val n = a.length
         val m = b.length
         if (kotlin.math.abs(n - m) > 2) return 99.0
         val coords = keyGridCoords(locale)
-        val d = Array(n + 1) { DoubleArray(m + 1) }
-        for (i in 0..n) d[i][0] = i.toDouble()
-        for (j in 0..m) d[0][j] = j.toDouble()
+        var prev2 = DoubleArray(m + 1)
+        var prev1 = DoubleArray(m + 1) { it.toDouble() }
+        var curr = DoubleArray(m + 1)
         for (i in 1..n) {
+            curr[0] = i.toDouble()
+            var rowMin = curr[0]
+            val ca = a[i - 1]
+            val pa = coords[ca]
             for (j in 1..m) {
-                val ca = a[i - 1]
                 val cb = b[j - 1]
                 val subCost = when {
                     ca == cb -> 0.0
-                    (ca to cb) in umlautPairs -> 0.25
+                    isUmlautPair(ca, cb) -> 0.25
                     else -> {
-                        val pa = coords[ca]
                         val pb = coords[cb]
                         if (pa != null && pb != null) {
                             val dx = pa.first - pb.first
                             val dy = pa.second - pb.second
-                            val euclid = kotlin.math.hypot(dx.toDouble(), dy.toDouble())
+                            val distSq = dx * dx + dy * dy
                             when {
-                                euclid <= 1.25 -> 0.45
-                                euclid <= 1.85 -> 0.55
+                                distSq <= 1.5625f -> 0.45
+                                distSq <= 3.4225f -> 0.55
                                 else -> 1.1
                             }
                         } else {
@@ -640,17 +715,25 @@ object SuggestionEngine {
                     }
                 }
                 var best = minOf(
-                    d[i - 1][j] + 1.0,
-                    d[i][j - 1] + 1.0,
-                    d[i - 1][j - 1] + subCost
+                    prev1[j] + 1.0,
+                    curr[j - 1] + 1.0,
+                    prev1[j - 1] + subCost
                 )
-                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
-                    best = minOf(best, d[i - 2][j - 2] + 0.65)
+                if (i > 1 && j > 1 && ca == b[j - 2] && a[i - 2] == cb) {
+                    val trans = prev2[j - 2] + 0.65
+                    if (trans < best) best = trans
                 }
-                d[i][j] = best
+                curr[j] = best
+                if (best < rowMin) rowMin = best
             }
+            // Early-abort if even the best cell in this row exceeds maxDistance (accounting for transposition slack)
+            if (rowMin > maxDistance + 0.65) return 99.0
+            val tmp = prev2
+            prev2 = prev1
+            prev1 = curr
+            curr = tmp
         }
-        return d[n][m]
+        return prev1[m]
     }
 
     /**
