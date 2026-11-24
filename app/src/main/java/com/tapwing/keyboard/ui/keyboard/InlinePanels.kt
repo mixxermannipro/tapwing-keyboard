@@ -7,6 +7,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -83,6 +85,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -113,6 +116,8 @@ import com.tapwing.keyboard.dictionary.TextSnippet
 import com.tapwing.keyboard.emoji.EmojiCatalog
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
@@ -150,7 +155,7 @@ fun ToolsHubPanel(
     onSwitchLanguage: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
-    val de = prefs.activeLocale == "de"
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
 
     val oneHandedLabel = when (prefs.oneHandedMode) {
         OneHandedMode.OFF -> if (de) "Einhändig" else "One-hand"
@@ -283,7 +288,7 @@ fun KeyboardResizePanel(
     onDone: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
-    val de = prefs.activeLocale == "de"
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
     var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
     Column(
@@ -368,28 +373,30 @@ fun KeyboardResizePanel(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
+                val currentScale by rememberUpdatedState(prefs.keyboardScalePercent)
+                val currentOnScaleChange by rememberUpdatedState(onScaleChange)
+                val resizeStepPx = with(LocalDensity.current) { 5.dp.toPx() }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(26.dp)
-                        .pointerInput(prefs.keyboardScalePercent) {
+                        .pointerInput(resizeStepPx) {
                             detectVerticalDragGestures(
                                 onDragStart = { dragAccumulator = 0f },
                                 onVerticalDrag = { _, dragAmount ->
                                     // Dragging UP (negative dy) increases keyboard height
                                     dragAccumulator -= dragAmount
-                                    val stepPx = 12f
-                                    var updated = prefs.keyboardScalePercent
-                                    while (dragAccumulator >= stepPx) {
+                                    var updated = currentScale
+                                    while (dragAccumulator >= resizeStepPx) {
                                         updated = (updated + 1).coerceIn(75, 135)
-                                        dragAccumulator -= stepPx
+                                        dragAccumulator -= resizeStepPx
                                     }
-                                    while (dragAccumulator <= -stepPx) {
+                                    while (dragAccumulator <= -resizeStepPx) {
                                         updated = (updated - 1).coerceIn(75, 135)
-                                        dragAccumulator += stepPx
+                                        dragAccumulator += resizeStepPx
                                     }
-                                    if (updated != prefs.keyboardScalePercent) {
-                                        onScaleChange(updated)
+                                    if (updated != currentScale) {
+                                        currentOnScaleChange(updated)
                                     }
                                 }
                             )
@@ -431,7 +438,7 @@ fun TextEditPanel(
     onUndo: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
-    val de = prefs.activeLocale == "de"
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
 
     Column(
         modifier = Modifier
@@ -468,20 +475,20 @@ fun TextEditPanel(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left: 4-way precision cursor D-pad
+            // Left: 4-way precision cursor D-pad with hold-to-repeat
             Column(
                 modifier = Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                EditPadButton(Icons.Rounded.KeyboardArrowUp, if (de) "Hoch" else "Up") {
+                EditPadButton(Icons.Rounded.KeyboardArrowUp, if (de) "Hoch" else "Up", prefs.hapticFeedback) {
                     onAction(TextEditAction.UP)
                 }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    EditPadButton(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, if (de) "Links" else "Left") {
+                    EditPadButton(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, if (de) "Links" else "Left", prefs.hapticFeedback) {
                         onAction(TextEditAction.LEFT)
                     }
                     Surface(
@@ -493,23 +500,23 @@ fun TextEditPanel(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                text = if (de) "SEL" else "SEL",
+                                text = "SEL",
                                 color = if (selectionActive) kbColors.actionText else kbColors.keyText,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp
                             )
                         }
                     }
-                    EditPadButton(Icons.AutoMirrored.Rounded.KeyboardArrowRight, if (de) "Rechts" else "Right") {
+                    EditPadButton(Icons.AutoMirrored.Rounded.KeyboardArrowRight, if (de) "Rechts" else "Right", prefs.hapticFeedback) {
                         onAction(TextEditAction.RIGHT)
                     }
                 }
-                EditPadButton(Icons.Rounded.KeyboardArrowDown, if (de) "Runter" else "Down") {
+                EditPadButton(Icons.Rounded.KeyboardArrowDown, if (de) "Runter" else "Down", prefs.hapticFeedback) {
                     onAction(TextEditAction.DOWN)
                 }
             }
 
-            // Right: Select All, Copy, Cut, Paste, Line Home/End, Undo
+            // Right: Select All, Copy, Cut, Paste, Line Start/End, Undo
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -530,7 +537,10 @@ fun TextEditPanel(
                         onAction(TextEditAction.PASTE)
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    EditActionTile(Modifier.weight(1f), Icons.AutoMirrored.Rounded.KeyboardArrowLeft, if (de) "Anfang" else "Home") {
+                        onAction(TextEditAction.LINE_START)
+                    }
                     EditActionTile(Modifier.weight(1f), Icons.AutoMirrored.Rounded.Undo, if (de) "Zurück" else "Undo", onClick = onUndo)
                     EditActionTile(Modifier.weight(1f), Icons.AutoMirrored.Rounded.KeyboardArrowRight, if (de) "Ende" else "End") {
                         onAction(TextEditAction.LINE_END)
@@ -545,15 +555,50 @@ fun TextEditPanel(
 private fun EditPadButton(
     icon: ImageVector,
     contentDescription: String,
-    onClick: () -> Unit
+    hapticEnabled: Boolean,
+    onStep: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
+    val view = LocalView.current
+    val scope = rememberCoroutineScope()
+    val currentOnStep by rememberUpdatedState(onStep)
+    val currentHaptic by rememberUpdatedState(hapticEnabled)
+    var pressed by remember { mutableStateOf(false) }
+
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = kbColors.modifierSurface,
+        color = if (pressed) kbColors.keyPressed else kbColors.modifierSurface,
         modifier = Modifier
             .size(52.dp)
-            .clickable(onClick = onClick)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val pid = down.id
+                    pressed = true
+                    if (currentHaptic) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    currentOnStep()
+                    val repeatJob = scope.launch {
+                        delay(300L)
+                        var ticks = 0
+                        while (true) {
+                            currentOnStep()
+                            if (currentHaptic) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            ticks++
+                            delay(if (ticks > 8) 45L else 75L)
+                        }
+                    }
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == pid } ?: break
+                            if (!change.pressed) break
+                        }
+                    } finally {
+                        repeatJob.cancel()
+                        pressed = false
+                    }
+                }
+            }
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = contentDescription, tint = kbColors.modifierText, modifier = Modifier.size(26.dp))
@@ -603,7 +648,7 @@ fun WritingToolsPanel(
     onUndoApplied: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
-    val de = prefs.activeLocale == "de"
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
 
     val actions = listOf(
         WritingAction.PROOFREAD to stringResource(R.string.action_proofread),
@@ -935,6 +980,19 @@ fun ClipboardPanel(
     onClearUnpinned: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
+    val view = LocalView.current
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+    var filterMode by remember { mutableStateOf(0) } // 0=All, 1=Pinned, 2=Images, 3=Text
+    val hasPinned = remember(clips) { clips.any { it.pinned } }
+    val hasImages = remember(clips) { clips.any { it.isImage } }
+    val filteredClips = remember(clips, filterMode) {
+        when (filterMode) {
+            1 -> clips.filter { it.pinned }
+            2 -> clips.filter { it.isImage }
+            3 -> clips.filter { !it.isImage }
+            else -> clips
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -957,13 +1015,53 @@ fun ClipboardPanel(
                 modifier = Modifier.weight(1f)
             )
             if (clips.any { !it.pinned }) {
-                TextButton(onClick = onClearUnpinned) {
+                TextButton(onClick = {
+                    if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                    onClearUnpinned()
+                }) {
                     Text(stringResource(R.string.clipboard_clear), fontSize = 12.sp)
                 }
             }
         }
 
-        if (clips.isEmpty()) {
+        if (clips.isNotEmpty() && (hasPinned || hasImages)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val tabs = buildList {
+                    add(0 to if (de) "Alle" else "All")
+                    if (hasPinned) add(1 to if (de) "Angepinnt" else "Pinned")
+                    if (hasImages) add(2 to if (de) "Bilder" else "Images")
+                    if (hasImages) add(3 to "Text")
+                }
+                tabs.forEach { (id, label) ->
+                    val selected = filterMode == id
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (selected) kbColors.actionSurface.copy(alpha = 0.28f) else kbColors.cardSurface,
+                        border = if (selected) BorderStroke(1.dp, kbColors.actionSurface) else null,
+                        modifier = Modifier.clickable {
+                            if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            filterMode = id
+                        }
+                    ) {
+                        Text(
+                            text = label,
+                            color = kbColors.keyText,
+                            fontSize = 11.5.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        if (filteredClips.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -986,7 +1084,7 @@ fun ClipboardPanel(
                     .fillMaxWidth()
                     .weight(1f)
             ) {
-                items(clips, key = { it.id }) { clip ->
+                items(filteredClips, key = { it.id }) { clip ->
                     val thumb by produceState<Bitmap?>(initialValue = null, clip.imagePath) {
                         val path = clip.imagePath
                         value = if (path != null) {
@@ -1001,7 +1099,10 @@ fun ClipboardPanel(
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = if (clip.pinned) kbColors.cardAltSurface else kbColors.cardSurface,
-                        modifier = Modifier.clickable { onPasteClip(clip) }
+                        modifier = Modifier.clickable {
+                            if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onPasteClip(clip)
+                        }
                     ) {
                         Column(
                             modifier = Modifier.padding(10.dp),
@@ -1035,7 +1136,10 @@ fun ClipboardPanel(
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
                                         color = kbColors.actionSurface.copy(alpha = 0.18f),
-                                        modifier = Modifier.clickable { onPasteClipOcr(clip) }
+                                        modifier = Modifier.clickable {
+                                            if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                            onPasteClipOcr(clip)
+                                        }
                                     ) {
                                         Text(
                                             text = stringResource(R.string.strip_screenshot_ocr),
@@ -1055,7 +1159,10 @@ fun ClipboardPanel(
                                         tint = if (clip.pinned) kbColors.actionSurface else kbColors.keyHintText,
                                         modifier = Modifier
                                             .size(16.dp)
-                                            .clickable { onTogglePin(clip) }
+                                            .clickable {
+                                                if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                onTogglePin(clip)
+                                            }
                                     )
                                     Spacer(Modifier.width(10.dp))
                                     Icon(
@@ -1064,7 +1171,10 @@ fun ClipboardPanel(
                                         tint = kbColors.keyHintText,
                                         modifier = Modifier
                                             .size(16.dp)
-                                            .clickable { onDeleteClip(clip) }
+                                            .clickable {
+                                                if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                                onDeleteClip(clip)
+                                            }
                                     )
                                 }
                             }
@@ -1201,6 +1311,9 @@ fun EmojiPanel(
     onBackspace: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
+    val view = LocalView.current
+    val scope = rememberCoroutineScope()
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
     val allCategories = remember(recentEmojis) {
         if (recentEmojis.isNotEmpty()) {
             listOf(
@@ -1216,12 +1329,25 @@ fun EmojiPanel(
             EmojiCatalog.categories
         }
     }
-    var selectedCategoryId by remember(recentEmojis.isNotEmpty()) {
-        mutableStateOf(allCategories.first().id)
+    // Keep category stable even when recentEmojis transitions from empty -> non-empty
+    var selectedCategoryId by remember {
+        mutableStateOf(if (recentEmojis.isNotEmpty()) "recent" else EmojiCatalog.categories.first().id)
     }
+    var activeSearchTag by remember { mutableStateOf<String?>(null) }
     val activeCategory = remember(selectedCategoryId, allCategories) {
         allCategories.firstOrNull { it.id == selectedCategoryId } ?: allCategories.first()
     }
+    val displayedEmojis = remember(activeSearchTag, activeCategory) {
+        val tag = activeSearchTag
+        if (tag.isNullOrBlank()) {
+            activeCategory.emojis.map { it.first }
+        } else {
+            EmojiCatalog.search(tag)
+        }
+    }
+    val quickTags = if (de) EmojiCatalog.quickSearchTagsDe else EmojiCatalog.quickSearchTagsEn
+    val currentOnBackspace by rememberUpdatedState(onBackspace)
+    val currentHaptic by rememberUpdatedState(prefs.hapticFeedback)
 
     Column(
         modifier = Modifier
@@ -1243,11 +1369,15 @@ fun EmojiPanel(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 allCategories.forEach { cat ->
-                    val selected = cat.id == activeCategory.id
+                    val selected = activeSearchTag == null && cat.id == activeCategory.id
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = if (selected) kbColors.actionSurface.copy(alpha = 0.28f) else kbColors.boardBackground,
-                        modifier = Modifier.clickable { selectedCategoryId = cat.id }
+                        modifier = Modifier.clickable {
+                            if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            activeSearchTag = null
+                            selectedCategoryId = cat.id
+                        }
                     ) {
                         Text(
                             text = cat.icon,
@@ -1257,8 +1387,70 @@ fun EmojiPanel(
                     }
                 }
             }
-            IconButton(onClick = onBackspace, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.AutoMirrored.Rounded.Backspace, contentDescription = stringResource(R.string.cd_backspace), tint = kbColors.keyText)
+            // Hold-to-repeat backspace inside Emoji panel
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val pid = down.id
+                            if (currentHaptic) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            currentOnBackspace()
+                            val repeatJob = scope.launch {
+                                delay(320L)
+                                while (true) {
+                                    currentOnBackspace()
+                                    if (currentHaptic) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    delay(55L)
+                                }
+                            }
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == pid } ?: break
+                                    if (!change.pressed) break
+                                }
+                            } finally {
+                                repeatJob.cancel()
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.Backspace, contentDescription = stringResource(R.string.cd_backspace), tint = kbColors.keyText, modifier = Modifier.size(20.dp))
+            }
+        }
+
+        // Quick 1-tap mood/keyword filter strip powered by EmojiCatalog.search
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            quickTags.forEach { (icon, keyword) ->
+                val isSelected = activeSearchTag == keyword
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isSelected) kbColors.actionSurface.copy(alpha = 0.28f) else kbColors.cardSurface,
+                    border = if (isSelected) BorderStroke(1.dp, kbColors.actionSurface) else null,
+                    modifier = Modifier.clickable {
+                        if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        activeSearchTag = if (isSelected) null else keyword
+                    }
+                ) {
+                    Text(
+                        text = "$icon $keyword",
+                        color = kbColors.keyText,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
             }
         }
 
@@ -1267,15 +1459,18 @@ fun EmojiPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(top = 4.dp),
+                .padding(top = 2.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            items(activeCategory.emojis) { (emoji, _) ->
+            items(displayedEmojis) { emoji ->
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { onInsertEmoji(emoji) }
+                        .clickable {
+                            if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            onInsertEmoji(emoji)
+                        }
                         .padding(vertical = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1300,7 +1495,7 @@ fun QuickBarCustomizePanel(
     onDone: () -> Unit
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
-    val de = prefs.activeLocale == "de"
+    val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
     val view = LocalView.current
     val density = LocalDensity.current
     val swapStepPx = remember(density) { with(density) { 42.dp.toPx() } }

@@ -406,21 +406,21 @@ object EmojiCatalog {
                 "🚂" to "lokomotive zug",
                 "🚆" to "zug bahn train",
                 "🚇" to "u-bahn metro",
-                "✈️" to "flugzeug reise urlaub flight",
-                "🛫" to "abflug reise",
-                "🛬" to "landung ankunft",
+                "✈️" to "flugzeug reise urlaub flight travel",
+                "🛫" to "abflug reise travel",
+                "🛬" to "landung ankunft travel",
                 "🚀" to "rakete start launch rocket",
                 "🛸" to "ufo",
-                "⛵" to "segelboot meer",
-                "🚢" to "schiff kreuzfahrt",
+                "⛵" to "segelboot meer travel",
+                "🚢" to "schiff kreuzfahrt travel",
                 "⛽" to "tankstelle benzin",
                 "🚦" to "ampel verkehr",
-                "🗺️" to "karte weltreise",
-                "🧭" to "kompass richtung",
+                "🗺️" to "karte weltreise travel",
+                "🧭" to "kompass richtung travel",
                 "🏔️" to "berg wandern alpen",
                 "⛰️" to "berg natur",
-                "🏖️" to "strand urlaub meer beach",
-                "🏝️" to "insel urlaub",
+                "🏖️" to "strand urlaub meer beach travel",
+                "🏝️" to "insel urlaub travel",
                 "🏕️" to "camping zelt",
                 "🏠" to "haus zuhause home",
                 "🏡" to "haus garten",
@@ -669,13 +669,55 @@ object EmojiCatalog {
         )
     )
 
+    val quickSearchTagsDe: List<Pair<String, String>> = listOf(
+        "❤️" to "liebe",
+        "😂" to "lachen",
+        "👍" to "ok",
+        "🎉" to "party",
+        "🔥" to "feuer",
+        "🙏" to "danke",
+        "☕" to "kaffee",
+        "✈️" to "reise"
+    )
+
+    val quickSearchTagsEn: List<Pair<String, String>> = listOf(
+        "❤️" to "love",
+        "😂" to "happy",
+        "👍" to "ok",
+        "🎉" to "party",
+        "🔥" to "fire",
+        "🙏" to "thanks",
+        "☕" to "coffee",
+        "✈️" to "travel"
+    )
+
+    private fun foldDiacritics(raw: String): String = raw.lowercase()
+        .replace('ä', 'a')
+        .replace('ö', 'o')
+        .replace('ü', 'u')
+        .replace("ß", "ss")
+
     fun search(query: String): List<String> {
-        val q = query.trim().lowercase()
+        val q = foldDiacritics(query.trim())
         if (q.isEmpty()) return categories.flatMap { cat -> cat.emojis.map { it.first } }
-        return categories.flatMap { cat ->
-            cat.emojis.filter { (emoji, keywords) ->
-                emoji == q || keywords.contains(q)
-            }.map { it.first }
-        }.distinct()
+        val exact = mutableListOf<String>()
+        val prefix = mutableListOf<String>()
+        val contains = mutableListOf<String>()
+        for (cat in categories) {
+            for ((emoji, keywords) in cat.emojis) {
+                if (emoji == q) {
+                    exact += emoji
+                    continue
+                }
+                val folded = foldDiacritics(keywords)
+                val tokens = folded.split(' ')
+                when {
+                    tokens.any { it == q } -> exact += emoji
+                    tokens.any { it.startsWith(q) } -> prefix += emoji
+                    folded.contains(q) -> contains += emoji
+                }
+            }
+        }
+        return (exact + prefix + contains).distinct()
     }
 }

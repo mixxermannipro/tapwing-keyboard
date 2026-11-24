@@ -5,7 +5,9 @@ import com.tapwing.keyboard.data.KeyboardLocales
 enum class KeyboardLayoutPage {
     LETTERS,
     SYMBOLS,
-    SYMBOLS_EXT
+    SYMBOLS_EXT,
+    NUMPAD,
+    PHONE_PAD
 }
 
 enum class ShiftState {
@@ -351,6 +353,61 @@ object KeyboardLayouts {
         )
     )
 
+    private val numpadRows: List<List<KeySpec>> = listOf(
+        listOf(
+            KeySpec("1", weight = 1.25f),
+            KeySpec("2", weight = 1.25f),
+            KeySpec("3", weight = 1.25f),
+            KeySpec("-", weight = 0.95f, alternates = listOf("+", "_", "/"))
+        ),
+        listOf(
+            KeySpec("4", weight = 1.25f),
+            KeySpec("5", weight = 1.25f),
+            KeySpec("6", weight = 1.25f),
+            KeySpec("␣", output = " ", weight = 0.95f, type = KeyActionType.SPACE)
+        ),
+        listOf(
+            KeySpec("7", weight = 1.25f),
+            KeySpec("8", weight = 1.25f),
+            KeySpec("9", weight = 1.25f),
+            KeySpec("⌫", weight = 0.95f, type = KeyActionType.BACKSPACE)
+        ),
+        listOf(
+            KeySpec("ABC", weight = 1.0f, type = KeyActionType.SYMBOLS_TOGGLE),
+            KeySpec(",", weight = 0.75f, type = KeyActionType.COMMA),
+            KeySpec("0", weight = 1.25f, alternates = listOf("+")),
+            KeySpec(".", weight = 0.75f, type = KeyActionType.PERIOD),
+            KeySpec("↵", weight = 0.95f, type = KeyActionType.ENTER)
+        )
+    )
+
+    private val phonePadRows: List<List<KeySpec>> = listOf(
+        listOf(
+            KeySpec("1", weight = 1.25f),
+            KeySpec("2", weight = 1.25f),
+            KeySpec("3", weight = 1.25f),
+            KeySpec("-", weight = 0.95f, alternates = listOf("(", ")", "/"))
+        ),
+        listOf(
+            KeySpec("4", weight = 1.25f),
+            KeySpec("5", weight = 1.25f),
+            KeySpec("6", weight = 1.25f),
+            KeySpec("␣", output = " ", weight = 0.95f, type = KeyActionType.SPACE)
+        ),
+        listOf(
+            KeySpec("7", weight = 1.25f),
+            KeySpec("8", weight = 1.25f),
+            KeySpec("9", weight = 1.25f),
+            KeySpec("⌫", weight = 0.95f, type = KeyActionType.BACKSPACE)
+        ),
+        listOf(
+            KeySpec("*", weight = 1.0f, alternates = listOf("(", ")")),
+            KeySpec("0", hint = "+", weight = 1.25f, alternates = listOf("+")),
+            KeySpec("#", weight = 1.0f, alternates = listOf(",", ";")),
+            KeySpec("↵", weight = 1.45f, type = KeyActionType.ENTER)
+        )
+    )
+
     fun rowsFor(
         page: KeyboardLayoutPage,
         locale: String,
@@ -429,6 +486,8 @@ object KeyboardLayouts {
             }
             KeyboardLayoutPage.SYMBOLS -> symbolRows
             KeyboardLayoutPage.SYMBOLS_EXT -> symbolExtRows
+            KeyboardLayoutPage.NUMPAD -> numpadRows
+            KeyboardLayoutPage.PHONE_PAD -> phonePadRows
         }
     }
 }

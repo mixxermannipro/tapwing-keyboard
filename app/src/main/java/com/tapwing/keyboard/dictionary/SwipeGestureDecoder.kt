@@ -21,6 +21,9 @@ data class SwipePoint(
  */
 object SwipeGestureDecoder {
 
+    private const val RESAMPLE_COUNT = 20
+    private const val DTW_BAND = 4
+
     fun decodeSwipe(
         points: List<SwipePoint>,
         keyCenters: List<KeyCenter>,
@@ -29,7 +32,9 @@ object SwipeGestureDecoder {
         dictionaryStore: AdaptiveDictionaryStore? = null,
         secondaryLocales: List<String> = emptyList(),
         atSentenceStart: Boolean = false,
-        offlinePack: LoadedDictionaryPack? = null
+        offlinePack: LoadedDictionaryPack? = null,
+        previousTwoWord: String? = null,
+        appPackage: String? = null
     ): List<String> {
         if (points.size < 2 || keyCenters.isEmpty()) return emptyList()
 
@@ -40,22 +45,32 @@ object SwipeGestureDecoder {
         if (startCandidates.isEmpty() || endCandidates.isEmpty()) return emptyList()
 
         val centerByChar = buildEffectiveKeyMap(keyCenters)
-        val resampled = resamplePath(points, targetCount = 24)
+        val resampled = resamplePath(points, targetCount = RESAMPLE_COUNT)
         val pathLength = computePathLength(resampled).coerceAtLeast(1f)
 
         val avgKeyGap = estimateKeyWidth(keyCenters).coerceAtLeast(40f)
+        val primaryVocab = LanguageVocabularies.vocabularyFor(locale)
+        val primaryRankMap = HashMap<String, Int>(primaryVocab.size * 2)
+        primaryVocab.forEachIndexed { idx, w -> primaryRankMap.putIfAbsent(w.lowercase(), idx) }
+
         val pool = linkedSetOf<String>()
         dictionaryStore?.allKnownVocabularyWords()?.let { pool.addAll(it) }
-        pool.addAll(LanguageVocabularies.vocabularyFor(locale))
+        pool.addAll(primaryVocab)
         offlinePack?.topSwipePool?.let { pool.addAll(it) }
         secondaryLocales.forEach { sec ->
             pool.addAll(LanguageVocabularies.vocabularyFor(sec))
         }
 
-        val bigramNext = if (!previousWord.isNullOrBlank() && dictionaryStore != null) {
-            dictionaryStore.predictNextWords(previousWord, limit = 10).toSet()
-        } else {
-            emptySet()
+        val contextNext = HashSet<String>(16)
+        if (!previousWord.isNullOrBlank()) {
+            dictionaryStore?.predictNextWords(
+                previousWord = previousWord,
+                limit = 10,
+                previousTwoWord = previousTwoWord,
+                appPackage = appPackage
+            )?.forEach { contextNext += it.lowercase() }
+            LanguageVocabularies.commonNextWords(locale, previousWord, previousTwoWord.orEmpty())
+                .forEach { contextNext += it.lowercase() }
         }
 
         val scored = mutableListOf<Pair<String, Double>>()
@@ -72,8 +87,8 @@ object SwipeGestureDecoder {
             if (startRank == -1 || endRank == -1) continue
 
             val idealPoints = buildIdealWordPath(lower, centerByChar, resampled.size) ?: continue
-            val dtwDist = normalizedPathDistance(resampled, idealPoints) / avgKeyGap
-            if (dtwDist > 1.85) continue
+            val dtwDist = bandedDtwDistance(resampled, idealPoints) / avgKeyGap
+            if (dtwDist > 1.75) continue
 
             val idealLen = computePathLength(idealPoints)
             val lenRatioPenalty = kotlin.math.abs(pathLength - idealLen) / maxOf(pathLength, idealLen, 1f)
@@ -82,10 +97,12 @@ object SwipeGestureDecoder {
                 endCandidates[endRank].second / avgKeyGap
 
             val personalScore = (dictionaryStore?.wordScore(clean) ?: 0).coerceAtMost(200)
-            val bigramBonus = if (clean in bigramNext || lower in bigramNext) 0.45 else 0.0
+            val contextBonus = if (lower in contextNext) 0.48 else 0.0
             val personalBonus = (personalScore / 200.0) * 0.35
+            val freqBonus = frequencyPriorBonus(lower, primaryRankMap, offlinePack)
 
-            val totalCost = dtwDist * 1.0 + startEndPenalty * 0.55 + lenRatioPenalty * 0.35 - bigramBonus - personalBonus
+            val totalCost = dtwDist * 1.0 + startEndPenalty * 0.55 + lenRatioPenalty * 0.30 -
+                contextBonus - personalBonus - freqBonus
             val finalWord = if (atSentenceStart) {
                 clean.replaceFirstChar { it.uppercaseChar() }
             } else if (LanguageVocabularies.isNeverAutoCapitalizeMidSentence(clean, locale)) {
@@ -101,6 +118,19 @@ object SwipeGestureDecoder {
             .map { it.first }
             .distinct()
             .take(3)
+    }
+
+    private fun frequencyPriorBonus(
+        lower: String,
+        primaryRankMap: Map<String, Int>,
+        offlinePack: LoadedDictionaryPack?
+    ): Double {
+        val primaryRank = primaryRankMap[lower]
+        if (primaryRank != null) {
+            return (0.22 * (1.0 - (primaryRank.toDouble() / (primaryRankMap.size + 1)))).coerceIn(0.04, 0.22)
+        }
+        val freq = offlinePack?.wordFreq?.get(lower) ?: return 0.0
+        return (kotlin.math.ln1p(freq.toDouble()) / 20.0).coerceIn(0.0, 0.14)
     }
 
     private fun buildEffectiveKeyMap(centers: List<KeyCenter>): Map<Char, KeyCenter> {
@@ -154,9 +184,14 @@ object SwipeGestureDecoder {
         centers: Map<Char, KeyCenter>,
         samples: Int
     ): List<SwipePoint>? {
-        val raw = word.map { ch ->
+        val raw = ArrayList<SwipePoint>(word.length)
+        var prevChar: Char? = null
+        for (ch in word) {
+            // Collapse consecutive duplicate letters (e.g. "ll" in "hallo") to mirror natural swipe paths
+            if (ch == prevChar) continue
+            prevChar = ch
             val kc = centers[ch] ?: return null
-            SwipePoint(kc.x, kc.y)
+            raw += SwipePoint(kc.x, kc.y)
         }
         return resamplePath(raw, samples)
     }
@@ -204,13 +239,35 @@ object SwipeGestureDecoder {
         return total
     }
 
-    private fun normalizedPathDistance(a: List<SwipePoint>, b: List<SwipePoint>): Double {
-        val n = min(a.size, b.size)
-        if (n == 0) return Double.MAX_VALUE
-        var sum = 0.0
-        for (i in 0 until n) {
-            sum += hypot((a[i].x - b[i].x).toDouble(), (a[i].y - b[i].y).toDouble())
+    /**
+     * Fast Sakoe-Chiba banded Dynamic Time Warping distance normalized by path length.
+     * Handles uneven finger speeds and slight pauses mid-swipe far better than 1:1 point indexing.
+     */
+    internal fun bandedDtwDistance(a: List<SwipePoint>, b: List<SwipePoint>, band: Int = DTW_BAND): Double {
+        val n = a.size
+        val m = b.size
+        if (n == 0 || m == 0) return Double.MAX_VALUE
+        val inf = 1e12
+        var prev = DoubleArray(m + 1) { inf }
+        var curr = DoubleArray(m + 1) { inf }
+        prev[0] = 0.0
+        for (i in 1..n) {
+            curr.fill(inf)
+            val jStart = maxOf(1, i - band)
+            val jEnd = minOf(m, i + band)
+            val ax = a[i - 1].x
+            val ay = a[i - 1].y
+            for (j in jStart..jEnd) {
+                val dx = (ax - b[j - 1].x).toDouble()
+                val dy = (ay - b[j - 1].y).toDouble()
+                val cost = hypot(dx, dy)
+                val bestPrev = minOf(prev[j], curr[j - 1], prev[j - 1])
+                curr[j] = cost + bestPrev
+            }
+            val tmp = prev
+            prev = curr
+            curr = tmp
         }
-        return sum / n
+        return prev[m] / maxOf(n, m)
     }
 }

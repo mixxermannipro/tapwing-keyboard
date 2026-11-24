@@ -147,4 +147,45 @@ class SuggestionEngineTest {
         val far = SuggestionEngine.weightedKeyboardDistance("zzzzzz", "hallo", "de", maxDistance = 1.5)
         assertTrue("Expected early-abort far distance >= 99.0, got $far", far >= 99.0)
     }
+
+    @Test
+    fun contextAwareAutocorrectDisambiguatesShortWordsAndBilingualEnglishI() {
+        // 3-letter typo disambiguated by German sentence context "Ich bkn" -> "bin"
+        assertEquals(
+            "bin",
+            SuggestionEngine.autoCorrectionFor("bkn", "de", previousWord = "Ich")
+        )
+        // Bilingual English sentence on German keyboard auto-capitalizes standalone "i"
+        assertEquals(
+            "I",
+            SuggestionEngine.autoCorrectionFor(
+                word = "i",
+                locale = "de",
+                secondaryLocales = listOf("en"),
+                previousWord = "think"
+            )
+        )
+        // German article triggers capitalization of known German nouns in vocab
+        assertEquals(
+            "Weg",
+            SuggestionEngine.autoCorrectionFor("weg", "de", previousWord = "der")
+        )
+    }
+
+    @Test
+    fun urlFieldOffersContextualTldAndSlashChips() {
+        val initial = SuggestionEngine.suggestionsFor("", "de", isUrlField = true)
+        assertTrue(initial.any { it.text == "https://" })
+
+        val typingHost = SuggestionEngine.suggestionsFor("tapwing", "de", isUrlField = true)
+        assertTrue("Expected .de TLD chip in $typingHost", typingHost.any { it.text == ".de" && !it.appendSpace })
+        assertTrue("Expected .com TLD chip in $typingHost", typingHost.any { it.text == ".com" && !it.appendSpace })
+
+        val partialTld = SuggestionEngine.suggestionsFor("tapwing.d", "de", isUrlField = true)
+        assertEquals(".de", partialTld.single().text)
+        assertEquals(2, partialTld.single().replaceCharCount)
+
+        val fullHost = SuggestionEngine.suggestionsFor("tapwing.de", "de", isUrlField = true)
+        assertEquals("/", fullHost.single().text)
+    }
 }

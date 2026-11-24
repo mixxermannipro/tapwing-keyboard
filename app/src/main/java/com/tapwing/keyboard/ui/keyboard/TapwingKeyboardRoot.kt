@@ -93,6 +93,7 @@ fun TapwingKeyboardRoot(
     onSwipeWord: (List<SwipePoint>, List<KeyCenter>) -> Unit,
     onCursorMove: (Int, Int) -> Unit,
     onDeletePreviousWord: () -> Unit,
+    onSwipeBackspaceEnd: () -> Unit = {},
     onSwitchLanguage: () -> Unit,
     onToggleOneHandedSide: () -> Unit,
     onExitOneHanded: () -> Unit,
@@ -388,6 +389,7 @@ fun TapwingKeyboardRoot(
                                             onSwipeWord = onSwipeWord,
                                             onCursorMove = onCursorMove,
                                             onDeletePreviousWord = onDeletePreviousWord,
+                                            onSwipeBackspaceEnd = onSwipeBackspaceEnd,
                                             onSwitchLanguage = onSwitchLanguage,
                                             onToggleOneHandedSide = onToggleOneHandedSide,
                                             onExitOneHanded = onExitOneHanded

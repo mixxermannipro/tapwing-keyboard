@@ -213,6 +213,7 @@ class TapwingInputMethodService :
     private var writingTarget: WritingTarget? = null
     private var lastWordBeforeEmoji: String = ""
     private var lastSuggestionKey: String = ""
+    private val pendingSwipeDeletedChunks = mutableListOf<String>()
 
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         syncSystemClipboard(updateStrip = inputViewActive)
@@ -481,7 +482,8 @@ class TapwingInputMethodService :
                     onKeyPress = ::handleKeyPress,
                     onSwipeWord = ::handleSwipeWord,
                     onCursorMove = ::moveCursor2D,
-                    onDeletePreviousWord = ::deletePreviousWordWithUndo,
+                    onDeletePreviousWord = ::deletePreviousWordSwipeStep,
+                    onSwipeBackspaceEnd = ::finishBackspaceSwipe,
                     onSwitchLanguage = ::toggleLocale,
                     onToggleOneHandedSide = ::swapOneHandedSide,
                     onExitOneHanded = { updatePref { it.copy(oneHandedMode = OneHandedMode.OFF) } },
@@ -682,11 +684,12 @@ class TapwingInputMethodService :
 
         resolvedImeAction = resolveImeAction(info)
         imeActionLabel = resolvedImeAction.label
-        layoutPage = KeyboardLayoutPage.LETTERS
+        layoutPage = SmartLayoutBehavior.initialPageForInputType(info?.inputType ?: InputType.TYPE_CLASS_TEXT)
         panelMode = KeyboardPanelMode.KEYS
         textEditSelectionActive = false
         pendingSmartUndoPair = null
         pendingSuggestionSpace = null
+        pendingSwipeDeletedChunks.clear()
         lastSpaceTapMs = 0L
         lastSuggestionKey = ""
 
@@ -1053,30 +1056,32 @@ class TapwingInputMethodService :
     private fun handleSwipeWord(points: List<SwipePoint>, keyCenters: List<KeyCenter>) {
         if (!languageToolsAllowed || !currentPrefs.glideTypingEnabled) return
         val ic = currentInputConnection ?: return
-        val before = ic.getTextBeforeCursor(80, 0)?.toString().orEmpty()
+        val before = runCatching { ic.getTextBeforeCursor(80, 0)?.toString().orEmpty() }.getOrDefault("")
         val atStart = SuggestionEngine.isAtSentenceStart(before, "")
-        val prevWord = SuggestionEngine.extractPreviousWord(before)
+        val (p1, p2) = SuggestionEngine.extractPreviousTwoWords(before)
+        val appPkg = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null
 
         val candidates = SwipeGestureDecoder.decodeSwipe(
             points = points,
             keyCenters = keyCenters,
             locale = currentPrefs.activeLocale,
-            previousWord = prevWord,
+            previousWord = p1,
             dictionaryStore = dictionaryStore.takeUnless { currentPrefs.incognitoMode },
             secondaryLocales = secondaryLocales(),
             atSentenceStart = atStart,
-            offlinePack = offlinePackManager.getCachedPack(currentPrefs.activeLocale)
+            offlinePack = offlinePackManager.getCachedPack(currentPrefs.activeLocale),
+            previousTwoWord = p2.takeIf { it.isNotEmpty() },
+            appPackage = appPkg
         )
         val top = candidates.firstOrNull() ?: return
         val needsSpace = before.isNotEmpty() && !before.last().isWhitespace()
         val insertion = (if (needsSpace) " " else "") + top + " "
-        val selected = ic.getSelectedText(0)?.toString().orEmpty()
-        if (!ic.commitText(insertion, 1)) return
+        val selected = runCatching { ic.getSelectedText(0)?.toString().orEmpty() }.getOrDefault("")
+        if (!runCatching { ic.commitText(insertion, 1) }.getOrDefault(false)) return
         statsStore.recordSwipeWord(top.length, currentPrefs.incognitoMode)
         pendingSuggestionSpace = ic.readUndoAnchor()
         pendingSmartUndoPair = null
 
-        val (p1, p2) = SuggestionEngine.extractPreviousTwoWords(before)
         dictionaryStore.recordTypedWord(
             word = top,
             previousWord = p1.takeIf { it.isNotEmpty() },
@@ -1085,7 +1090,7 @@ class TapwingInputMethodService :
             previousTwoWord = p2.takeIf { it.isNotEmpty() },
             wasSentenceStart = atStart,
             locale = currentPrefs.activeLocale,
-            appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null
+            appPackage = appPkg
         )
 
         recordEditorUndo(
@@ -1118,7 +1123,7 @@ class TapwingInputMethodService :
     private fun handleSpaceKey() {
         val ic = currentInputConnection ?: return
         val now = System.currentTimeMillis()
-        val before = ic.getTextBeforeCursor(48, 0)?.toString().orEmpty()
+        val before = runCatching { ic.getTextBeforeCursor(48, 0)?.toString().orEmpty() }.getOrDefault("")
         pendingSuggestionSpace = null
 
         if (languageToolsAllowed && currentPrefs.doubleSpacePeriod && (now - lastSpaceTapMs) <= 320L &&
@@ -1135,7 +1140,10 @@ class TapwingInputMethodService :
         lastSpaceTapMs = now
         val correctedPair = maybeAutoCorrectTrailingWord()
         learnCompletedTrailingWord()
-        val committed = ic.commitText(" ", 1)
+        val committed = runCatching { ic.commitText(" ", 1) }.getOrDefault(false)
+        if (committed && SmartLayoutBehavior.shouldAutoReturnToLettersAfterSpace(layoutPage, before)) {
+            layoutPage = KeyboardLayoutPage.LETTERS
+        }
         if (correctedPair != null) {
             recordAutocorrection(correctedPair, if (committed) " " else "")
             pendingSmartUndoPair = correctedPair.takeIf { committed }
@@ -1161,7 +1169,7 @@ class TapwingInputMethodService :
         if (!languageToolsAllowed) return
         if (!currentPrefs.learningEnabled || currentPrefs.incognitoMode) return
         val ic = currentInputConnection ?: return
-        val before = ic.getTextBeforeCursor(140, 0)?.toString().orEmpty()
+        val before = runCatching { ic.getTextBeforeCursor(140, 0)?.toString().orEmpty() }.getOrDefault("")
         val trailing = SuggestionEngine.extractTrailingWord(before)
         if (trailing.isEmpty()) return
 
@@ -1184,18 +1192,23 @@ class TapwingInputMethodService :
     private fun maybeAutoCorrectTrailingWord(): Pair<String, String>? {
         if (!languageToolsAllowed || !currentPrefs.autoCorrect) return null
         val ic = currentInputConnection ?: return null
-        val before = ic.getTextBeforeCursor(48, 0)?.toString().orEmpty()
+        val before = runCatching { ic.getTextBeforeCursor(96, 0)?.toString().orEmpty() }.getOrDefault("")
         val trailing = SuggestionEngine.extractTrailingWord(before)
         if (trailing.isBlank()) return null
 
+        val prefixBeforeTrailing = before.dropLast(trailing.length)
         val atStart = SuggestionEngine.isAtSentenceStart(before, trailing)
+        val (prev1, prev2) = SuggestionEngine.extractPreviousTwoWords(prefixBeforeTrailing)
         val correction = SuggestionEngine.autoCorrectionFor(
             word = trailing,
             locale = currentPrefs.activeLocale,
             dictionaryStore = dictionaryStore.takeUnless { currentPrefs.incognitoMode },
             atSentenceStart = atStart,
             secondaryLocales = secondaryLocales(),
-            offlinePack = offlinePackManager.getCachedPack(currentPrefs.activeLocale)
+            offlinePack = offlinePackManager.getCachedPack(currentPrefs.activeLocale),
+            previousWord = prev1.takeIf { it.isNotEmpty() },
+            previousTwoWord = prev2.takeIf { it.isNotEmpty() },
+            appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null
         )
         if (correction != null && correction != trailing &&
             ic.getSelectedText(0).isNullOrEmpty() &&
@@ -1211,10 +1224,10 @@ class TapwingInputMethodService :
         val ic = currentInputConnection ?: return
         pendingSuggestionSpace = null
 
-        val selected = ic.getSelectedText(0)
+        val selected = runCatching { ic.getSelectedText(0) }.getOrNull()
         if (!selected.isNullOrEmpty()) {
             pendingSmartUndoPair = null
-            ic.commitText("", 1)
+            runCatching { ic.commitText("", 1) }
             refreshContextAndSuggestions()
             return
         }
@@ -1223,19 +1236,54 @@ class TapwingInputMethodService :
         pendingSmartUndoPair = null
 
         val now = SystemClock.uptimeMillis()
-        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0, 0))
-        ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0, 0))
+        runCatching {
+            ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0, 0))
+            ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0, 0))
+        }
         refreshContextAndSuggestions()
+    }
+
+    private fun deletePreviousWordSwipeStep() {
+        pendingSmartUndoPair = null
+        pendingSuggestionSpace = null
+        val ic = currentInputConnection ?: return
+        val before = runCatching { ic.getTextBeforeCursor(60, 0)?.toString().orEmpty() }.getOrDefault("")
+        val match = WORD_DELETE_REGEX.find(before) ?: return
+        val deleted = match.value
+        if (!ic.getSelectedText(0).isNullOrEmpty() || !runCatching { ic.deleteSurroundingText(deleted.length, 0) }.getOrDefault(false)) return
+        pendingSwipeDeletedChunks.add(0, deleted)
+    }
+
+    private fun finishBackspaceSwipe() {
+        if (pendingSwipeDeletedChunks.isEmpty()) return
+        val count = pendingSwipeDeletedChunks.size
+        val combinedDeleted = pendingSwipeDeletedChunks.joinToString(separator = "")
+        pendingSwipeDeletedChunks.clear()
+        val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
+        val label = when {
+            count == 1 && de -> "Wort wiederherstellen"
+            count == 1 -> "Restore word"
+            de -> "$count Wörter wiederherstellen"
+            else -> "Restore $count words"
+        }
+        recordEditorUndo(
+            beforeText = combinedDeleted,
+            afterText = "",
+            reason = UndoReason.BULK_DELETE,
+            label = label
+        )
+        proactiveUndoState = undoManager.activeBanner()
+        refreshContextAndSuggestions(force = true)
     }
 
     private fun deletePreviousWordWithUndo() {
         pendingSmartUndoPair = null
         pendingSuggestionSpace = null
         val ic = currentInputConnection ?: return
-        val before = ic.getTextBeforeCursor(60, 0)?.toString().orEmpty()
+        val before = runCatching { ic.getTextBeforeCursor(60, 0)?.toString().orEmpty() }.getOrDefault("")
         val match = WORD_DELETE_REGEX.find(before) ?: return
         val deleted = match.value
-        if (!ic.getSelectedText(0).isNullOrEmpty() || !ic.deleteSurroundingText(deleted.length, 0)) return
+        if (!ic.getSelectedText(0).isNullOrEmpty() || !runCatching { ic.deleteSurroundingText(deleted.length, 0) }.getOrDefault(false)) return
         val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
         recordEditorUndo(
             beforeText = deleted,
@@ -1255,8 +1303,10 @@ class TapwingInputMethodService :
         fun sendDpad(code: Int, count: Int) {
             repeat(count) {
                 val now = SystemClock.uptimeMillis()
-                ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, 0))
-                ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0, 0))
+                runCatching {
+                    ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, 0))
+                    ic.sendKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0, 0))
+                }
             }
         }
         if (dx != 0) {
