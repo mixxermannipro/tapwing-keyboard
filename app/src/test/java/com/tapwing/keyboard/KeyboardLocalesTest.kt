@@ -32,7 +32,7 @@ class KeyboardLocalesTest {
     fun modelCatalogHasRecommendedSpeechAndWhisperModelsWithHttpsUrls() {
         assertTrue(LocalModelCatalog.recommendedWhisper().downloadUrl.startsWith("https://"))
         assertTrue(LocalModelCatalog.recommendedSherpa().downloadUrl.startsWith("https://"))
-        assertTrue(LocalModelCatalog.sherpaModels.size >= 4)
+        assertTrue(LocalModelCatalog.sherpaModels.size >= 6)
         assertTrue(LocalModelCatalog.whisperModels.size >= 3)
         assertTrue(LocalModelCatalog.allModels.all { it.kind.isSpeechModel && it.downloadUrl.startsWith("https://") })
         assertEquals("sherpa-fastconformer-de-pc-int8", LocalModelCatalog.recommendedForLocale("de-DE").id)

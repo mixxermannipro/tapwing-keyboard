@@ -6,7 +6,7 @@
 
 Tapwing verbindet Wortvorschläge, Spracheingabe, Schreibhilfe und eine anpassbare Werkzeugleiste. Schreiben, Lernen und viele Werkzeuge laufen direkt auf deinem Gerät.
 
-![Version 2.6.0](https://img.shields.io/badge/Version-2.6.0-6750A4?style=flat-square)
+![Version 2.6.1](https://img.shields.io/badge/Version-2.6.1-6750A4?style=flat-square)
 ![Android 10+](https://img.shields.io/badge/Android-10%2B-307D5D?style=flat-square&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7451BD?style=flat-square&logo=kotlin&logoColor=white)
 ![Apache 2.0](https://img.shields.io/badge/Lizenz-Apache%202.0-405773?style=flat-square)
@@ -16,7 +16,7 @@ Tapwing verbindet Wortvorschläge, Spracheingabe, Schreibhilfe und eine anpassba
 </div>
 
 > [!NOTE]
-> Tapwing 2.6.0 ist in Vorbereitung; der geschlossene Google-Play-Test setzt weiterhin einen freigeschalteten Testerzugang voraus.
+> Tapwing 2.6.1 ist als Update für den geschlossenen Google-Play-Test vorbereitet; der Installationslink setzt einen freigeschalteten Testerzugang voraus.
 
 ## Screenshots
 
@@ -35,7 +35,7 @@ Aufnahmen der Oberfläche (Stand 2.2.0 auf einem Android-16-Emulator mit Beispie
 | Bereich | Was du damit tun kannst |
 | --- | --- |
 | **Tippen** | Zwischen Sprache und Layout wechseln, per Wischgeste tippen, Folgewörter übernehmen und Autokorrekturen zurücknehmen. Tapwing lernt Wortpaare auf dem Gerät und kann Vorschläge pro App anpassen. |
-| **Diktat** | Blitzschnell lokal auf dem Gerät mit **Sherpa-ONNX** (FastConformer Deutsch, Kroko Live-Streaming mit Wort-für-Wort-Vorschau, Parakeet TDT v3 Ultra für 25 EU-Sprachen, Canary 180M Flash) oder **Whisper** diktieren – inklusive automatischer Verstärkung leiser Aufnahmen, Vorwärmung beim Tastaturstart und intelligenter Bereinigung von Füllwörtern, Stottern und Selbstkorrekturen. Alternativ über den Android-Sprachdienst oder optionale Cloud-APIs. |
+| **Diktat** | Blitzschnell lokal auf dem Gerät mit **Sherpa-ONNX** (**NVIDIA FastConformer Deutsch**, **Kroko Live-Streaming** mit Wort-für-Wort-Vorschau, **NVIDIA Parakeet TDT 0.6B v3 / Ultra** für 25 EU-Sprachen, **NVIDIA Parakeet TDT 0.6B v2 Englisch**, **NVIDIA Canary 180M Flash**) oder **Whisper** diktieren – inklusive automatischer Verstärkung leiser Aufnahmen, Vorwärmung beim Tastaturstart und intelligenter Bereinigung von Füllwörtern, Stottern und Selbstkorrekturen. Alternativ über den Android-Sprachdienst oder optionale Cloud-APIs. |
 | **Schreibhilfe** | Text korrigieren, kürzen und umformulieren. Die Optionen umfassen eingebaute Regeln, herunterladbare lokale Sprachmodelle und Cloud-Dienste mit eigenem Schlüssel. |
 | **Zwischenablage** | Kopierte Texte direkt einfügen, häufig genutzte Einträge anheften und die Aufbewahrung einstellen. Kopierte Bestätigungscodes können kurz zum Einfügen angeboten werden. |
 | **Text scannen** | Text mit der Kamera oder aus einem einzeln ausgewählten Foto erkennen und ins Schreibfeld übernehmen. |
@@ -43,9 +43,9 @@ Aufnahmen der Oberfläche (Stand 2.2.0 auf einem Android-16-Emulator mit Beispie
 | **Oberfläche & Schnellleiste** | Minimalistische Material-3-Expressive-Einstellungen im vertrauten Gboard-Aufbau mit federnden, flüssigen Übergängen. Höhe, Design und Schnellaktionen anpassen; Einhand- und geteiltes Layout sowie das Steuerkreuz stehen zur Auswahl. |
 | **Weitere Werkzeuge** | Rechnungen wie `24*7=` im Eingabefeld lösen, Tippstatistiken ansehen und Android-Autofill (automatisches Ausfüllen durch den gewählten Dienst) ab Android 11 nutzen. |
 
-### Neu in 2.6.0
+### Neu in 2.6.1
 
-- **Sherpa-ONNX-Engine auf dem Gerät (v2.0.3):** Deutlich schnellere lokale Spracherkennung mit kuratierter Modellauswahl und Empfehlungen direkt in den Einstellungen (inklusive Echtzeit-Live-Streaming über Kroko Zipformer, FastConformer Deutsch mit eingebauter Zeichensetzung, Parakeet 0.6B Ultra und Canary 180M).
+- **Sherpa-ONNX-Engine & NVIDIA NeMo / Parakeet (v2.0.3):** Deutlich schnellere lokale Spracherkennung mit kuratierter Modellauswahl direkt in den Einstellungen – darunter **NVIDIA FastConformer Deutsch**, **NVIDIA Parakeet TDT 0.6B v3 & Ultra** (25 EU-Sprachen), **NVIDIA Parakeet TDT 0.6B v2** (Englisch-Flaggschiff), **NVIDIA Canary 180M Flash** und **Kroko Live-Streaming**.
 - **Bereinigung auf Rambler-Niveau:** Verbesserte Erkennung von Stottern (`g- gehe`), Satz-Neustarts (`vergiss das`), deutschen/englischen Präpositions-Selbstkorrekturen, diktierten nummerierten Listen (`erstens / zweitens`), Nebensatz-Kommas und Sprachbefehlen (`Senden`).
 - **Gboard-nahe, butterweiche Oberfläche:** Schlanke, übersichtliche Einstellungen mit Suchleiste, federnden Druck- und Panel-Animationen sowie live scrollender Diktat-Leiste.
 

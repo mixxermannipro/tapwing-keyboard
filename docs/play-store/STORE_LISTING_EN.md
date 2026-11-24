@@ -49,14 +49,12 @@ PRIVACY BY DESIGN
 Typing, dictionary learning, clipboard history, and camera OCR stay locally on your device. No ads, no analytics SDKs, no hidden uploads.
 ```
 
-## Release Notes (`v2.4.0` — max 500 chars)
+## Release Notes (`v2.6.1` — max 500 chars)
 ```text
-What's new in Tapwing 2.4.0:
-• Refined pill-key design with centered secondary hints & glitch-free symbol/letter switching
-• Smart contextual bottom-right key (Search/Go in browsers, paragraph newline in chats with Send buttons)
-• Reliable clipboard capture for every copied item & native-style inline autofill chips (e.g. Bitwarden)
-• Multi-provider API Keys Vault (Gemini, Groq, OpenRouter, Grok, OpenAI) with free-tier presets & fallback routing
-• 500+ diverse emojis + smarter per-app & proximity-aware predictions
+What's new in Tapwing 2.6.1:
+• Ultra-fast offline dictation via Sherpa-ONNX (NVIDIA FastConformer, Parakeet TDT 0.6B v3/v2/Ultra, Canary 180M & Kroko real-time streaming)
+• Quiet-mic gain normalization, model pre-warming & cleanup for stutters, filler words, self-corrections and spoken lists
+• Minimalist Gboard-familiar Material 3 Expressive settings and fluid spring animations
 ```
 
 ## Category & Tags
