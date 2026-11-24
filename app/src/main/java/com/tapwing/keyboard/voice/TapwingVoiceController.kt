@@ -9,22 +9,26 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.Log
 import android.speech.RecognitionListener
 import android.speech.RecognitionSupport
 import android.speech.RecognitionSupportCallback
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.tapwing.keyboard.ai.LocalInferenceEngine
 import com.tapwing.keyboard.ai.LocalModelKind
 import com.tapwing.keyboard.ai.LocalModelManager
+import com.tapwing.keyboard.ai.LocalModelSpec
+import com.tapwing.keyboard.ai.SherpaOnnxEngine
 import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.VoiceEngineMode
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +36,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.ConcurrentLinkedQueue
 
 data class VoiceUiState(
     val isListening: Boolean = false,
@@ -45,7 +50,8 @@ data class VoiceUiState(
     val partialText: String = "",
     val processingLabel: String? = null,
     val errorMessage: String? = null,
-    val activeLocaleTag: String = "de-DE"
+    val activeLocaleTag: String = "de-DE",
+    val engineLabel: String? = null
 )
 
 internal class TapwingVoiceController(
@@ -68,15 +74,18 @@ internal class TapwingVoiceController(
     private var wasListeningBeforeConfigChange: Boolean = false
     private var activeLocale: String = "de"
     private var activeEngineMode: VoiceEngineMode = VoiceEngineMode.AUTO_LOCAL_FIRST
-    private var activeWhisperModelId: String = "whisper-small-q5_1"
-    private var activeWhisperFile: File? = null
+    private var activeWhisperModelId: String = "sherpa-fastconformer-de-pc-int8"
+    private var activeLocalModel: Pair<LocalModelSpec, File>? = null
     private var activeCloud: CloudDictation? = null
     private var activeFallbackCloud: CloudDictation? = null
-    private var activeFallbackWhisperFile: File? = null
+    private var activeFallbackLocalModel: Pair<LocalModelSpec, File>? = null
     private var activeLive: GeminiLiveDictation? = null
     @Volatile
     private var liveFailed: Boolean = false
     private var activeIncremental: IncrementalWhisper? = null
+    private var activeSherpaStreamJob: Deferred<SherpaOnnxEngine.SherpaStreamingSession?>? = null
+    @Volatile
+    private var activeSherpaStream: SherpaOnnxEngine.SherpaStreamingSession? = null
     private var activeVocabularyHint: String? = null
     private var stopStartedAt = 0L
     private var lastPartialChangedAt = 0L
@@ -85,6 +94,7 @@ internal class TapwingVoiceController(
     private var activeOfflineOnly = false
     private var activeFormatting = true
     private var transcriptionJob: Job? = null
+    private var warmJob: Job? = null
     private var usingLocalAudioCapture: Boolean = false
     private var systemSpeechStartedAtMs: Long = 0L
     private var consecutiveSegmentErrors: Int = 0
@@ -111,6 +121,19 @@ internal class TapwingVoiceController(
                     }?.forEach { it.delete() }
                 }
             }
+        }
+    }
+
+    fun warmInstalledLocalModel(locale: String, preferredModelId: String) {
+        if (sessionActive || _state.value.isProcessing) return
+        val best = modelManager.bestInstalledSpeechModel(preferredModelId, locale) ?: return
+        warmJob?.cancel()
+        warmJob = controllerScope.launch {
+            LocalInferenceEngine.warmSpeechModel(
+                spec = best.first,
+                modelPath = best.second,
+                languageCode = KeyboardLocales.baseLang(locale)
+            )
         }
     }
 
@@ -228,24 +251,26 @@ internal class TapwingVoiceController(
             return
         }
         val de = KeyboardLocales.baseLang(locale) == "de"
-        val installedWhisper = modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, whisperModelId)?.second
+        val bestLocal = modelManager.bestInstalledSpeechModel(whisperModelId, locale)
 
         if (engineMode == VoiceEngineMode.GEMINI_LIVE) {
             if (offlineOnly || live == null) {
-                if (installedWhisper != null) {
-                    startAudioCapture(locale, modelFile = installedWhisper, cloud = null)
+                if (bestLocal != null) {
+                    startAudioCapture(locale, localModel = bestLocal, cloud = null)
                 } else {
-                    showError(if (de) "Speichere für Gemini Live einen Google-API-Schlüssel"
-                              else "Save a Google API key for Gemini Live")
+                    showError(
+                        if (de) "Speichere für Gemini Live einen Google-API-Schlüssel"
+                        else "Save a Google API key for Gemini Live"
+                    )
                 }
             } else {
                 startAudioCapture(
                     locale = locale,
-                    modelFile = null,
+                    localModel = null,
                     cloud = null,
                     liveConfig = live,
                     fallbackCloud = fallbackCloud,
-                    fallbackWhisperFile = installedWhisper
+                    fallbackLocalModel = bestLocal
                 )
             }
             return
@@ -254,23 +279,36 @@ internal class TapwingVoiceController(
             val effectiveCloud = cloud ?: fallbackCloud
             val effectiveFallback = if (cloud != null) fallbackCloud else null
             if (effectiveCloud == null) {
-                if (!offlineOnly && installedWhisper != null) {
-                    startAudioCapture(locale, modelFile = installedWhisper, cloud = null)
+                if (!offlineOnly && bestLocal != null) {
+                    startAudioCapture(locale, localModel = bestLocal, cloud = null)
                 } else {
-                    showError(if (de) "Cloud-Diktat braucht einen API-Schlüssel"
-                              else "Cloud dictation needs an API key")
+                    showError(
+                        if (de) "Cloud-Diktat braucht einen API-Schlüssel"
+                        else "Cloud dictation needs an API key"
+                    )
                 }
             } else {
                 startAudioCapture(
                     locale = locale,
-                    modelFile = null,
+                    localModel = null,
                     cloud = effectiveCloud,
                     fallbackCloud = effectiveFallback,
-                    fallbackWhisperFile = installedWhisper
+                    fallbackLocalModel = bestLocal
                 )
             }
             return
         }
+
+        // In AUTO_LOCAL_FIRST: prefer an installed next-gen Sherpa-ONNX model matching the active language first.
+        if (engineMode == VoiceEngineMode.AUTO_LOCAL_FIRST &&
+            bestLocal != null &&
+            bestLocal.first.kind.isSherpa &&
+            bestLocal.first.supportsLocale(locale)
+        ) {
+            startAudioCapture(locale, localModel = bestLocal, cloud = null)
+            return
+        }
+
         if (engineMode == VoiceEngineMode.AUTO_LOCAL_FIRST && strictLanguageLock &&
             readyLanguageTag == KeyboardLocales.specFor(locale).bcp47Tag
         ) {
@@ -278,12 +316,15 @@ internal class TapwingVoiceController(
             return
         }
         if (engineMode == VoiceEngineMode.LOCAL_WHISPER || engineMode == VoiceEngineMode.AUTO_LOCAL_FIRST) {
-            if (installedWhisper != null) {
-                startAudioCapture(locale, modelFile = installedWhisper, cloud = null)
+            if (bestLocal != null) {
+                startAudioCapture(locale, localModel = bestLocal, cloud = null)
                 return
             }
             if (engineMode == VoiceEngineMode.LOCAL_WHISPER) {
-                showError(if (de) "Lade unter Diktat ein Offline-Sprachmodell" else "Download an offline model in Dictation settings")
+                showError(
+                    if (de) "Lade unter Diktat ein Offline-Sprachmodell"
+                    else "Download an offline model in Dictation settings"
+                )
                 return
             }
         }
@@ -296,8 +337,10 @@ internal class TapwingVoiceController(
         if (available) {
             startSystemSpeechSession(locale, strictLanguageLock, onDevice)
         } else {
-            showError(if (de) "Android-Diktat fehlt. Lade ein Offline-Sprachmodell"
-                      else "Android dictation unavailable. Download an offline model")
+            showError(
+                if (de) "Android-Diktat fehlt. Lade ein Offline-Sprachmodell"
+                else "Android dictation unavailable. Download an offline model"
+            )
         }
     }
 
@@ -307,11 +350,11 @@ internal class TapwingVoiceController(
 
     private fun startAudioCapture(
         locale: String,
-        modelFile: File?,
+        localModel: Pair<LocalModelSpec, File>?,
         cloud: CloudDictation?,
         liveConfig: GeminiLiveConfig? = null,
         fallbackCloud: CloudDictation? = null,
-        fallbackWhisperFile: File? = null
+        fallbackLocalModel: Pair<LocalModelSpec, File>? = null
     ) {
         sessionGeneration++
         val generation = sessionGeneration
@@ -319,10 +362,12 @@ internal class TapwingVoiceController(
         stopRequested = false
         usingLocalAudioCapture = true
         liveFailed = false
-        activeWhisperFile = modelFile
+        activeLocalModel = localModel
         activeCloud = cloud
         activeFallbackCloud = fallbackCloud
-        activeFallbackWhisperFile = fallbackWhisperFile
+        activeFallbackLocalModel = fallbackLocalModel
+        activeSherpaStream = null
+        activeSherpaStreamJob = null
         val de = KeyboardLocales.baseLang(locale) == "de"
 
         fun preview(text: String) {
@@ -335,84 +380,158 @@ internal class TapwingVoiceController(
             GeminiLiveDictation(
                 config = config,
                 onPreview = { text -> mainHandler.post { if (!liveFailed) preview(text) } },
-                onFailure = { mainHandler.post {
-                    if (generation == sessionGeneration && sessionActive && !stopRequested) {
-                        liveFailed = true
-                        activeLive?.close()
-                        activeLive = null
-                        val hasFallback = activeFallbackCloud != null || activeFallbackWhisperFile != null
-                        if (hasFallback) {
-                            _state.value = _state.value.copy(
-                                isCloud = activeFallbackCloud != null,
-                                isLocalWhisper = activeFallbackCloud == null && activeFallbackWhisperFile != null,
-                                processingLabel = null
-                            )
-                        } else {
-                            wavRecorder.cancelAndDelete()
-                            finishSession()
-                            showError(if (de) "Gemini Live ist nicht erreichbar. Prüfe Netz und Schlüssel."
-                                      else "Gemini Live is unavailable. Check your connection and key.")
+                onFailure = {
+                    mainHandler.post {
+                        if (generation == sessionGeneration && sessionActive && !stopRequested) {
+                            liveFailed = true
+                            activeLive?.close()
+                            activeLive = null
+                            val hasFallback = activeFallbackCloud != null || activeFallbackLocalModel != null
+                            if (hasFallback) {
+                                _state.value = _state.value.copy(
+                                    isCloud = activeFallbackCloud != null,
+                                    isLocalWhisper = activeFallbackCloud == null && activeFallbackLocalModel != null,
+                                    engineLabel = activeFallbackCloud?.let { "Cloud" }
+                                        ?: activeFallbackLocalModel?.first?.shortEngineLabel,
+                                    processingLabel = null
+                                )
+                            } else {
+                                wavRecorder.cancelAndDelete()
+                                finishSession()
+                                showError(
+                                    if (de) "Gemini Live ist nicht erreichbar. Prüfe Netz und Schlüssel."
+                                    else "Gemini Live is unavailable. Check your connection and key."
+                                )
+                            }
                         }
                     }
-                } }
+                }
             )
         }
+
         val langHint = KeyboardLocales.baseLang(locale).takeIf { activeStrictLanguage }
-        val incremental = modelFile?.let { file ->
+        val streamingPair = localModel?.takeIf {
+            it.first.kind == LocalModelKind.SHERPA_STREAMING && live == null && cloud == null
+        }
+        val isStreamingSherpa = streamingPair != null
+
+        val preStreamBuffer = if (streamingPair != null) ConcurrentLinkedQueue<ByteArray>() else null
+        val streamingDeferred = if (streamingPair != null) {
+            controllerScope.async(Dispatchers.Default) {
+                val res = SherpaOnnxEngine.createStreamingSession(
+                    scope = controllerScope,
+                    spec = streamingPair.first,
+                    modelDir = streamingPair.second,
+                    onPreview = { text -> mainHandler.post { preview(text) } }
+                )
+                val session = res.getOrNull()
+                if (session != null && generation == sessionGeneration && sessionActive) {
+                    activeSherpaStream = session
+                    while (true) {
+                        val queued = preStreamBuffer?.poll() ?: break
+                        session.offerPcm(queued, queued.size)
+                    }
+                } else {
+                    preStreamBuffer?.clear()
+                }
+                session
+            }
+        } else null
+        activeSherpaStreamJob = streamingDeferred
+
+        val incremental = if (!isStreamingSherpa && localModel != null) {
             IncrementalWhisper(
                 scope = controllerScope,
-                model = file,
+                model = localModel.second,
                 language = langHint,
                 vocabularyHint = activeVocabularyHint,
+                modelSpec = localModel.first,
                 onPreview = ::preview
             )
-        }
+        } else null
+
         activeLive = live
         activeIncremental = incremental
         val wavFile = File(context.cacheDir, "tapwing_voice_${java.util.UUID.randomUUID()}.wav")
+
+        val pcmHook: ((ByteArray, Int) -> Unit)? = when {
+            live != null -> { pcmBytes, count -> if (!liveFailed) live.offerPcm(pcmBytes, count) }
+            isStreamingSherpa -> { pcmBytes, count ->
+                val session = activeSherpaStream
+                if (session != null) {
+                    session.offerPcm(pcmBytes, count)
+                } else if (preStreamBuffer != null && preStreamBuffer.size < 120) {
+                    preStreamBuffer.offer(pcmBytes.copyOf(count))
+                }
+            }
+            else -> null
+        }
+
+        val softMaxSec = if (localModel?.first?.kind?.isSherpa == true) 14 else 16
+        val hardMaxSec = if (localModel?.first?.kind?.isSherpa == true) 18 else 24
+
         val started = wavRecorder.start(
             outputFile = wavFile,
-            onPcm = live?.let { l -> { pcmBytes, count -> if (!liveFailed) l.offerPcm(pcmBytes, count) } },
+            onPcm = pcmHook,
             canScheduleChunk = incremental?.let { it::canSchedule },
             onSpeechChunk = incremental?.let { it::offer },
-            onReady = { mainHandler.post {
-                if (generation == sessionGeneration && _state.value.isListening) {
-                    _state.value = _state.value.copy(processingLabel = null)
+            chunkSoftMaxSeconds = softMaxSec,
+            chunkHardMaxSeconds = hardMaxSec,
+            onReady = {
+                mainHandler.post {
+                    if (generation == sessionGeneration && _state.value.isListening) {
+                        _state.value = _state.value.copy(processingLabel = null)
+                    }
                 }
-            } },
-            onRmsDb = { db -> mainHandler.post {
-                if (generation == sessionGeneration && _state.value.isListening) {
-                    _state.value = _state.value.copy(rmsDb = db)
+            },
+            onRmsDb = { db ->
+                mainHandler.post {
+                    if (generation == sessionGeneration && _state.value.isListening) {
+                        _state.value = _state.value.copy(rmsDb = db)
+                    }
                 }
-            } },
-            onElapsedSeconds = { seconds -> mainHandler.post {
-                if (generation == sessionGeneration && _state.value.isListening) {
-                    _state.value = _state.value.copy(elapsedSeconds = seconds)
-                    if (seconds >= MAX_RECORDING_SECONDS) finishAndCommit()
+            },
+            onElapsedSeconds = { seconds ->
+                mainHandler.post {
+                    if (generation == sessionGeneration && _state.value.isListening) {
+                        _state.value = _state.value.copy(elapsedSeconds = seconds)
+                        if (seconds >= MAX_RECORDING_SECONDS) finishAndCommit()
+                    }
                 }
-            } },
-            onError = { mainHandler.post {
-                if (generation == sessionGeneration && sessionActive) {
-                    wavRecorder.cancelAndDelete()
-                    finishSession()
-                    showError(if (de) "Mikrofon nicht verfügbar" else "Microphone unavailable")
+            },
+            onError = {
+                mainHandler.post {
+                    if (generation == sessionGeneration && sessionActive) {
+                        wavRecorder.cancelAndDelete()
+                        finishSession()
+                        showError(if (de) "Mikrofon nicht verfügbar" else "Microphone unavailable")
+                    }
                 }
-            } }
+            }
         )
         if (!started) {
             finishSession()
             showError(if (de) "Mikrofon wird noch freigegeben" else "Microphone is still closing")
             return
         }
+        val engineLabel = when {
+            live != null -> "Gemini Live"
+            cloud != null -> "Cloud"
+            localModel != null -> localModel.first.shortEngineLabel
+            else -> if (de) "Lokal" else "Local"
+        }
         _state.value = VoiceUiState(
             isListening = true,
-            isLocalWhisper = modelFile != null,
+            isLocalWhisper = localModel != null,
             isCloud = cloud != null || live != null,
             processingLabel = if (de) "Mikrofon startet …" else "Starting microphone…",
-            activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag
+            activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag,
+            engineLabel = engineLabel
         )
-        if (modelFile != null && incremental == null) {
-            controllerScope.launch { LocalInferenceEngine.warmWhisper(modelFile) }
+        if (localModel != null && incremental == null && streamingDeferred == null) {
+            controllerScope.launch {
+                LocalInferenceEngine.warmSpeechModel(localModel.first, localModel.second, langHint)
+            }
         }
     }
 
@@ -422,10 +541,10 @@ internal class TapwingVoiceController(
         sessionActive = true
         stopRequested = false
         usingLocalAudioCapture = false
-        activeWhisperFile = null
+        activeLocalModel = null
         activeCloud = null
         activeFallbackCloud = null
-        activeFallbackWhisperFile = null
+        activeFallbackLocalModel = null
         accumulated.setLength(0)
         lastCommittedSnapshot = ""
         segmentPartial = ""
@@ -436,7 +555,8 @@ internal class TapwingVoiceController(
             isListening = true,
             isAndroidOffline = onDevice,
             elapsedSeconds = 0,
-            activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag
+            activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag,
+            engineLabel = if (onDevice) "Android Offline" else "Android"
         )
         scheduleSystemSpeechTimer(sessionGeneration)
         startSegment(locale, strictLanguageLock)
@@ -630,14 +750,18 @@ internal class TapwingVoiceController(
         stopRequested = false
         usingLocalAudioCapture = false
         liveFailed = false
-        activeWhisperFile = null
+        activeLocalModel = null
         activeCloud = null
         activeFallbackCloud = null
-        activeFallbackWhisperFile = null
+        activeFallbackLocalModel = null
         activeLive?.close()
         activeLive = null
         activeIncremental?.cancel()
         activeIncremental = null
+        activeSherpaStream?.cancel()
+        activeSherpaStream = null
+        activeSherpaStreamJob?.cancel()
+        activeSherpaStreamJob = null
         mainHandler.removeCallbacksAndMessages(null)
         destroyRecognizerLocked()
     }
@@ -686,12 +810,13 @@ internal class TapwingVoiceController(
     }
 
     private fun transcribeCapture(generation: Int) {
-        val model = activeWhisperFile
+        val localModel = activeLocalModel
         val cloud = activeCloud
         val fallbackCloud = activeFallbackCloud
-        val fallbackWhisper = activeFallbackWhisperFile
+        val fallbackLocal = activeFallbackLocalModel
         val live = activeLive?.takeUnless { liveFailed }
         val incremental = activeIncremental
+        val streamDeferred = activeSherpaStreamJob
         val vocabHint = activeVocabularyHint
         val lang = KeyboardLocales.baseLang(activeLocale)
         val languageHint = lang.takeIf { activeStrictLanguage }
@@ -702,8 +827,8 @@ internal class TapwingVoiceController(
                 live != null -> "Finishing dictation…"
                 cloud != null && de -> "Cloud transkribiert …"
                 cloud != null -> "Transcribing in the cloud…"
-                de -> "Transkribiere auf dem Gerät …"
-                else -> "Transcribing on your device…"
+                de -> "Erkenne blitzschnell lokal …"
+                else -> "Transcribing locally…"
             }
         )
         transcriptionJob = controllerScope.launch {
@@ -715,7 +840,10 @@ internal class TapwingVoiceController(
             if (recording == null || recording.durationMs < 250L || recording.peakSampleAbs < 35) {
                 recording?.file?.delete()
                 finishSession()
-                showError(if (de) "Keine Sprache erkannt. Sprich nach dem Start." else "No speech detected. Speak after starting.")
+                showError(
+                    if (de) "Keine Sprache erkannt. Sprich nach dem Start."
+                    else "No speech detected. Speak after starting."
+                )
                 return@launch
             }
 
@@ -733,13 +861,13 @@ internal class TapwingVoiceController(
                             if (fcRes.isSuccess && fcRes.getOrNull().orEmpty().isNotBlank()) {
                                 outputFormatted = fallbackCloud.formatsText
                                 fcRes
-                            } else if (fallbackWhisper != null) {
-                                transcribeLocalWavSafely(recording.file, fallbackWhisper, languageHint, vocabHint)
+                            } else if (fallbackLocal != null) {
+                                transcribeLocalWavSafely(recording.file, fallbackLocal, languageHint, vocabHint)
                             } else {
                                 fcRes
                             }
-                        } else if (fallbackWhisper != null) {
-                            transcribeLocalWavSafely(recording.file, fallbackWhisper, languageHint, vocabHint)
+                        } else if (fallbackLocal != null) {
+                            transcribeLocalWavSafely(recording.file, fallbackLocal, languageHint, vocabHint)
                         } else {
                             liveRes
                         }
@@ -754,13 +882,13 @@ internal class TapwingVoiceController(
                             if (fcRes.isSuccess && fcRes.getOrNull().orEmpty().isNotBlank()) {
                                 outputFormatted = fallbackCloud.formatsText
                                 fcRes
-                            } else if (fallbackWhisper != null) {
-                                transcribeLocalWavSafely(recording.file, fallbackWhisper, languageHint, vocabHint)
+                            } else if (fallbackLocal != null) {
+                                transcribeLocalWavSafely(recording.file, fallbackLocal, languageHint, vocabHint)
                             } else {
                                 fcRes
                             }
-                        } else if (fallbackWhisper != null) {
-                            transcribeLocalWavSafely(recording.file, fallbackWhisper, languageHint, vocabHint)
+                        } else if (fallbackLocal != null) {
+                            transcribeLocalWavSafely(recording.file, fallbackLocal, languageHint, vocabHint)
                         } else {
                             cloudRes
                         }
@@ -770,21 +898,31 @@ internal class TapwingVoiceController(
                         if (fcRes.isSuccess && fcRes.getOrNull().orEmpty().isNotBlank()) {
                             outputFormatted = fallbackCloud.formatsText
                             fcRes
-                        } else if (fallbackWhisper != null) {
-                            transcribeLocalWavSafely(recording.file, fallbackWhisper, languageHint, vocabHint)
+                        } else if (fallbackLocal != null) {
+                            transcribeLocalWavSafely(recording.file, fallbackLocal, languageHint, vocabHint)
                         } else {
                             fcRes
                         }
                     }
-                    fallbackWhisper != null && liveFailed -> {
-                        transcribeLocalWavSafely(recording.file, fallbackWhisper, languageHint, vocabHint)
+                    fallbackLocal != null && liveFailed -> {
+                        transcribeLocalWavSafely(recording.file, fallbackLocal, languageHint, vocabHint)
                     }
-                    model != null -> {
+                    streamDeferred != null && localModel != null -> {
+                        val session = runCatching { streamDeferred.await() }.getOrNull()
+                        val streamed = session?.let { runCatching { it.finish() }.getOrNull() }.orEmpty()
+                        activeSherpaStream = null
+                        if (streamed.isNotBlank()) {
+                            Result.success(streamed)
+                        } else {
+                            transcribeLocalWavSafely(recording.file, localModel, languageHint, vocabHint)
+                        }
+                    }
+                    localModel != null -> {
                         val incText = incremental?.finish()
                         if (!incText.isNullOrBlank()) {
                             Result.success(incText)
                         } else {
-                            transcribeLocalWavSafely(recording.file, model, languageHint, vocabHint)
+                            transcribeLocalWavSafely(recording.file, localModel, languageHint, vocabHint)
                         }
                     }
                     else -> Result.failure(IllegalStateException("Missing speech model"))
@@ -797,15 +935,21 @@ internal class TapwingVoiceController(
             val text = result.getOrNull().orEmpty()
             when {
                 result.isFailure && (cloud != null || live != null || fallbackCloud != null) -> {
-                    showError(if (de) "Cloud-Diktat fehlgeschlagen. Prüfe Netz und Schlüssel."
-                              else "Cloud dictation failed. Check your connection and API key.")
+                    showError(
+                        if (de) "Cloud-Diktat fehlgeschlagen. Prüfe Netz und Schlüssel."
+                        else "Cloud dictation failed. Check your connection and API key."
+                    )
                 }
                 result.isFailure -> {
-                    showError(if (de) "Offline-Modell fehlgeschlagen. Prüfe den Download."
-                              else "Offline model failed. Check the download.")
+                    showError(
+                        if (de) "Offline-Modell fehlgeschlagen. Prüfe den Download."
+                        else "Offline model failed. Check the download."
+                    )
                 }
-                text.isBlank() -> showError(if (de) "Keine Sprache erkannt. Versuch es erneut."
-                                            else "No speech detected. Try again.")
+                text.isBlank() -> showError(
+                    if (de) "Keine Sprache erkannt. Versuch es erneut."
+                    else "No speech detected. Try again."
+                )
                 else -> {
                     _state.value = VoiceUiState()
                     onTranscriptReady(text, outputFormatted)
@@ -816,12 +960,14 @@ internal class TapwingVoiceController(
 
     private suspend fun transcribeLocalWavSafely(
         wavFile: File,
-        modelFile: File,
+        localModel: Pair<LocalModelSpec, File>,
         languageHint: String?,
         vocabularyHint: String?
     ): Result<String> {
+        val (spec, path) = localModel
+        val chunkSecs = if (spec.kind.isSherpa) SHERPA_CHUNK_SECONDS else LOCAL_FALLBACK_CHUNK_SECONDS
         val parts = withContext(Dispatchers.IO) {
-            WavChunker.splitIfNeeded(wavFile, maxChunkSeconds = LOCAL_FALLBACK_CHUNK_SECONDS)
+            WavChunker.splitIfNeeded(wavFile, maxChunkSeconds = chunkSecs)
         }
         val tempParts = parts.filter { it != wavFile }
         return try {
@@ -830,7 +976,8 @@ internal class TapwingVoiceController(
                 val prompt = IncrementalWhisper.buildContextPrompt(vocabularyHint, stitched)
                 val res = LocalInferenceEngine.transcribeWav(
                     wavPath = part.absolutePath,
-                    modelFile = modelFile,
+                    spec = spec,
+                    modelPath = path,
                     languageCode = languageHint,
                     initialPrompt = prompt
                 )
@@ -868,6 +1015,7 @@ internal class TapwingVoiceController(
 
     fun destroy() {
         cancel()
+        warmJob?.cancel()
         supportRecognizer?.destroy()
         supportRecognizer = null
         controllerScope.cancel()
@@ -903,6 +1051,7 @@ internal class TapwingVoiceController(
 
     companion object {
         private const val MAX_RECORDING_SECONDS = 3600
+        private const val SHERPA_CHUNK_SECONDS = 16
         private const val LOCAL_FALLBACK_CHUNK_SECONDS = 24
 
         fun isOnDeviceSpeechAvailable(context: Context): Boolean =

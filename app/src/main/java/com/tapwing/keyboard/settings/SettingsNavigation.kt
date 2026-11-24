@@ -78,7 +78,7 @@ internal object SettingsCatalog {
         SettingsRoute.APPEARANCE to "theme design farbschema color farbe dark dunkel light hell system amoled pixel slate lavender material you borders umrandung pill capsule tasten apple liquid glass",
         SettingsRoute.CORRECTIONS to "text correction textkorrektur autocorrect autokorrektur undo rückgängig backspace double space doppeltipp punkt period grammar grammatik spell rechtschreibung chips math taschenrechner learning lernen incognito inkognito",
         SettingsRoute.GLIDE_TYPING to "glide typing swipe wischen wisch tippen gesture geste delete word wort löschen cursor trackpad spacebar leertaste verschieben",
-        SettingsRoute.VOICE to "voice typing spracheingabe diktat dictation speech mikrofon mic whisper local offline android cloud gemini live audio",
+        SettingsRoute.VOICE to "voice typing spracheingabe diktat dictation speech mikrofon mic whisper sherpa fastconformer parakeet kroko canary rambler streaming live local offline android cloud gemini audio",
         SettingsRoute.DICTIONARY to "dictionary wörterbuch personal persönlich words wörter learn lernen adaptive per app pack paket offline 50k import export zip",
         SettingsRoute.CLIPBOARD to "clipboard zwischenablage copy kopieren paste einfügen history verlauf retention aufbewahrung screenshot ocr scan kamera camera",
         SettingsRoute.EMOJI to "emoji emojis smileys stickers scale größe suggestions vorschläge",

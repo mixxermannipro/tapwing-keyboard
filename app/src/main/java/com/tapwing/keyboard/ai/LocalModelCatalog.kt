@@ -1,7 +1,18 @@
 package com.tapwing.keyboard.ai
 
+import com.tapwing.keyboard.data.KeyboardLocales
+
 enum class LocalModelKind {
-    WHISPER_STT
+    WHISPER_STT,
+    SHERPA_STREAMING,
+    SHERPA_TRANSDUCER,
+    SHERPA_CANARY;
+
+    val isSherpa: Boolean
+        get() = this != WHISPER_STT
+
+    val isSpeechModel: Boolean
+        get() = true
 }
 
 data class LocalModelSpec(
@@ -15,25 +26,120 @@ data class LocalModelSpec(
     val repoUrl: String,
     val isRecommended: Boolean = false,
     val summaryDe: String,
-    val summaryEn: String
-)
+    val summaryEn: String,
+    val requiredFiles: List<String> = emptyList(),
+    val supportedLanguages: Set<String> = emptySet(),
+    val speedBadgeDe: String = "",
+    val speedBadgeEn: String = "",
+    val highlightTagDe: String = "",
+    val highlightTagEn: String = "",
+    val nativePunctuation: Boolean = false,
+    val supportsStreaming: Boolean = false,
+    val shortEngineLabel: String = "Whisper"
+) {
+    fun supportsLocale(locale: String): Boolean {
+        if (supportedLanguages.isEmpty()) return true
+        return KeyboardLocales.baseLang(locale) in supportedLanguages
+    }
+}
 
 object LocalModelCatalog {
 
-    val whisperModels: List<LocalModelSpec> = listOf(
+    private val EUROPEAN_25_LANGS = setOf(
+        "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de",
+        "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "sk",
+        "sl", "es", "sv", "ru", "uk"
+    )
+
+    val sherpaModels: List<LocalModelSpec> = listOf(
         LocalModelSpec(
-            id = "whisper-small-q5_1",
-            kind = LocalModelKind.WHISPER_STT,
-            displayName = "Whisper Small (Q5_1)",
-            fileName = "ggml-small-q5_1.bin",
-            approxSizeMb = 190,
-            minRamGb = 4,
-            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
-            repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
+            id = "sherpa-fastconformer-de-pc-int8",
+            kind = LocalModelKind.SHERPA_TRANSDUCER,
+            displayName = "FastConformer Deutsch (Int8)",
+            fileName = "sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8.tar.bz2",
+            approxSizeMb = 103,
+            minRamGb = 3,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8.tar.bz2",
+            repoUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-transducer-stt_de_fastconformer_hybrid_large_pc-int8",
             isRecommended = true,
-            summaryDe = "Mehr Reserven für Namen und Fachwörter. Braucht mehr Zeit und Speicher als Whisper Base.",
-            summaryEn = "More capacity for names and technical terms. Takes more time and memory than Whisper Base."
+            summaryDe = "6–10× schneller als Whisper mit eingebauten Satzzeichen & Groß-/Kleinschreibung. Ideal für Deutsch.",
+            summaryEn = "6–10x faster than Whisper with built-in punctuation & capitalization. Best speed/accuracy for German.",
+            requiredFiles = listOf("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"),
+            supportedLanguages = setOf("de"),
+            speedBadgeDe = "⚡ ~0,25 Sek.",
+            speedBadgeEn = "⚡ ~0.25s",
+            highlightTagDe = "Empfohlen · Deutsch",
+            highlightTagEn = "Recommended · German",
+            nativePunctuation = true,
+            supportsStreaming = false,
+            shortEngineLabel = "FastConformer"
         ),
+        LocalModelSpec(
+            id = "sherpa-streaming-zipformer-de",
+            kind = LocalModelKind.SHERPA_STREAMING,
+            displayName = "Kroko Live-Streaming Deutsch",
+            fileName = "sherpa-onnx-streaming-zipformer-de-kroko-2025-08-06.tar.bz2",
+            approxSizeMb = 54,
+            minRamGb = 2,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-de-kroko-2025-08-06.tar.bz2",
+            repoUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-de-kroko-2025-08-06",
+            summaryDe = "Schreibt Wort für Wort live beim Sprechen – fast keine Wartezeit nach ✓. Ideal auch für ältere Handys.",
+            summaryEn = "Streams words live as you speak with near-zero wait after ✓. Compact 54 MB for any phone.",
+            requiredFiles = listOf("encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt"),
+            supportedLanguages = setOf("de"),
+            speedBadgeDe = "⚡ Live · < 0,1 Sek.",
+            speedBadgeEn = "⚡ Live · < 0.1s",
+            highlightTagDe = "Echtzeit · 54 MB",
+            highlightTagEn = "Real-time · 54 MB",
+            nativePunctuation = false,
+            supportsStreaming = true,
+            shortEngineLabel = "Live"
+        ),
+        LocalModelSpec(
+            id = "sherpa-parakeet-ultra-0.6b-int8",
+            kind = LocalModelKind.SHERPA_TRANSDUCER,
+            displayName = "Parakeet Ultra 0.6B (Int8)",
+            fileName = "sherpa-onnx-nemo-parakeet-tdt-0.6b-ultra-int8.tar.bz2",
+            approxSizeMb = 464,
+            minRamGb = 6,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-ultra-int8.tar.bz2",
+            repoUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-ultra-int8",
+            summaryDe = "Höchste Offline-Genauigkeit für 25 europäische Sprachen inkl. Satzzeichen. Schneller TDT-Decoder.",
+            summaryEn = "Top offline accuracy across 25 European languages with built-in punctuation and fast TDT decoding.",
+            requiredFiles = listOf("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"),
+            supportedLanguages = EUROPEAN_25_LANGS,
+            speedBadgeDe = "⚡ ~0,35 Sek.",
+            speedBadgeEn = "⚡ ~0.35s",
+            highlightTagDe = "Beste Qualität · 25 Sprachen",
+            highlightTagEn = "Best accuracy · 25 languages",
+            nativePunctuation = true,
+            supportsStreaming = false,
+            shortEngineLabel = "Parakeet"
+        ),
+        LocalModelSpec(
+            id = "sherpa-canary-180m-flash-int8",
+            kind = LocalModelKind.SHERPA_CANARY,
+            displayName = "Canary 180M Flash (Int8)",
+            fileName = "sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8.tar.bz2",
+            approxSizeMb = 146,
+            minRamGb = 3,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8.tar.bz2",
+            repoUrl = "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8",
+            summaryDe = "Schnelles 4-Sprachen-Modell (Deutsch, Englisch, Französisch, Spanisch) mit nativer Zeichensetzung.",
+            summaryEn = "Fast 4-language model (DE, EN, FR, ES) with built-in punctuation and capitalization.",
+            requiredFiles = listOf("encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"),
+            supportedLanguages = setOf("de", "en", "fr", "es"),
+            speedBadgeDe = "⚡ ~0,30 Sek.",
+            speedBadgeEn = "⚡ ~0.30s",
+            highlightTagDe = "Kompakt · DE/EN/FR/ES",
+            highlightTagEn = "Compact · DE/EN/FR/ES",
+            nativePunctuation = true,
+            supportsStreaming = false,
+            shortEngineLabel = "Canary"
+        )
+    )
+
+    val whisperModels: List<LocalModelSpec> = listOf(
         LocalModelSpec(
             id = "whisper-base-q5_1",
             kind = LocalModelKind.WHISPER_STT,
@@ -43,8 +149,15 @@ object LocalModelCatalog {
             minRamGb = 3,
             downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
-            summaryDe = "Schnell und kompakt für ältere Geräte oder kurze Notizen.",
-            summaryEn = "Fast and lightweight for older phones or quick notes."
+            isRecommended = true,
+            summaryDe = "Schnell und kompakt für alle Sprachen oder ältere Geräte.",
+            summaryEn = "Fast and lightweight for all languages or older phones.",
+            speedBadgeDe = "~0,8–1,5 Sek.",
+            speedBadgeEn = "~0.8–1.5s",
+            highlightTagDe = "99 Sprachen · 60 MB",
+            highlightTagEn = "99 languages · 60 MB",
+            nativePunctuation = true,
+            shortEngineLabel = "Whisper"
         ),
         LocalModelSpec(
             id = "whisper-tiny-q5_1",
@@ -55,8 +168,32 @@ object LocalModelCatalog {
             minRamGb = 2,
             downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
-            summaryDe = "Minimaler Speicherbedarf (~32 MB), sehr schnell.",
-            summaryEn = "Ultra-compact (~32 MB), fastest transcription."
+            summaryDe = "Minimaler Speicherbedarf (~32 MB), schnelle Fallback-Option für alle Sprachen.",
+            summaryEn = "Ultra-compact (~32 MB), fast universal fallback.",
+            speedBadgeDe = "~0,5–1,0 Sek.",
+            speedBadgeEn = "~0.5–1.0s",
+            highlightTagDe = "Ultra-Kompakt · 32 MB",
+            highlightTagEn = "Ultra-compact · 32 MB",
+            nativePunctuation = true,
+            shortEngineLabel = "Whisper"
+        ),
+        LocalModelSpec(
+            id = "whisper-small-q5_1",
+            kind = LocalModelKind.WHISPER_STT,
+            displayName = "Whisper Small (Q5_1)",
+            fileName = "ggml-small-q5_1.bin",
+            approxSizeMb = 190,
+            minRamGb = 4,
+            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+            repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
+            summaryDe = "Mehr Reserven für Namen und seltene Sprachen. Langsamer als Sherpa-Modelle.",
+            summaryEn = "More capacity for names and 99 languages. Slower than Sherpa models.",
+            speedBadgeDe = "~1,5–3,0 Sek.",
+            speedBadgeEn = "~1.5–3.0s",
+            highlightTagDe = "99 Sprachen · 190 MB",
+            highlightTagEn = "99 languages · 190 MB",
+            nativePunctuation = true,
+            shortEngineLabel = "Whisper"
         ),
         LocalModelSpec(
             id = "whisper-large-v3-turbo-q5_0",
@@ -67,14 +204,32 @@ object LocalModelCatalog {
             minRamGb = 8,
             downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
-            summaryDe = "Maximale Genauigkeit auch bei Fachbegriffen und Dialekten (für Smartphones mit 8+ GB RAM).",
-            summaryEn = "Larger speech model for accents and terminology (8+ GB RAM phones)."
+            summaryDe = "Maximale Whisper-Genauigkeit für 99 Sprachen (nur für Geräte mit 8+ GB RAM).",
+            summaryEn = "Larger 99-language speech model for flagship phones (8+ GB RAM).",
+            speedBadgeDe = "~2,5–5,0 Sek.",
+            speedBadgeEn = "~2.5–5.0s",
+            highlightTagDe = "Flaggschiff · 574 MB",
+            highlightTagEn = "Flagship · 574 MB",
+            nativePunctuation = true,
+            shortEngineLabel = "Whisper"
         )
     )
 
-    val allModels: List<LocalModelSpec> = whisperModels
+    val allModels: List<LocalModelSpec> = sherpaModels + whisperModels
 
     fun findById(id: String): LocalModelSpec? = allModels.firstOrNull { it.id == id }
 
     fun recommendedWhisper(): LocalModelSpec = whisperModels.first { it.isRecommended }
+
+    fun recommendedSherpa(): LocalModelSpec = sherpaModels.first { it.isRecommended }
+
+    fun recommendedForLocale(locale: String): LocalModelSpec {
+        val base = KeyboardLocales.baseLang(locale)
+        return when {
+            base == "de" -> findById("sherpa-fastconformer-de-pc-int8")!!
+            base in setOf("en", "fr", "es") -> findById("sherpa-canary-180m-flash-int8")!!
+            base in EUROPEAN_25_LANGS -> findById("sherpa-parakeet-ultra-0.6b-int8")!!
+            else -> recommendedWhisper()
+        }
+    }
 }

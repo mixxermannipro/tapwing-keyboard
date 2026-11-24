@@ -9,9 +9,9 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Thread-safe on-device speech inference engine wrapping Llamatik's whisper.cpp native bridge.
- * Keeps active Whisper model path cached so consecutive transcriptions execute quickly,
- * while permitting clean release under memory pressure.
+ * Thread-safe on-device speech inference engine orchestrating both:
+ * - Sherpa-ONNX v2.0.3 (FastConformer, Kroko Live-Streaming, Parakeet Ultra 0.6B, Canary 180M Flash)
+ * - Llamatik whisper.cpp (GGML Whisper models for universal 99-language fallback)
  */
 object LocalInferenceEngine {
 
@@ -21,6 +21,44 @@ object LocalInferenceEngine {
 
     @Volatile
     private var loadedWhisperPath: String? = null
+
+    suspend fun transcribeWav(
+        wavPath: String,
+        spec: LocalModelSpec,
+        modelPath: File,
+        languageCode: String? = null,
+        initialPrompt: String? = null,
+        translateToEnglish: Boolean = false
+    ): Result<String> {
+        return if (spec.kind.isSherpa) {
+            SherpaOnnxEngine.transcribeWav(
+                wavPath = wavPath,
+                spec = spec,
+                modelDir = modelPath,
+                languageCode = languageCode
+            )
+        } else {
+            transcribeWav(
+                wavPath = wavPath,
+                modelFile = modelPath,
+                languageCode = languageCode,
+                initialPrompt = initialPrompt,
+                translateToEnglish = translateToEnglish
+            )
+        }
+    }
+
+    suspend fun warmSpeechModel(
+        spec: LocalModelSpec,
+        modelPath: File,
+        languageCode: String? = null
+    ): Result<Unit> {
+        return if (spec.kind.isSherpa) {
+            SherpaOnnxEngine.warmModel(spec, modelPath, languageCode)
+        } else {
+            warmWhisper(modelPath)
+        }
+    }
 
     suspend fun transcribeWav(
         wavPath: String,
@@ -107,6 +145,7 @@ object LocalInferenceEngine {
 
     fun unloadAll() {
         unloadWhisper()
+        SherpaOnnxEngine.unloadAll()
     }
 
     private fun extractSegmentsText(jsonRaw: String): String {

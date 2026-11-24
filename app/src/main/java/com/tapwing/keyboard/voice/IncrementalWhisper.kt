@@ -1,6 +1,7 @@
 package com.tapwing.keyboard.voice
 
 import com.tapwing.keyboard.ai.LocalInferenceEngine
+import com.tapwing.keyboard.ai.LocalModelSpec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -44,10 +45,15 @@ internal class AdaptiveSpeechDetector(
 
 /**
  * Byte ranges in a 16 kHz mono PCM stream.
- * Cuts naturally on pauses, uses micro-pauses after 16 s, and forces a split at 24 s
- * so Whisper's 30 s window never overflows on unlimited-length dictation.
+ * Cuts naturally on pauses, uses micro-pauses after [softMaxSeconds], and forces a split at [hardMaxSeconds]
+ * so both Whisper (30 s window) and Parakeet/FastConformer (15-20 s optimal window) stay blazing fast on long speech.
  */
-internal class SpeechChunkBoundaries {
+internal class SpeechChunkBoundaries(
+    softMaxSeconds: Int = 16,
+    hardMaxSeconds: Int = 24
+) {
+    private val softMaxChunkBytes = PCM_BYTES_PER_SECOND * softMaxSeconds.coerceAtLeast(4)
+    private val hardMaxChunkBytes = PCM_BYTES_PER_SECOND * hardMaxSeconds.coerceAtLeast(softMaxSeconds + 2)
     private var nextOffset = 0L
     private var firstVoicedEnd = -1L
     private var lastVoicedEnd = 0L
@@ -58,7 +64,7 @@ internal class SpeechChunkBoundaries {
         if (voiced) {
             if (firstVoicedEnd < 0) firstVoicedEnd = end
             lastVoicedEnd = end
-            if (decoderReady && firstVoicedEnd >= 0 && end - firstVoicedEnd >= HARD_MAX_CHUNK_BYTES) {
+            if (decoderReady && firstVoicedEnd >= 0 && end - firstVoicedEnd >= hardMaxChunkBytes) {
                 val start = if (nextOffset == 0L) (firstVoicedEnd - PADDING_BYTES).coerceAtLeast(0) else nextOffset
                 val range = start until end
                 nextOffset = end
@@ -71,7 +77,7 @@ internal class SpeechChunkBoundaries {
 
         val speechBytes = lastVoicedEnd - firstVoicedEnd
         val pauseBytes = end - lastVoicedEnd
-        val requiredPause = if (speechBytes >= SOFT_MAX_CHUNK_BYTES) MICRO_PAUSE_BYTES else PAUSE_BYTES
+        val requiredPause = if (speechBytes >= softMaxChunkBytes) MICRO_PAUSE_BYTES else PAUSE_BYTES
         if (speechBytes < MIN_SPEECH_BYTES || pauseBytes < requiredPause) return null
 
         val cut = minOf(end, lastVoicedEnd + PADDING_BYTES)
@@ -90,12 +96,12 @@ internal class SpeechChunkBoundaries {
 
     companion object {
         internal const val PCM_BYTES_PER_SECOND = 32_000L
+        internal const val SOFT_MAX_CHUNK_BYTES = PCM_BYTES_PER_SECOND * 16
+        internal const val HARD_MAX_CHUNK_BYTES = PCM_BYTES_PER_SECOND * 24
         private const val MIN_SPEECH_BYTES = PCM_BYTES_PER_SECOND * 2
         private const val PAUSE_BYTES = PCM_BYTES_PER_SECOND * 45 / 100
         private const val MICRO_PAUSE_BYTES = PCM_BYTES_PER_SECOND * 20 / 100
         private const val PADDING_BYTES = PCM_BYTES_PER_SECOND * 20 / 100
-        internal const val SOFT_MAX_CHUNK_BYTES = PCM_BYTES_PER_SECOND * 16
-        internal const val HARD_MAX_CHUNK_BYTES = PCM_BYTES_PER_SECOND * 24
     }
 }
 
@@ -104,12 +110,17 @@ internal class IncrementalWhisper(
     private val model: File,
     private val language: String?,
     private val vocabularyHint: String? = null,
+    private val modelSpec: LocalModelSpec? = null,
     onPreview: (String) -> Unit
 ) {
     private val pending = Channel<File>(Channel.UNLIMITED, onUndeliveredElement = { it.delete() })
     private val busy = AtomicBoolean()
     private val worker = scope.async {
-        val warmRes = LocalInferenceEngine.warmWhisper(model)
+        val warmRes = if (modelSpec != null) {
+            LocalInferenceEngine.warmSpeechModel(modelSpec, model, language)
+        } else {
+            LocalInferenceEngine.warmWhisper(model)
+        }
         if (warmRes.isFailure) {
             for (part in pending) part.delete()
             return@async null
@@ -120,12 +131,22 @@ internal class IncrementalWhisper(
             try {
                 if (!failed) {
                     val prompt = buildContextPrompt(vocabularyHint, combined)
-                    val result = LocalInferenceEngine.transcribeWav(
-                        wavPath = part.absolutePath,
-                        modelFile = model,
-                        languageCode = language,
-                        initialPrompt = prompt
-                    )
+                    val result = if (modelSpec != null) {
+                        LocalInferenceEngine.transcribeWav(
+                            wavPath = part.absolutePath,
+                            spec = modelSpec,
+                            modelPath = model,
+                            languageCode = language,
+                            initialPrompt = prompt
+                        )
+                    } else {
+                        LocalInferenceEngine.transcribeWav(
+                            wavPath = part.absolutePath,
+                            modelFile = model,
+                            languageCode = language,
+                            initialPrompt = prompt
+                        )
+                    }
                     if (result.isFailure) {
                         failed = true
                     } else {

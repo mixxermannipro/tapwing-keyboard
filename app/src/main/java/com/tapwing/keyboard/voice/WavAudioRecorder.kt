@@ -53,7 +53,9 @@ class WavAudioRecorder {
         onPcm: ((ByteArray, Int) -> Unit)? = null,
         canScheduleChunk: (() -> Boolean)? = null,
         onSpeechChunk: ((File) -> Unit)? = null,
-        skipFinalTrim: Boolean = false
+        skipFinalTrim: Boolean = false,
+        chunkSoftMaxSeconds: Int = 16,
+        chunkHardMaxSeconds: Int = 24
     ): Boolean {
         if (current != null) return false
         val capture = Capture(outputFile)
@@ -64,7 +66,8 @@ class WavAudioRecorder {
                     if (!capture.stop) {
                         capture.result = record(
                             capture, onReady, onRmsDb, onElapsedSeconds,
-                            onPcm, canScheduleChunk, onSpeechChunk, skipFinalTrim
+                            onPcm, canScheduleChunk, onSpeechChunk, skipFinalTrim,
+                            chunkSoftMaxSeconds, chunkHardMaxSeconds
                         )
                     }
                 }
@@ -85,7 +88,9 @@ class WavAudioRecorder {
         onPcm: ((ByteArray, Int) -> Unit)?,
         canScheduleChunk: (() -> Boolean)?,
         onSpeechChunk: ((File) -> Unit)?,
-        skipFinalTrim: Boolean
+        skipFinalTrim: Boolean,
+        chunkSoftMaxSeconds: Int,
+        chunkHardMaxSeconds: Int
     ): WavRecordingResult {
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         check(minBuffer > 0)
@@ -116,7 +121,12 @@ class WavAudioRecorder {
                 var lastActivityEnd = 0L
                 var reportedSeconds = 0
                 val vad = AdaptiveSpeechDetector()
-                val boundaries = onSpeechChunk?.let { SpeechChunkBoundaries() }
+                val boundaries = onSpeechChunk?.let {
+                    SpeechChunkBoundaries(
+                        softMaxSeconds = chunkSoftMaxSeconds,
+                        hardMaxSeconds = chunkHardMaxSeconds
+                    )
+                }
 
                 while (!capture.stop) {
                     val read = recorder.read(pcm, 0, pcm.size)

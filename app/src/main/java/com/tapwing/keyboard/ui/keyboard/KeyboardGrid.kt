@@ -454,8 +454,11 @@ fun KeyboardGrid(
             // Alternate-character popup
             androidx.compose.animation.AnimatedVisibility(
                 visible = altPopup != null,
-                enter = fadeIn(tween(110)) + scaleIn(initialScale = 0.92f, animationSpec = tween(140, easing = FastOutSlowInEasing)),
-                exit = fadeOut(tween(90)),
+                enter = fadeIn(tween(90)) + scaleIn(
+                    initialScale = 0.90f,
+                    animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMedium)
+                ),
+                exit = fadeOut(tween(80)),
                 modifier = Modifier.offset {
                     IntOffset(
                         ((lastAltPopup?.leftRootPx ?: 0f) - gridGeometry.leftRoot).roundToInt(),
@@ -502,8 +505,11 @@ fun KeyboardGrid(
             val preview = activePreview
             androidx.compose.animation.AnimatedVisibility(
                 visible = preview != null && altPopup == null && !isSwipingActive && !trackpadModeActive,
-                enter = fadeIn(tween(60)) + scaleIn(initialScale = 0.88f, animationSpec = tween(80)),
-                exit = fadeOut(tween(70)),
+                enter = fadeIn(tween(55)) + scaleIn(
+                    initialScale = 0.88f,
+                    animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessHigh)
+                ),
+                exit = fadeOut(tween(65)),
                 modifier = Modifier.offset {
                     val bubbleHalfPx = 22.dp.toPx()
                     val x = ((preview?.centerXRoot ?: gridGeometry.leftRoot) - gridGeometry.leftRoot - bubbleHalfPx)

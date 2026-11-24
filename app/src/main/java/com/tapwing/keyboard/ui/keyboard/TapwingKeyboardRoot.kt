@@ -5,12 +5,15 @@ import android.view.View
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -196,17 +199,19 @@ fun TapwingKeyboardRoot(
                 AnimatedContent(
                     targetState = panelMode,
                     transitionSpec = {
-                        val enter = fadeIn(tween(240, delayMillis = 50, easing = FastOutSlowInEasing)) +
+                        val enter = fadeIn(tween(190, delayMillis = 30, easing = FastOutSlowInEasing)) +
                             scaleIn(
                                 initialScale = 0.97f,
-                                animationSpec = tween(280, easing = FastOutSlowInEasing)
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)
                             ) +
                             slideInVertically(
-                                animationSpec = tween(280, easing = FastOutSlowInEasing)
-                            ) { it / 24 }
-                        val exit = fadeOut(tween(140, easing = FastOutSlowInEasing))
+                                animationSpec = spring(dampingRatio = 0.86f, stiffness = Spring.StiffnessMediumLow)
+                            ) { it / 28 }
+                        val exit = fadeOut(tween(130, easing = FastOutSlowInEasing))
                         (enter togetherWith exit).using(
-                            SizeTransform(clip = false) { _, _ -> tween(260, easing = FastOutSlowInEasing) }
+                            SizeTransform(clip = false) { _, _ ->
+                                spring<IntSize>(dampingRatio = 0.86f, stiffness = Spring.StiffnessMediumLow)
+                            }
                         )
                     },
                     label = "keyboardPanelTransition"

@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,6 +79,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -114,6 +116,7 @@ import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.SnippetPlaceholderResolver
 import com.tapwing.keyboard.dictionary.TextSnippet
 import com.tapwing.keyboard.emoji.EmojiCatalog
+import com.tapwing.keyboard.settings.springPressScale
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -228,11 +231,19 @@ fun ToolsHubPanel(
             modifier = Modifier.fillMaxWidth()
         ) {
             items(items) { tile ->
+                val interactionSource = remember { MutableInteractionSource() }
                 Surface(
                     shape = RoundedCornerShape(18.dp),
                     color = if (tile.active) kbColors.actionSurface.copy(alpha = 0.28f) else kbColors.cardSurface,
                     border = if (tile.active) BorderStroke(1.dp, kbColors.actionSurface) else null,
-                    modifier = Modifier.clickable(onClick = tile.onClick)
+                    modifier = Modifier
+                        .springPressScale(interactionSource, pressedScale = 0.95f)
+                        .clip(RoundedCornerShape(18.dp))
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = ripple(),
+                            onClick = tile.onClick
+                        )
                 ) {
                     Column(
                         modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),

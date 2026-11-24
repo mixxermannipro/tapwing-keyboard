@@ -22,16 +22,23 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
@@ -173,6 +180,7 @@ import com.tapwing.keyboard.ai.LocalModelManager
 import com.tapwing.keyboard.ai.LocalModelSpec
 import com.tapwing.keyboard.ai.ModelInstallState
 import com.tapwing.keyboard.ai.NanoAvailability
+import com.tapwing.keyboard.voice.NaturalVoiceCleaner
 import com.tapwing.keyboard.voice.VoiceSelfTest
 import com.tapwing.keyboard.voice.CloudDictation
 import com.tapwing.keyboard.voice.GeminiLiveDictation
@@ -341,9 +349,11 @@ fun TapwingSettingsApp(
                 targetState = route,
                 transitionSpec = {
                     val direction = if (navigatingBack) -1 else 1
-                    (slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { direction * it / 8 } +
-                        fadeIn(tween(200))) togetherWith
-                        (slideOutHorizontally(tween(220, easing = FastOutSlowInEasing)) { -direction * it / 12 } +
+                    (slideInHorizontally(tween(290, easing = FastOutSlowInEasing)) { direction * it / 7 } +
+                        scaleIn(initialScale = 0.985f, animationSpec = tween(290, easing = FastOutSlowInEasing)) +
+                        fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 12 } +
+                            scaleOut(targetScale = 0.985f, animationSpec = tween(220, easing = FastOutSlowInEasing)) +
                             fadeOut(tween(150)))
                 },
                 label = "settingsNavigation"
@@ -587,13 +597,16 @@ private fun SettingsRoute.liveSummary(
             if (de) "Aus · 2D-Cursor aktiv" else "Off · 2D cursor active"
         }
     }
-    SettingsRoute.VOICE -> when (prefs.voiceEngine) {
-        VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) "Automatisch (Lokal zuerst)" else "Auto (Local first)"
-        VoiceEngineMode.LOCAL_WHISPER -> if (de) "Lokal (Whisper)" else "On-device (Whisper)"
-        VoiceEngineMode.ON_DEVICE_SPEECH -> if (de) "Android On-Device" else "Android On-Device"
-        VoiceEngineMode.CLOUD -> if (de) "Cloud-Diktat" else "Cloud speech"
-        VoiceEngineMode.GEMINI_LIVE -> "Gemini Live"
-        VoiceEngineMode.SYSTEM_SPEECH -> if (de) "System-Spracheingabe" else "System speech"
+    SettingsRoute.VOICE -> {
+        val modelShort = LocalModelCatalog.findById(prefs.selectedWhisperModelId)?.shortEngineLabel ?: "Sherpa"
+        when (prefs.voiceEngine) {
+            VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) "Automatisch · $modelShort" else "Auto · $modelShort"
+            VoiceEngineMode.LOCAL_WHISPER -> if (de) "Lokal · $modelShort" else "On-device · $modelShort"
+            VoiceEngineMode.ON_DEVICE_SPEECH -> "Android On-Device"
+            VoiceEngineMode.CLOUD -> if (de) "Cloud-Diktat" else "Cloud speech"
+            VoiceEngineMode.GEMINI_LIVE -> "Gemini Live"
+            VoiceEngineMode.SYSTEM_SPEECH -> if (de) "System-Spracheingabe" else "System speech"
+        }
     }
     SettingsRoute.DICTIONARY -> {
         if (prefs.learningEnabled) {
@@ -2508,7 +2521,7 @@ private fun VoiceSettingsScreen(
     }
 
     var advanced by rememberSaveable { mutableStateOf(false) }
-    var modelDetails by rememberSaveable { mutableStateOf(false) }
+    var whisperModelsExpanded by rememberSaveable { mutableStateOf(false) }
     var diagRunning by remember { mutableStateOf(false) }
     var diagReport by remember { mutableStateOf<String?>(null) }
 
@@ -2520,12 +2533,14 @@ private fun VoiceSettingsScreen(
             (dictationProvider != null && secureKeyStorage.readDictationKey(dictationProvider.name).isNotBlank())
     }
     val localAndroidAvailable = remember(context) { TapwingVoiceController.isOnDeviceSpeechAvailable(context) }
-    val installedWhisper = remember(modelStates, prefs.selectedWhisperModelId) {
-        modelManager.firstInstalledModel(LocalModelKind.WHISPER_STT, prefs.selectedWhisperModelId)
+    val bestInstalled = remember(modelStates, prefs.selectedWhisperModelId, prefs.activeLocale) {
+        modelManager.bestInstalledSpeechModel(prefs.selectedWhisperModelId, prefs.activeLocale)
     }
-    val visibleModel = installedWhisper?.first ?: requireNotNull(LocalModelCatalog.findById("whisper-tiny-q5_1"))
+    val recommendedForLocale = remember(prefs.activeLocale) {
+        LocalModelCatalog.recommendedForLocale(prefs.activeLocale)
+    }
     val cloudNeedsKey = prefs.voiceEngine.usesCloudAudio && (dictationProvider == null || !keySaved)
-    val offlineReady = installedWhisper != null || localAndroidAvailable ||
+    val offlineReady = bestInstalled != null || localAndroidAvailable ||
         (!prefs.voiceEngine.usesCloudAudio && android.speech.SpeechRecognizer.isRecognitionAvailable(context))
     val dictationReady = micGranted && !cloudNeedsKey && (prefs.voiceEngine.usesCloudAudio || offlineReady)
 
@@ -2541,8 +2556,8 @@ private fun VoiceSettingsScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         item {
             AppleGroupedSurface {
@@ -2555,7 +2570,7 @@ private fun VoiceSettingsScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
                             .background(
                                 if (dictationReady) Color(0xFF34C759).copy(alpha = 0.16f)
@@ -2567,7 +2582,7 @@ private fun VoiceSettingsScreen(
                             imageVector = if (dictationReady) Icons.Rounded.Check else Icons.Rounded.Mic,
                             contentDescription = null,
                             tint = if (dictationReady) Color(0xFF34C759) else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -2575,9 +2590,9 @@ private fun VoiceSettingsScreen(
                             text = when {
                                 !micGranted -> if (de) "Mikrofon noch erlauben" else "Allow microphone access"
                                 cloudNeedsKey -> if (de) "Cloud-Schlüssel fehlt" else "Cloud API key needed"
-                                installedWhisper == null && prefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER ->
-                                    if (de) "Offline-Sprachpaket laden" else "Download offline speech model"
-                                else -> if (de) "Diktat ist einsatzbereit" else "Dictation is ready"
+                                bestInstalled == null && prefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER ->
+                                    if (de) "Lokal-Modell laden" else "Download offline model"
+                                else -> if (de) "Spracheingabe bereit" else "Voice typing ready"
                             },
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
@@ -2585,9 +2600,13 @@ private fun VoiceSettingsScreen(
                         Text(
                             text = when {
                                 !micGranted -> if (de) "Ein Tipp genügt, damit Tapwing dich hört." else "Tap once so Tapwing can hear your voice."
-                                cloudNeedsKey -> if (de) "Schlüssel hinterlegen oder auf „Automatisch“ wechseln." else "Save your key or switch to Automatic."
-                                installedWhisper != null -> if (de) "Schnell & ohne Zeitlimit (${installedWhisper.first.displayName.substringBefore(" (")})." else "Fast & unlimited (${installedWhisper.first.displayName.substringBefore(" (")})."
-                                else -> if (de) "Funktioniert direkt und ohne Zeitlimit." else "Ready immediately with no time limit."
+                                cloudNeedsKey -> if (de) "API-Schlüssel eintragen oder lokal diktieren." else "Save an API key or switch to local mode."
+                                bestInstalled != null -> {
+                                    val name = bestInstalled.first.displayName.substringBefore(" (")
+                                    val speed = if (de) bestInstalled.first.speedBadgeDe else bestInstalled.first.speedBadgeEn
+                                    if (speed.isNotEmpty()) "$name · $speed" else name
+                                }
+                                else -> if (de) "Empfehlung unten laden für maximales Offline-Tempo." else "Download recommended model below for instant offline speed."
                             },
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2600,63 +2619,15 @@ private fun VoiceSettingsScreen(
                         if (de) "Mikrofon jetzt erlauben" else "Allow microphone now",
                         MaterialTheme.colorScheme.primary
                     ) { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }
-                }
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Empfohlener Workflow (für Tempo)" else "Recommended workflow (for speed)")
-                AppleGroupedSurface {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                } else if (bestInstalled == null) {
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalActionRow(
+                        if (de) "Empfohlenes Modell laden (${recommendedForLocale.approxSizeMb} MB)"
+                        else "Download recommended model (${recommendedForLocale.approxSizeMb} MB)",
+                        MaterialTheme.colorScheme.primary
                     ) {
-                        Text(
-                            text = if (de) "1. Rambler-Tempo (~0,3 Sek. nach ✓)" else "1. Rambler speed (~0.3s after ✓)",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = if (de) {
-                                "„Cloud-KI (Live)“ mit Gemini ODER „Automatisch“ (Android-Live) kombiniert mit Groq/Gemini unter Schreibhilfe."
-                            } else {
-                                "“Cloud AI (Live)” with Gemini OR “Automatic” (Android live) paired with Groq/Gemini in Writing tools."
-                            },
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        AppleHairlineDivider(startIndent = 0.dp)
-                        Text(
-                            text = if (de) "2. Sofort & 100 % Offline (< 0,2 Sek.)" else "2. Instant & 100% Offline (< 0.2s)",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = if (de) {
-                                "„Automatisch“ nutzt das Android-Sprachpaket + schnelle Offline-Regeln (auf unterstützten Pixel/Flagships auch Gemini Nano)."
-                            } else {
-                                "“Automatic” uses your Android speech pack + instant offline rules (or Gemini Nano on supported AICore phones)."
-                            },
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        AppleHairlineDivider(startIndent = 0.dp)
-                        Text(
-                            text = if (de) "3. Offline ohne Google (Whisper)" else "3. Offline without Google (Whisper)",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = if (de) {
-                                "Whisper Tiny/Base läuft komplett autark auf dem Gerät — ideal für Datenschutz oder lange Monologe."
-                            } else {
-                                "Whisper Tiny/Base runs standalone on-device — great for strict privacy or long monologues."
-                            },
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        onUpdatePrefs { it.copy(selectedWhisperModelId = recommendedForLocale.id) }
+                        modelManager.startDownload(recommendedForLocale)
                     }
                 }
             }
@@ -2666,7 +2637,7 @@ private fun VoiceSettingsScreen(
             Column {
                 AppleGroupedSurface {
                     MinimalToggleRow(
-                        if (de) "Sätze automatisch glätten" else "Clean up sentences automatically",
+                        if (de) "Natürlich bereinigen (Rambler-Stil)" else "Natural cleanup (Rambler-style)",
                         prefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP
                     ) { enabled ->
                         val mode = if (enabled) VoiceDictationMode.NATURAL_CLEANUP else VoiceDictationMode.STANDARD
@@ -2674,19 +2645,19 @@ private fun VoiceSettingsScreen(
                     }
                 }
                 AppleSectionFooter(
-                    if (de) "Entfernt „ähm“ und Versprecher mitten im Satz, setzt Satzzeichen und versteht Befehle wie „mach es freundlicher“."
-                    else "Removes ‘ums’ and mid-sentence corrections, adds punctuation, and supports commands like ‘make it friendly’."
+                    if (de) "Entfernt „ähm“ & Stottern, korrigiert Versprecher mitten im Satz, setzt Kommas/Punkte und versteht Befehle."
+                    else "Strips ‘ums’ & stutters, handles mid-sentence self-corrections, adds punctuation, and runs voice commands."
                 )
             }
         }
 
         item {
             Column {
-                AppleSectionHeader(if (de) "Wie soll erkannt werden?" else "Recognition mode")
+                AppleSectionHeader(if (de) "Verarbeitung" else "Processing")
                 AppleGroupedSurface {
                     val primaryOptions = listOf(
-                        VoiceEngineMode.AUTO_LOCAL_FIRST,
                         VoiceEngineMode.LOCAL_WHISPER,
+                        VoiceEngineMode.AUTO_LOCAL_FIRST,
                         VoiceEngineMode.GEMINI_LIVE
                     )
                     val options = buildList {
@@ -2702,21 +2673,21 @@ private fun VoiceSettingsScreen(
                     options.forEachIndexed { index, mode ->
                         if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
                         val (title, description) = when (mode) {
-                            VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) {
-                                "Automatisch (Empfohlen)" to "Schnell & zuverlässig: nutzt dein Gerät direkt und schützt vor Ausfällen."
-                            } else "Automatic (Recommended)" to "Fast & reliable: runs on your device and falls back automatically."
                             VoiceEngineMode.LOCAL_WHISPER -> if (de) {
-                                "Nur auf dem Gerät (Offline)" to "100 % privat, funktioniert auch ohne Internet — auch für sehr lange Texte."
-                            } else "On-device only (Offline)" to "100% private, works completely offline — even for long dictations."
+                                "Lokal & Ultraschnell (Empfohlen)" to "100 % auf deinem Gerät mit Sherpa-ONNX oder Whisper — blitzschnell & ohne Zeitlimit."
+                            } else "On-device & ultra-fast (Recommended)" to "100% private via Sherpa-ONNX or Whisper — instant results & unlimited length."
+                            VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) {
+                                "Automatisch" to "Bevorzugt dein schnelles Lokal-Modell und fällt bei Bedarf auf Android-Sprache zurück."
+                            } else "Automatic" to "Uses your fast local model first and falls back to Android speech when needed."
                             VoiceEngineMode.GEMINI_LIVE -> if (de) {
-                                "Cloud-KI (Live)" to "Höchste Genauigkeit mit Live-Vorschau und automatischem Offline-Schutz."
-                            } else "Cloud AI (Live)" to "Best accuracy with live preview and automatic offline fallback."
+                                "Cloud-KI (Live)" to "Gemini Live-Streaming mit automatischem Offline-Schutz."
+                            } else "Cloud AI (Live)" to "Gemini Live streaming with automatic offline fallback."
                             VoiceEngineMode.ON_DEVICE_SPEECH -> if (de) {
                                 "Android offline · Live-Text" to "System-Sprachpaket auf dem Gerät mit Sofort-Vorschau."
                             } else "Android offline · Live text" to "Built-in device language pack with instant preview."
                             VoiceEngineMode.CLOUD -> if (de) {
-                                "Cloud nach dem Stopp" to "Sendet Audio nach dem Stopp an Gemini oder OpenAI."
-                            } else "Cloud after stop" to "Sends audio to Gemini or OpenAI after stopping."
+                                "Cloud nach dem Stopp" to "Sendet Audio nach dem Stopp an Groq, Gemini oder OpenAI."
+                            } else "Cloud after stop" to "Sends audio to Groq, Gemini, or OpenAI after stopping."
                             VoiceEngineMode.SYSTEM_SPEECH -> if (de) {
                                 "Android-Sprachdienst" to "Standard-Spracherkennung von Android."
                             } else "Android speech service" to "Standard Android speech recognition."
@@ -2739,7 +2710,7 @@ private fun VoiceSettingsScreen(
                             if (useLiveCloud) "Gemini Live" else AiModelCatalog.displayName(prefs.dictationProvider, de)
                         )
                         val model = if (useLiveCloud) GeminiLiveDictation.MODEL
-                            else prefs.dictationModel.ifBlank { AiModelCatalog.defaultAudioModelFor(activeDictProviderType) }
+                        else prefs.dictationModel.ifBlank { AiModelCatalog.defaultAudioModelFor(activeDictProviderType) }
                         AiModelReference(activeDictProviderType, model)
                         AppleHairlineDivider(startIndent = 16.dp)
                         MinimalActionRow(
@@ -2754,17 +2725,15 @@ private fun VoiceSettingsScreen(
                             onClick = onOpenWritingTools
                         )
                     }
-                    if (!keySaved || dictationProvider == null) {
-                        AppleSectionFooter(
-                            if (de) "Hinterlege in der Schreibhilfe deinen API-Schlüssel — oder nutze „Automatisch“ ohne Schlüssel."
-                            else "Add your API key under Writing tools — or switch to Automatic without a key."
-                        )
-                    } else {
-                        AppleSectionFooter(
-                            if (de) "Bei Verbindungsabbruch übernimmt automatisch ein Offline-Modell, falls installiert."
-                            else "If the connection drops, an installed offline model takes over automatically."
-                        )
-                    }
+                    AppleSectionFooter(
+                        if (!keySaved || dictationProvider == null) {
+                            if (de) "Hinterlege einen API-Schlüssel — oder nutze „Lokal & Ultraschnell“ ohne Schlüssel."
+                            else "Add an API key — or use “On-device & ultra-fast” without a key."
+                        } else {
+                            if (de) "Bei Verbindungsabbruch übernimmt automatisch dein lokales Offline-Modell."
+                            else "If the connection drops, your installed offline model takes over automatically."
+                        }
+                    )
                 }
             }
         }
@@ -2774,249 +2743,68 @@ private fun VoiceSettingsScreen(
             prefs.voiceEngine == VoiceEngineMode.GEMINI_LIVE
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     LocalModelCatalogSection(
-                        title = if (de) "Offline-Sprachpaket" else "Offline speech model",
+                        title = if (de) "Lokale Sprachmodelle (Sherpa-ONNX)" else "On-device Speech Models (Sherpa-ONNX)",
                         recommendationNote = if (de) {
-                            "Whisper Tiny (32 MB) ist blitzschnell. Whisper Base (60 MB) erkennt Namen und Satzbau noch genauer."
+                            "Empfohlen: FastConformer (103 MB) für maximales Tempo + Satzzeichen oder Kroko Live (54 MB) für Wort-für-Wort-Vorschau."
                         } else {
-                            "Whisper Tiny (32 MB) is instant. Whisper Base (60 MB) improves accuracy on names and grammar."
+                            "Recommended: FastConformer (103 MB) for top German speed + punctuation, Canary (146 MB) for DE/EN/FR/ES, or Parakeet Ultra (25 languages)."
                         },
-                        models = if (modelDetails) LocalModelCatalog.whisperModels else listOf(visibleModel),
-                        selectedModelId = installedWhisper?.first?.id.orEmpty(),
+                        models = LocalModelCatalog.sherpaModels,
+                        selectedModelId = bestInstalled?.first?.id ?: prefs.selectedWhisperModelId,
                         states = modelStates,
                         de = de,
                         onSelectModel = { spec -> onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) } },
                         onDownloadModel = { spec ->
-                            if (installedWhisper == null) onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) }
+                            onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) }
                             modelManager.startDownload(spec)
                         },
                         onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
                         onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
                         onImportModel = { spec ->
                             pendingImportSpec = spec
-                            importModelLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                            importModelLauncher.launch(arrayOf("application/octet-stream", "application/x-bzip2", "*/*"))
                         },
                         onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
-                        showTechnicalDetails = modelDetails
+                        showTechnicalDetails = true
                     )
+
                     AppleGroupedSurface {
-                        SettingsDisclosure(if (de) "Weitere Modellgrößen anzeigen" else "Show more model sizes", modelDetails) {
-                            modelDetails = !modelDetails
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Schnelltest" else "Quick check")
-                AppleGroupedSurface {
-                    MinimalActionRow(
-                        title = if (diagRunning) (if (de) "Test läuft…" else "Testing…")
-                        else (if (de) "Diktat kurz testen (3 Sek.)" else "Test dictation (3 sec)"),
-                        textColor = MaterialTheme.colorScheme.primary
-                    ) {
-                        if (diagRunning) return@MinimalActionRow
-                        if (!micGranted) {
-                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            return@MinimalActionRow
-                        }
-                        val target = installedWhisper
-                        if (target == null) {
-                            diagReport = if (de) "Lade zuerst oben ein Offline-Sprachpaket, um lokal zu testen."
-                            else "Download an offline speech model above first to test locally."
-                            return@MinimalActionRow
-                        }
-                        diagRunning = true
-                        diagReport = if (de) "Aufnahme läuft (3 Sek.) — sprich jetzt!" else "Recording (3 sec) — speak now!"
-                        scope.launch {
-                            val wav = File(context.cacheDir, "tapwing_diag_voice.wav")
-                            val rec = WavAudioRecorder()
-                            val started = rec.start(wav, {}, {}, { err ->
-                                diagReport = if (de) "Mikrofon-Fehler: $err" else "Mic error: $err"
-                            })
-                            if (!started) {
-                                diagRunning = false
-                                return@launch
-                            }
-                            delay(3000L)
-                            val result = rec.stopAndGetResult()
-                            if (result == null) {
-                                diagRunning = false
-                                diagReport = if (de) "Keine Aufnahme erstellt." else "No audio recorded."
-                                return@launch
-                            }
-                            diagReport = if (de) "Erkenne Text…" else "Recognizing speech…"
-                            val t0 = System.currentTimeMillis()
-                            val tr = LocalInferenceEngine.transcribeWav(
-                                wavPath = result.file.absolutePath,
-                                modelFile = target.second,
-                                languageCode = KeyboardLocales.baseLang(prefs.activeLocale)
-                            )
-                            val ms = System.currentTimeMillis() - t0
-                            result.file.delete()
-                            diagRunning = false
-                            diagReport = tr.fold(
-                                onSuccess = { txt ->
-                                    if (txt.isBlank()) {
-                                        if (de) "Keine Sprache gehört (Pegel ${result.peakSampleAbs}). Bitte lauter sprechen."
-                                        else "No speech heard (peak ${result.peakSampleAbs}). Try speaking closer."
-                                    } else {
-                                        if (de) "Erkannt in ${ms} ms: „$txt“" else "Recognized in ${ms} ms: \"$txt\""
-                                    }
-                                },
-                                onFailure = { err ->
-                                    if (de) "Fehler (${ms} ms): ${err.localizedMessage}" else "Error (${ms} ms): ${err.localizedMessage}"
-                                }
-                            )
-                        }
-                    }
-                    if (!diagReport.isNullOrBlank()) {
-                        AppleHairlineDivider(startIndent = 16.dp)
-                        Text(
-                            text = diagReport!!,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        item {
-            AppleGroupedSurface {
-                SettingsDisclosure(if (de) "Erweiterte Einstellungen" else "Advanced settings", advanced) {
-                    advanced = !advanced
-                }
-            }
-        }
-        if (!advanced) return@LazyColumn
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Zusätzliche Text-KI" else "Additional text AI")
-                AppleGroupedSurface {
-                    MinimalToggleRow(
-                        if (de) "KI-Bereinigung nach Diktat" else "AI cleanup after dictation",
-                        prefs.voiceAiPolish
-                    ) { v -> onUpdatePrefs { it.copy(voiceAiPolish = v) } }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(
-                        if (de) "Sprache = Systemsprache (${KeyboardLocales.systemLanguageDisplayName()})"
-                        else "Language = System (${KeyboardLocales.systemLanguageDisplayName()})",
-                        prefs.voiceCleanupUseSystemLanguage
-                    ) { v -> onUpdatePrefs { it.copy(voiceCleanupUseSystemLanguage = v) } }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = promptDraft,
-                            onValueChange = { promptDraft = it },
-                            label = {
-                                Text(
-                                    if (de) "Eigene Anweisung (optional)"
-                                    else "Custom instructions (optional)",
-                                    fontSize = 12.sp
-                                )
-                            },
-                            placeholder = {
-                                Text(defaultPromptPreview.take(160) + "…", fontSize = 12.sp)
-                            },
-                            minLines = 4,
-                            maxLines = 8,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    onUpdatePrefs { it.copy(voiceCleanupPrompt = promptDraft.trim()) }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (de) "Prompt speichern" else "Save prompt", fontSize = 13.sp)
-                            }
-                            FilledTonalButton(
-                                onClick = {
-                                    promptDraft = defaultPromptPreview
-                                    onUpdatePrefs { it.copy(voiceCleanupPrompt = "") }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(if (de) "Standard einfügen" else "Load default", fontSize = 13.sp)
-                            }
-                        }
-                    }
-                }
-                AppleSectionFooter(
-                    if (de) "Optionaler zweiter Schritt mit dem Anbieter aus der Schreibhilfe. In den Offline-Modi bleibt der Text lokal."
-                    else "Optional second step using your Writing Tools provider. In offline modes, text stays on the device."
-                )
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Diktat-Modus & Optionen" else "Dictation Mode & Options")
-                AppleGroupedSurface {
-                    MinimalToggleRow(if (de) "Füllwörter entfernen" else "Remove filler words", prefs.voiceRemoveFillers) { v ->
-                        onUpdatePrefs { it.copy(voiceRemoveFillers = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Auto-Zeichensetzung" else "Auto-punctuation", prefs.voiceAutoPunctuate) { v ->
-                        onUpdatePrefs { it.copy(voiceAutoPunctuate = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Tastatursprache bevorzugen" else "Prefer keyboard language", prefs.voiceStrictLanguageLock) { v ->
-                        onUpdatePrefs { it.copy(voiceStrictLanguageLock = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Minimieren-Taste" else "Minimize button", prefs.voiceMinimizeButton) { v ->
-                        onUpdatePrefs { it.copy(voiceMinimizeButton = v) }
-                    }
-                }
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Mikrofon & Timing" else "Microphone & Timing")
-                AppleGroupedSurface {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        SettingsDisclosure(
+                            title = if (de) "Weitere Modelle (Whisper · 99 Sprachen)" else "More models (Whisper · 99 languages)",
+                            expanded = whisperModelsExpanded
                         ) {
-                            Text(if (de) "Diktat nach Drehung fortsetzen" else "Resume dictation after rotation", fontSize = 15.sp)
-                            Text("${prefs.voiceRotationGraceMs} ms", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+                            whisperModelsExpanded = !whisperModelsExpanded
                         }
-                        Slider(
-                            value = prefs.voiceRotationGraceMs.toFloat(),
-                            onValueChange = { value ->
-                                onUpdatePrefs { it.copy(voiceRotationGraceMs = value.roundToInt().toLong()) }
-                            },
-                            valueRange = 500f..3500f
-                        )
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalActionRow(
-                        title = if (micGranted) {
-                            if (de) "Mikrofon-Berechtigung erteilt ✓" else "Microphone granted ✓"
-                        } else {
-                            if (de) "Mikrofon-Berechtigung anfordern" else "Grant microphone permission"
-                        },
-                        textColor = if (micGranted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
-                    ) {
-                        micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        AnimatedVisibility(
+                            visible = whisperModelsExpanded,
+                            enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                            exit = fadeOut(tween(140)) + shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium))
+                        ) {
+                            Column {
+                                AppleHairlineDivider(startIndent = 16.dp)
+                                LocalModelCatalogListContent(
+                                    models = LocalModelCatalog.whisperModels,
+                                    selectedModelId = bestInstalled?.first?.id ?: prefs.selectedWhisperModelId,
+                                    states = modelStates,
+                                    de = de,
+                                    onSelectModel = { spec -> onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) } },
+                                    onDownloadModel = { spec ->
+                                        if (bestInstalled == null) onUpdatePrefs { it.copy(selectedWhisperModelId = spec.id) }
+                                        modelManager.startDownload(spec)
+                                    },
+                                    onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
+                                    onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
+                                    onImportModel = { spec ->
+                                        pendingImportSpec = spec
+                                        importModelLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                                    },
+                                    onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                                    showTechnicalDetails = true
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -3024,40 +2812,34 @@ private fun VoiceSettingsScreen(
 
         item {
             Column {
-                AppleSectionHeader(if (de) "Diagnose & Technik" else "Diagnostics & Tech")
+                AppleSectionHeader(if (de) "Tempo- & Bereinigungstest" else "Speed & cleanup check")
                 AppleGroupedSurface {
-                    MinimalValueRow(
-                        if (de) "Aktives Whisper-Modell" else "Active Whisper model",
-                        installedWhisper?.first?.displayName ?: (if (de) "Keines geladen" else "None")
-                    )
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalValueRow(
-                        if (de) "Aktive KI-Bereinigung" else "Active cleanup AI",
-                        "${AiModelCatalog.displayName(prefs.cleanupProvider, de)}${if (prefs.cleanupModel.isNotBlank()) " · ${prefs.cleanupModel}" else ""}"
-                    )
-                    AppleHairlineDivider(startIndent = 16.dp)
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         FilledTonalButton(
                             onClick = {
+                                if (diagRunning) return@FilledTonalButton
                                 if (!micGranted) {
                                     micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     return@FilledTonalButton
                                 }
-                                val target = installedWhisper
+                                val target = bestInstalled
                                 if (target == null) {
-                                    diagReport = if (de) "Bitte zuerst ein Whisper-Modell laden." else "Please download a Whisper model first."
+                                    diagReport = if (de) "Lade zuerst oben ein Modell, um lokal zu testen."
+                                    else "Download a model above first to test locally."
                                     return@FilledTonalButton
                                 }
                                 diagRunning = true
-                                diagReport = if (de) "Aufnahme läuft (3 Sek.)… jetzt sprechen!" else "Recording (3 sec)… speak now!"
+                                diagReport = if (de) "Aufnahme läuft (3 Sek.) — sprich jetzt!" else "Recording (3 sec) — speak now!"
                                 scope.launch {
                                     val wav = File(context.cacheDir, "tapwing_diag_voice.wav")
                                     val rec = WavAudioRecorder()
                                     val started = rec.start(wav, {}, {}, { err ->
-                                        diagReport = "Mic error: $err"
+                                        diagReport = if (de) "Mikrofon-Fehler: $err" else "Mic error: $err"
                                     })
                                     if (!started) {
                                         diagRunning = false
@@ -3067,48 +2849,58 @@ private fun VoiceSettingsScreen(
                                     val result = rec.stopAndGetResult()
                                     if (result == null) {
                                         diagRunning = false
-                                        diagReport = if (de) "Keine Audiodatei erzeugt." else "Failed to record WAV."
+                                        diagReport = if (de) "Keine Aufnahme erstellt." else "No audio recorded."
                                         return@launch
                                     }
-                                    diagReport = if (de) {
-                                        "Transkribiere (${result.durationMs} ms, Pegel ${result.peakSampleAbs})…"
-                                    } else {
-                                        "Transcribing (${result.durationMs} ms, peak ${result.peakSampleAbs})…"
-                                    }
+                                    diagReport = if (de) "Erkenne & bereinige lokal…" else "Recognizing & cleaning locally…"
                                     val t0 = System.currentTimeMillis()
                                     val tr = LocalInferenceEngine.transcribeWav(
                                         wavPath = result.file.absolutePath,
-                                        modelFile = target.second,
+                                        spec = target.first,
+                                        modelPath = target.second,
                                         languageCode = KeyboardLocales.baseLang(prefs.activeLocale)
                                     )
                                     val ms = System.currentTimeMillis() - t0
                                     result.file.delete()
                                     diagRunning = false
                                     diagReport = tr.fold(
-                                        onSuccess = { txt ->
-                                            "Mic Peak=${result.peakSampleAbs}, Whisper=${ms}ms → '${txt.ifBlank { "(Stille)" }}'"
+                                        onSuccess = { rawTxt ->
+                                            if (rawTxt.isBlank()) {
+                                                if (de) "Keine Sprache gehört (Pegel ${result.peakSampleAbs}). Bitte lauter sprechen."
+                                                else "No speech heard (peak ${result.peakSampleAbs}). Try speaking closer."
+                                            } else {
+                                                val cleaned = NaturalVoiceCleaner.clean(
+                                                    rawTranscript = rawTxt,
+                                                    locale = prefs.activeLocale,
+                                                    removeFillers = prefs.voiceRemoveFillers,
+                                                    autoPunctuate = prefs.voiceAutoPunctuate
+                                                )
+                                                "${target.first.shortEngineLabel} · ${ms} ms → „$cleaned“"
+                                            }
                                         },
                                         onFailure = { err ->
-                                            "Whisper error (${ms}ms): ${err.localizedMessage}"
+                                            if (de) "Fehler (${ms} ms): ${err.localizedMessage}" else "Error (${ms} ms): ${err.localizedMessage}"
                                         }
                                     )
                                 }
                             },
                             enabled = !diagRunning,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = CircleShape,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(if (de) "3s Mic + Whisper" else "3s Mic + Whisper", fontSize = 12.sp)
+                            Text(if (de) "3s Mikrofon-Test" else "3s Mic Test", fontSize = 13.sp, maxLines = 1)
                         }
                         FilledTonalButton(
                             onClick = {
-                                val target = installedWhisper
+                                if (diagRunning) return@FilledTonalButton
+                                val target = bestInstalled
                                 if (target == null) {
-                                    diagReport = if (de) "Bitte zuerst ein Whisper-Modell laden." else "Please download a Whisper model first."
+                                    diagReport = if (de) "Lade zuerst oben ein Modell, um lokal zu testen."
+                                    else "Download a model above first to test locally."
                                     return@FilledTonalButton
                                 }
                                 diagRunning = true
-                                diagReport = if (de) "Erzeuge deutsches TTS-Audio & transkribiere…" else "Synthesizing German TTS & transcribing…"
+                                diagReport = if (de) "Starte TTS-Benchmark…" else "Running TTS benchmark…"
                                 scope.launch {
                                     val wav = File(context.cacheDir, "tapwing_tts_16k.wav")
                                     val synth = VoiceSelfTest.synthesizeGermanWav16k(
@@ -3125,32 +2917,155 @@ private fun VoiceSettingsScreen(
                                     val t0 = System.currentTimeMillis()
                                     val tr = LocalInferenceEngine.transcribeWav(
                                         wavPath = file.absolutePath,
-                                        modelFile = target.second,
+                                        spec = target.first,
+                                        modelPath = target.second,
                                         languageCode = KeyboardLocales.baseLang(prefs.activeLocale)
                                     )
                                     val ms = System.currentTimeMillis() - t0
                                     file.delete()
                                     diagRunning = false
                                     diagReport = tr.fold(
-                                        onSuccess = { txt -> "TTS ($wavInfo) → Whisper=${ms}ms → '${txt.ifBlank { "(leer)" }}'" },
-                                        onFailure = { err -> "Whisper Fehler (${ms}ms): ${err.localizedMessage}" }
+                                        onSuccess = { rawTxt ->
+                                            val cleaned = NaturalVoiceCleaner.clean(
+                                                rawTranscript = rawTxt,
+                                                locale = prefs.activeLocale,
+                                                removeFillers = prefs.voiceRemoveFillers,
+                                                autoPunctuate = prefs.voiceAutoPunctuate
+                                            )
+                                            "${target.first.shortEngineLabel} ($wavInfo) · ${ms} ms → „${cleaned.ifBlank { "(leer)" }}“"
+                                        },
+                                        onFailure = { err ->
+                                            "Fehler (${ms} ms): ${err.localizedMessage}"
+                                        }
                                     )
                                 }
                             },
                             enabled = !diagRunning,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = CircleShape,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(if (de) "TTS → Whisper" else "TTS → Whisper", fontSize = 12.sp)
+                            Text(if (de) "TTS-Benchmark" else "TTS Benchmark", fontSize = 13.sp, maxLines = 1)
                         }
                     }
                     if (!diagReport.isNullOrBlank()) {
                         AppleHairlineDivider(startIndent = 16.dp)
                         Text(
                             text = diagReport!!,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            AppleGroupedSurface {
+                SettingsDisclosure(if (de) "Erweiterte Einstellungen" else "Advanced settings", advanced) {
+                    advanced = !advanced
+                }
+                AnimatedVisibility(
+                    visible = advanced,
+                    enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                    exit = fadeOut(tween(140)) + shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium))
+                ) {
+                    Column {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalToggleRow(if (de) "Füllwörter entfernen" else "Remove filler words", prefs.voiceRemoveFillers) { v ->
+                            onUpdatePrefs { it.copy(voiceRemoveFillers = v) }
+                        }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalToggleRow(if (de) "Auto-Zeichensetzung" else "Auto-punctuation", prefs.voiceAutoPunctuate) { v ->
+                            onUpdatePrefs { it.copy(voiceAutoPunctuate = v) }
+                        }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalToggleRow(if (de) "Tastatursprache bevorzugen" else "Prefer keyboard language", prefs.voiceStrictLanguageLock) { v ->
+                            onUpdatePrefs { it.copy(voiceStrictLanguageLock = v) }
+                        }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalToggleRow(if (de) "Minimieren-Taste" else "Minimize button", prefs.voiceMinimizeButton) { v ->
+                            onUpdatePrefs { it.copy(voiceMinimizeButton = v) }
+                        }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalToggleRow(
+                            if (de) "Zusätzliche Text-KI-Bereinigung" else "Additional AI cleanup pass",
+                            prefs.voiceAiPolish
+                        ) { v -> onUpdatePrefs { it.copy(voiceAiPolish = v) } }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalToggleRow(
+                            if (de) "Sprache = Systemsprache (${KeyboardLocales.systemLanguageDisplayName()})"
+                            else "Language = System (${KeyboardLocales.systemLanguageDisplayName()})",
+                            prefs.voiceCleanupUseSystemLanguage
+                        ) { v -> onUpdatePrefs { it.copy(voiceCleanupUseSystemLanguage = v) } }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = promptDraft,
+                                onValueChange = { promptDraft = it },
+                                label = {
+                                    Text(
+                                        if (de) "Eigene Bereinigungs-Anweisung (optional)"
+                                        else "Custom cleanup instructions (optional)",
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                placeholder = {
+                                    Text(defaultPromptPreview.take(140) + "…", fontSize = 12.sp)
+                                },
+                                minLines = 3,
+                                maxLines = 6,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        onUpdatePrefs { it.copy(voiceCleanupPrompt = promptDraft.trim()) }
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(if (de) "Prompt speichern" else "Save prompt", fontSize = 13.sp)
+                                }
+                                FilledTonalButton(
+                                    onClick = {
+                                        promptDraft = defaultPromptPreview
+                                        onUpdatePrefs { it.copy(voiceCleanupPrompt = "") }
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(if (de) "Standard" else "Default", fontSize = 13.sp)
+                                }
+                            }
+                        }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(if (de) "Diktat nach Drehung fortsetzen" else "Resume after rotation", fontSize = 15.sp)
+                                Text("${prefs.voiceRotationGraceMs} ms", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
+                            }
+                            Slider(
+                                value = prefs.voiceRotationGraceMs.toFloat(),
+                                onValueChange = { value ->
+                                    onUpdatePrefs { it.copy(voiceRotationGraceMs = value.roundToInt().toLong()) }
+                                },
+                                valueRange = 500f..3500f
+                            )
+                        }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalValueRow(
+                            if (de) "Aktives Modell" else "Active model",
+                            bestInstalled?.first?.displayName ?: (if (de) "Keines geladen" else "None")
                         )
                     }
                 }
@@ -3891,166 +3806,243 @@ private fun LocalModelCatalogSection(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
             )
-            models.forEach { spec ->
-                AppleHairlineDivider(startIndent = 16.dp)
-                val state = states[spec.id] ?: ModelInstallState.NotInstalled
-                val isSelected = selectedModelId == spec.id
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = state is ModelInstallState.Installed) { onSelectModel(spec) }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+            AppleHairlineDivider(startIndent = 16.dp)
+            LocalModelCatalogListContent(
+                models = models,
+                selectedModelId = selectedModelId,
+                states = states,
+                de = de,
+                onSelectModel = onSelectModel,
+                onDownloadModel = onDownloadModel,
+                onCancelDownload = onCancelDownload,
+                onDeleteModel = onDeleteModel,
+                onImportModel = onImportModel,
+                onOpenUrl = onOpenUrl,
+                showTechnicalDetails = showTechnicalDetails
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocalModelCatalogListContent(
+    models: List<LocalModelSpec>,
+    selectedModelId: String,
+    states: Map<String, ModelInstallState>,
+    de: Boolean,
+    onSelectModel: (LocalModelSpec) -> Unit,
+    onDownloadModel: (LocalModelSpec) -> Unit,
+    onCancelDownload: (LocalModelSpec) -> Unit,
+    onDeleteModel: (LocalModelSpec) -> Unit,
+    onImportModel: (LocalModelSpec) -> Unit,
+    onOpenUrl: (String) -> Unit,
+    showTechnicalDetails: Boolean = true
+) {
+    models.forEachIndexed { idx, spec ->
+        if (idx > 0) AppleHairlineDivider(startIndent = 16.dp)
+        val state = states[spec.id] ?: ModelInstallState.NotInstalled
+        val isSelected = selectedModelId == spec.id
+        val interaction = remember { MutableInteractionSource() }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .springPressScale(interaction, enabled = state is ModelInstallState.Installed, pressedScale = 0.986f)
+                .clickable(
+                    interactionSource = interaction,
+                    indication = androidx.compose.material3.ripple(),
+                    enabled = state is ModelInstallState.Installed
+                ) { onSelectModel(spec) }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        Text(
+                            text = if (showTechnicalDetails) spec.displayName else spec.displayName.substringBefore(" ("),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val tag = if (de) spec.highlightTagDe else spec.highlightTagEn
+                        if (tag.isNotEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (spec.isRecommended) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                } else {
+                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                                }
                             ) {
                                 Text(
-                                    text = if (showTechnicalDetails) spec.displayName else spec.displayName.substringBefore(" ("),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    text = tag,
+                                    color = if (spec.isRecommended) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSecondaryContainer,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                                 )
-                                if (showTechnicalDetails && spec.isRecommended) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                                    ) {
-                                        Text(
-                                            text = if (de) "Empfohlen" else "Recommended",
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
                             }
-                            val friendlyBadge = when (spec.id) {
-                                "whisper-tiny-q5_1" -> if (de) "Blitzschnell · 32 MB" else "Fastest · 32 MB"
-                                "whisper-base-q5_1" -> if (de) "Ausgewogen · 60 MB" else "Balanced · 60 MB"
-                                "whisper-small-q5_1" -> if (de) "Sehr genau · 190 MB" else "High accuracy · 190 MB"
-                                "whisper-large-v3-turbo-q5_0" -> if (de) "Studio-Qualität · 574 MB" else "Studio · 574 MB"
-                                else -> "${spec.approxSizeMb} MB"
-                            }
-                            Text(
-                                text = if (showTechnicalDetails) "${spec.approxSizeMb} MB · ${spec.minRamGb}+ GB RAM" else friendlyBadge,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (isSelected && state is ModelInstallState.Installed) {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
                         }
                     }
-
-                    if (showTechnicalDetails) Text(
-                        text = if (de) spec.summaryDe else spec.summaryEn,
+                    val speedBadge = if (de) spec.speedBadgeDe else spec.speedBadgeEn
+                    val metaText = listOfNotNull(
+                        speedBadge.takeIf { it.isNotEmpty() },
+                        "${spec.approxSizeMb} MB",
+                        "${spec.minRamGb}+ GB RAM".takeIf { showTechnicalDetails }
+                    ).joinToString(" · ")
+                    Text(
+                        text = metaText,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (isSelected && state is ModelInstallState.Installed) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
 
-                    when (state) {
-                        is ModelInstallState.Downloading -> {
-                            val pct = (state.progress * 100f).roundToInt()
-                            val dlMb = state.downloadedBytes / 1_000_000L
-                            val totMb = (state.totalBytes / 1_000_000L).coerceAtLeast(1L)
-                            LinearProgressIndicator(
-                                progress = { state.progress },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("$pct% ($dlMb / $totMb MB)", fontSize = 12.sp)
-                                TextButton(onClick = { onCancelDownload(spec) }) {
-                                    Text(if (de) "Abbrechen" else "Cancel", fontSize = 12.sp)
-                                }
-                            }
+            if (showTechnicalDetails) {
+                Text(
+                    text = if (de) spec.summaryDe else spec.summaryEn,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 16.sp
+                )
+            }
+
+            when (state) {
+                is ModelInstallState.Downloading -> {
+                    val animatedProgress by animateFloatAsState(
+                        targetValue = state.progress,
+                        animationSpec = spring(stiffness = Spring.StiffnessLow),
+                        label = "modelDlProgress"
+                    )
+                    val pct = (state.progress * 100f).roundToInt()
+                    val dlMb = state.downloadedBytes / 1_000_000L
+                    val totMb = (state.totalBytes / 1_000_000L).coerceAtLeast(1L)
+                    LinearProgressIndicator(
+                        progress = { animatedProgress },
+                        modifier = Modifier.fillMaxWidth().clip(CircleShape)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("$pct% ($dlMb / $totMb MB)", fontSize = 12.sp)
+                        TextButton(onClick = { onCancelDownload(spec) }) {
+                            Text(if (de) "Abbrechen" else "Cancel", fontSize = 12.sp)
                         }
-                        is ModelInstallState.Installed -> if (showTechnicalDetails || !isSelected) {
-                            val mb = state.sizeBytes / 1_000_000L
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                FilledTonalButton(
-                                    onClick = { onSelectModel(spec) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = if (isSelected) (if (de) "Aktiv ✓" else "Active ✓")
-                                        else (if (de) "Auswählen ($mb MB)" else "Use ($mb MB)"),
-                                        fontSize = 12.sp
-                                    )
-                                }
-                                IconButton(onClick = { onDeleteModel(spec) }) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.DeleteOutline,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                            }
-                        }
-                        is ModelInstallState.Error -> {
+                    }
+                }
+                is ModelInstallState.Extracting -> {
+                    val animatedProgress by animateFloatAsState(
+                        targetValue = state.progress,
+                        animationSpec = spring(stiffness = Spring.StiffnessLow),
+                        label = "modelExtractProgress"
+                    )
+                    LinearProgressIndicator(
+                        progress = { animatedProgress },
+                        modifier = Modifier.fillMaxWidth().clip(CircleShape)
+                    )
+                    Text(
+                        text = if (de) "Entpacke ONNX-Modell…" else "Extracting ONNX model…",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                is ModelInstallState.Installed -> if (showTechnicalDetails || !isSelected) {
+                    val mb = state.sizeBytes / 1_000_000L
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilledTonalButton(
+                            onClick = { onSelectModel(spec) },
+                            shape = CircleShape,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text(
-                                text = state.message,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.error
+                                text = if (isSelected) (if (de) "Aktiv ✓" else "Active ✓")
+                                else (if (de) "Auswählen ($mb MB)" else "Use ($mb MB)"),
+                                fontSize = 12.sp
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(
-                                    onClick = { onDownloadModel(spec) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(if (de) "Erneut laden" else "Retry", fontSize = 12.sp)
-                                }
-                                if (showTechnicalDetails) TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
-                                    Text("HuggingFace", fontSize = 12.sp)
-                                }
-                            }
                         }
-                        ModelInstallState.NotInstalled -> {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = { onDownloadModel(spec) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(if (de) "Laden" else "Download", fontSize = 12.sp)
-                                }
-                                if (showTechnicalDetails) FilledTonalButton(
-                                    onClick = { onImportModel(spec) },
-                                    shape = RoundedCornerShape(10.dp)
-                                ) {
-                                    Text(if (de) "Datei" else "File", fontSize = 12.sp)
-                                }
-                                if (showTechnicalDetails) TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
-                                    Text("Link", fontSize = 12.sp)
-                                }
-                            }
+                        IconButton(onClick = { onDeleteModel(spec) }) {
+                            Icon(
+                                imageVector = Icons.Rounded.DeleteOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+                is ModelInstallState.Error -> {
+                    Text(
+                        text = state.message,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { onDownloadModel(spec) },
+                            shape = CircleShape,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (de) "Erneut laden" else "Retry", fontSize = 12.sp)
+                        }
+                        if (showTechnicalDetails) TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
+                            Text("Repo", fontSize = 12.sp)
+                        }
+                    }
+                }
+                ModelInstallState.NotInstalled -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { onDownloadModel(spec) },
+                            shape = CircleShape,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (de) "Laden" else "Download", fontSize = 12.sp)
+                        }
+                        if (showTechnicalDetails) FilledTonalButton(
+                            onClick = { onImportModel(spec) },
+                            shape = CircleShape
+                        ) {
+                            Text(if (de) "Datei" else "File", fontSize = 12.sp)
+                        }
+                        if (showTechnicalDetails) TextButton(onClick = { onOpenUrl(spec.repoUrl) }) {
+                            Text("Info", fontSize = 12.sp)
                         }
                     }
                 }
@@ -4358,11 +4350,13 @@ private fun MinimalNavRow(
     value: String,
     onClick: () -> Unit
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp)
-            .clickable(onClick = onClick)
+            .springPressScale(interaction, pressedScale = 0.985f)
+            .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -4403,11 +4397,19 @@ private fun MinimalToggleRow(
     badgeColor: Color = Color(0xFF007AFF),
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp)
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .springPressScale(interaction, pressedScale = 0.988f)
+            .toggleable(
+                value = checked,
+                interactionSource = interaction,
+                indication = androidx.compose.material3.ripple(),
+                role = Role.Switch,
+                onValueChange = onCheckedChange
+            )
             .padding(horizontal = if (icon != null) 14.dp else 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -4429,10 +4431,20 @@ private fun MinimalToggleRow(
 
 @Composable
 private fun SettingsDisclosure(title: String, expanded: Boolean, onToggle: () -> Unit) {
-    val rotation by animateFloatAsState(if (expanded) 180f else 0f, tween(240), label = "disclosureChevron")
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMedium),
+        label = "disclosureChevron"
+    )
+    val interaction = remember { MutableInteractionSource() }
     Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .springPressScale(interaction, pressedScale = 0.988f)
             .clickable(
+                interactionSource = interaction,
+                indication = androidx.compose.material3.ripple(),
                 onClickLabel = if (expanded) stringResource(R.string.settings_collapse) else stringResource(R.string.settings_expand),
                 role = Role.Button,
                 onClick = onToggle
@@ -4440,7 +4452,7 @@ private fun SettingsDisclosure(title: String, expanded: Boolean, onToggle: () ->
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, modifier = Modifier.weight(1f), fontSize = 15.sp)
+        Text(title, modifier = Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
         Icon(
             Icons.Rounded.ExpandMore,
             contentDescription = null,
@@ -4452,15 +4464,24 @@ private fun SettingsDisclosure(title: String, expanded: Boolean, onToggle: () ->
 
 @Composable
 private fun VoiceChoice(title: String, description: String, selected: Boolean, onSelect: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
     Row(
-        modifier = Modifier.fillMaxWidth()
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
-            .padding(horizontal = 16.dp, vertical = 11.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .springPressScale(interaction, pressedScale = 0.986f)
+            .selectable(
+                selected = selected,
+                interactionSource = interaction,
+                indication = androidx.compose.material3.ripple(),
+                role = Role.RadioButton,
+                onClick = onSelect
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, fontSize = 15.sp)
+            Text(title, fontSize = 15.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (selected) {
@@ -4475,18 +4496,26 @@ private fun MinimalCheckRow(
     selected: Boolean,
     onClick: () -> Unit
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .springPressScale(interaction, pressedScale = 0.988f)
+            .selectable(
+                selected = selected,
+                interactionSource = interaction,
+                indication = androidx.compose.material3.ripple(),
+                role = Role.RadioButton,
+                onClick = onClick
+            )
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = title,
             fontSize = 15.sp,
-            fontWeight = FontWeight.Normal,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
@@ -4522,11 +4551,13 @@ private fun MinimalActionRow(
     textColor: Color,
     onClick: () -> Unit
 ) {
+    val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
-            .clickable(onClick = onClick)
+            .height(48.dp)
+            .springPressScale(interaction, pressedScale = 0.986f)
+            .clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), onClick = onClick)
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {

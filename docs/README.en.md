@@ -10,28 +10,28 @@
 
 </div>
 
-Tapwing 2.2.0 is available through a closed Google Play test. The installation link requires tester access. Tapwing supports Android 10 and later.
+Tapwing 2.6.0 supports Android 10 and later and focuses on ultra-fast private on-device dictation alongside a streamlined, Gboard-familiar Material 3 Expressive interface.
 
 ## What you can do
 
 | Feature | What it does |
 | --- | --- |
 | **Typing and suggestions** | Switch languages and layouts, swipe to type, insert a suggested word and see likely continuations. Tapwing learns locally and can adapt suggestions by app. |
-| **Dictation** | Use Android speech recognition or Whisper on your device. Android offline shows words as you speak when a supported language pack is installed. Whisper can process completed phrases during clear pauses. |
+| **Dictation** | Dictate privately on-device with **Sherpa-ONNX** (FastConformer German, Kroko live word-by-word streaming, Parakeet TDT v3 Ultra for 25 EU languages, Canary 180M Flash) or **Whisper**, backed by automatic quiet-mic gain normalization, pre-warming on keyboard open, and Rambler-style cleanup of fillers, stutters, self-corrections, and voice commands. Standard Android speech recognition and optional cloud APIs remain supported. |
 | **Writing tools** | Proofread, shorten or rephrase text with built-in rules, a downloadable local language model or an optional cloud provider with your own key. |
 | **Clipboard and text scanning** | Paste from the suggestion bar, pin clips, set retention and scan text from the camera or a single selected photo. Copied verification codes can appear briefly as a one-tap suggestion. |
 | **Dictionary and snippets** | Download offline dictionaries, import and export your own words and use snippets such as `/date` or your own abbreviations. |
-| **Layout and shortcuts** | Customize themes, keyboard height and the quick bar. Use one-handed or split layouts, text selection controls, inline math and typing statistics. Android inline autofill is supported on Android 11 and later. |
+| **Layout and shortcuts** | Minimalist Gboard-aligned settings with fluid spring transitions, theme customization, keyboard height, quick bar, one-handed or split layouts, text selection controls, inline math and typing statistics. Android inline autofill is supported on Android 11 and later. |
 
 ## Get started
 
 1. Install Tapwing through the [closed Google Play test](https://play.google.com/apps/testing/com.tapwing.keyboard) or build it locally.
 2. Open Tapwing, enable it in Android keyboard settings and select it as the input method.
-3. Try the text field in Tapwing. To dictate, select a method in **Dictation** and install the appropriate Android language pack or Whisper model if needed.
+3. Try the text field in Tapwing. To dictate offline at maximum speed, open **Dictation** and download the recommended Sherpa-ONNX model for your language.
 
 ## Data and privacy
 
-Typing, learning, clipboard history and text recognition are processed on the device. Incognito mode pauses learning and clipboard history. Android offline and Whisper process audio locally. Android's standard speech service may use the internet depending on the device.
+Typing, learning, clipboard history and text recognition are processed on the device. Incognito mode pauses learning and clipboard history. Sherpa-ONNX, Whisper and Android offline process audio locally. Android's standard speech service may use the internet depending on the device.
 
 Optional Gemini Live sends audio as you speak. The separate cloud dictation mode sends the recording after you stop. Cloud writing or transcript cleanup can send the text being processed to your configured provider. Tapwing has no ads or analytics SDKs. See the [privacy policy](../PRIVACY_POLICY.md) for permissions, storage and deletion.
 

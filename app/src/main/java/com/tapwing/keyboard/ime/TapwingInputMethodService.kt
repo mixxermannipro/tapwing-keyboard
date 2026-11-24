@@ -671,6 +671,11 @@ class TapwingInputMethodService :
         if (currentPrefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST) {
             voiceController.prepareOfflineSpeech(currentPrefs.activeLocale)
         }
+        if (currentPrefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST ||
+            currentPrefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER
+        ) {
+            voiceController.warmInstalledLocalModel(currentPrefs.activeLocale, currentPrefs.selectedWhisperModelId)
+        }
 
         currentEditorInfo = info
         currentTargetPackage = info?.packageName.orEmpty()
@@ -982,20 +987,7 @@ class TapwingInputMethodService :
                 pendingSmartUndoPair = null
                 pendingSuggestionSpace = null
                 learnCompletedTrailingWord()
-                if (resolvedImeAction.insertNewlineDirectly) {
-                    ic.commitText("\n", 1)
-                } else {
-                    val performed = (resolvedImeAction.editorActionId != EditorInfo.IME_ACTION_UNSPECIFIED &&
-                        ic.performEditorAction(resolvedImeAction.editorActionId)) ||
-                        sendDefaultEditorAction(true)
-                    if (!performed) {
-                        if (resolvedImeAction.sendEnterKeyFallback) {
-                            sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
-                        } else {
-                            ic.commitText("\n", 1)
-                        }
-                    }
-                }
+                performEditorEnterAction(ic)
                 refreshContextAndSuggestions()
             }
             KeyActionType.SPACE -> handleSpaceKey()
@@ -1025,6 +1017,23 @@ class TapwingInputMethodService :
                     shiftState = ShiftState.OFF
                 }
                 refreshContextAndSuggestions()
+            }
+        }
+    }
+
+    private fun performEditorEnterAction(ic: android.view.inputmethod.InputConnection) {
+        if (resolvedImeAction.insertNewlineDirectly) {
+            ic.commitText("\n", 1)
+        } else {
+            val performed = (resolvedImeAction.editorActionId != EditorInfo.IME_ACTION_UNSPECIFIED &&
+                ic.performEditorAction(resolvedImeAction.editorActionId)) ||
+                sendDefaultEditorAction(true)
+            if (!performed) {
+                if (resolvedImeAction.sendEnterKeyFallback) {
+                    sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
+                } else {
+                    ic.commitText("\n", 1)
+                }
             }
         }
     }
@@ -1633,6 +1642,11 @@ class TapwingInputMethodService :
             VoiceCommandResult.DeleteLastSentence -> deletePreviousSentence(de)
             VoiceCommandResult.ClearAll -> clearWholeFieldWithUndo(de)
             VoiceCommandResult.UndoLast -> { performUndo() }
+            VoiceCommandResult.SendAction -> {
+                val ic = currentInputConnection ?: return
+                performEditorEnterAction(ic)
+                refreshContextAndSuggestions()
+            }
             is VoiceCommandResult.RewriteAction -> {
                 val target = currentInputConnection?.readWritingTarget() ?: return
                 val fieldText = target.text

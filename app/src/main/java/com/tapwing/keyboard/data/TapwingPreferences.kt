@@ -131,7 +131,7 @@ data class TapwingPrefs(
 
     val voiceMode: VoiceDictationMode = VoiceDictationMode.NATURAL_CLEANUP,
     val voiceEngine: VoiceEngineMode = VoiceEngineMode.AUTO_LOCAL_FIRST,
-    val selectedWhisperModelId: String = "whisper-small-q5_1",
+    val selectedWhisperModelId: String = "sherpa-fastconformer-de-pc-int8",
     val voiceCleanupPrompt: String = "",
     val voiceCleanupUseSystemLanguage: Boolean = true,
     val voiceRemoveFillers: Boolean = true,
@@ -345,7 +345,7 @@ class TapwingPreferencesRepository(context: Context) {
 
             voiceMode = parseEnum(p[Keys.VOICE_MODE], VoiceDictationMode.NATURAL_CLEANUP),
             voiceEngine = parseEnum(p[Keys.VOICE_ENGINE], VoiceEngineMode.AUTO_LOCAL_FIRST),
-            selectedWhisperModelId = p[Keys.SELECTED_WHISPER_MODEL_ID] ?: "whisper-small-q5_1",
+            selectedWhisperModelId = p[Keys.SELECTED_WHISPER_MODEL_ID] ?: "sherpa-fastconformer-de-pc-int8",
             voiceCleanupPrompt = p[Keys.VOICE_CLEANUP_PROMPT] ?: "",
             voiceCleanupUseSystemLanguage = p[Keys.VOICE_CLEANUP_USE_SYSTEM_LANG] ?: true,
             voiceRemoveFillers = p[Keys.VOICE_REMOVE_FILLERS] ?: true,

@@ -29,9 +29,16 @@ class KeyboardLocalesTest {
     }
 
     @Test
-    fun modelCatalogHasRecommendedWhisperModelsWithHttpsUrlsAndNoLlms() {
+    fun modelCatalogHasRecommendedSpeechAndWhisperModelsWithHttpsUrls() {
         assertTrue(LocalModelCatalog.recommendedWhisper().downloadUrl.startsWith("https://"))
+        assertTrue(LocalModelCatalog.recommendedSherpa().downloadUrl.startsWith("https://"))
+        assertTrue(LocalModelCatalog.sherpaModels.size >= 4)
         assertTrue(LocalModelCatalog.whisperModels.size >= 3)
-        assertTrue(LocalModelCatalog.allModels.all { it.kind == LocalModelKind.WHISPER_STT })
+        assertTrue(LocalModelCatalog.allModels.all { it.kind.isSpeechModel && it.downloadUrl.startsWith("https://") })
+        assertEquals("sherpa-fastconformer-de-pc-int8", LocalModelCatalog.recommendedForLocale("de-DE").id)
+        assertEquals("sherpa-canary-180m-flash-int8", LocalModelCatalog.recommendedForLocale("en-US").id)
+        assertEquals("sherpa-canary-180m-flash-int8", LocalModelCatalog.recommendedForLocale("fr-FR").id)
+        assertEquals("sherpa-parakeet-ultra-0.6b-int8", LocalModelCatalog.recommendedForLocale("pl-PL").id)
+        assertEquals("whisper-base-q5_1", LocalModelCatalog.recommendedForLocale("zh-CN").id)
     }
 }

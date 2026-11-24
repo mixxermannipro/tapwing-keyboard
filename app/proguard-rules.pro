@@ -14,6 +14,11 @@
 -keepclassmembers class com.llamatik.library.platform.GenStream { *; }
 -dontwarn com.llamatik.library.**
 
+# Keep Sherpa-ONNX JNI & Kotlin config classes
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+-dontwarn com.k2fsa.sherpa.onnx.**
+-dontwarn org.apache.commons.compress.**
+
 # Keep DataStore & Kotlin coroutines metadata
 -keepclassmembers class * {
     @androidx.annotation.Keep <methods>;
