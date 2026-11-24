@@ -59,8 +59,33 @@ object SuggestionEngine {
                 .map { SuggestionChip(it, replaceCharCount = domain.length, appendSpace = false) }
         }
         if (isUrlField) {
-            if (textBeforeCursor.isBlank()) return listOf("https://", "www.").map { SuggestionChip(it, appendSpace = false) }
-            return emptyList()
+            if (textBeforeCursor.isBlank()) {
+                return listOf("https://", "www.").map { SuggestionChip(it, appendSpace = false) }
+            }
+            if (trailingToken.isEmpty() || textBeforeCursor.last().isWhitespace()) return emptyList()
+            val tlds = if (baseLocale == "de") listOf(".de", ".com", ".org") else listOf(".com", ".org", ".net")
+            val hostPart = trailingToken.substringAfter("://").substringBefore('/')
+            val hasSlashAfterHost = trailingToken.substringAfter("://").contains('/')
+            return when {
+                hasSlashAfterHost -> emptyList()
+                hostPart.endsWith(".") -> tlds.map { tld ->
+                    SuggestionChip(tld.removePrefix("."), replaceCharCount = 0, appendSpace = false)
+                }
+                '.' !in hostPart && hostPart.length >= 2 -> tlds.map { tld ->
+                    SuggestionChip(tld, replaceCharCount = 0, appendSpace = false)
+                }
+                else -> {
+                    val afterDot = "." + hostPart.substringAfterLast('.')
+                    val matchingTlds = tlds.filter { it.startsWith(afterDot, ignoreCase = true) && !it.equals(afterDot, ignoreCase = true) }
+                    if (matchingTlds.isNotEmpty()) {
+                        matchingTlds.map { tld ->
+                            SuggestionChip(tld, replaceCharCount = afterDot.length, appendSpace = false)
+                        }
+                    } else {
+                        listOf(SuggestionChip("/", replaceCharCount = 0, appendSpace = false))
+                    }
+                }
+            }
         }
         if (trailingToken.isNotEmpty() && dictionaryStore != null) {
             val snippet = dictionaryStore.lookupSnippet(trailingToken)
@@ -354,17 +379,34 @@ object SuggestionEngine {
         return results.take(3)
     }
 
+    private val englishSentenceCues = setOf(
+        "and", "but", "because", "when", "that", "think", "thought", "hope", "know",
+        "said", "told", "asked", "wish", "believe", "mean", "guess", "yes", "well",
+        "actually", "really", "sure", "maybe", "today", "tomorrow", "yesterday", "what", "why", "how"
+    )
+
     fun autoCorrectionFor(
         word: String,
         locale: String,
         dictionaryStore: AdaptiveDictionaryStore? = null,
         atSentenceStart: Boolean = false,
         secondaryLocales: List<String> = emptyList(),
-        offlinePack: LoadedDictionaryPack? = null
+        offlinePack: LoadedDictionaryPack? = null,
+        previousWord: String? = null,
+        previousTwoWord: String? = null,
+        appPackage: String? = null
     ): String? {
         val baseLocale = KeyboardLocales.baseLang(locale)
-        // Standalone English pronoun "i" -> "I"
-        if (word == "i" && baseLocale == "en") return "I"
+        val hasEnglishSecondary = secondaryLocales.any { KeyboardLocales.baseLang(it) == "en" }
+        val prevLower = previousWord?.trim()?.lowercase().orEmpty()
+        val prev2Lower = previousTwoWord?.trim()?.lowercase().orEmpty()
+
+        // Standalone English pronoun "i" -> "I" (active EN or bilingual EN sentence context)
+        if (word == "i" && (baseLocale == "en" ||
+                (hasEnglishSecondary && (prevLower in englishSentenceCues || prev2Lower in englishSentenceCues)))
+        ) {
+            return "I"
+        }
         if (word.length < 2) return null
         if (dictionaryStore?.isKnownWord(word) == true) {
             // Even if known, NEVER auto-capitalize mid-sentence function words
@@ -398,6 +440,19 @@ object SuggestionEngine {
             return word.replaceFirstChar { it.uppercaseChar() }
         }
 
+        // German article-triggered noun capitalization (e.g., "der haus" / "mein weg" for known vocab nouns)
+        val primaryVocab = LanguageVocabularies.vocabularyFor(locale)
+        if (baseLocale == "de" &&
+            prevLower in LanguageVocabularies.germanNounPrecursors &&
+            word.first().isLowerCase() &&
+            !LanguageVocabularies.isNeverAutoCapitalizeMidSentence(lower, locale)
+        ) {
+            val capitalNoun = primaryVocab.firstOrNull {
+                it.firstOrNull()?.isUpperCase() == true && it.equals(word, ignoreCase = true)
+            }
+            if (capitalNoun != null) return capitalNoun
+        }
+
         // Check secondary languages for clear typos (e.g., typing English "teh" while on DE keyboard)
         for (sec in secondaryLocales) {
             if (KeyboardLocales.baseLang(sec) == baseLocale) continue
@@ -408,11 +463,23 @@ object SuggestionEngine {
         }
 
         // If the word is already valid in stock vocab or downloaded 50k pack, don't force fuzzy change
-        val primaryVocab = LanguageVocabularies.vocabularyFor(locale)
         if (primaryVocab.any { it.equals(word, ignoreCase = true) } ||
             offlinePack?.contains(word) == true
         ) {
             return null
+        }
+
+        // Build lightweight next-word context set for context-aware disambiguation
+        val contextNext = HashSet<String>(12)
+        if (prevLower.isNotEmpty()) {
+            dictionaryStore?.predictNextWords(
+                previousWord = prevLower,
+                limit = 8,
+                previousTwoWord = prev2Lower.takeIf { it.isNotEmpty() },
+                appPackage = appPackage
+            )?.forEach { contextNext += it.lowercase() }
+            LanguageVocabularies.commonNextWords(locale, prevLower, prev2Lower)
+                .forEach { contextNext += it.lowercase() }
         }
 
         // Check high-confidence keyboard-proximity / transposition typo in user's learned words (>= 3 uses)
@@ -420,7 +487,11 @@ object SuggestionEngine {
             val learnedMatch = dictionaryStore.allKnownVocabularyWords()
                 .asSequence()
                 .filter { kotlin.math.abs(it.length - word.length) <= 1 && dictionaryStore.wordScore(it) >= 15 }
-                .map { it to weightedKeyboardDistance(lower, it.lowercase(), locale, maxDistance = 0.85) }
+                .map { cand ->
+                    val rawDist = weightedKeyboardDistance(lower, cand.lowercase(), locale, maxDistance = 0.85)
+                    val ctxDiscount = if (cand.lowercase() in contextNext) 0.18 else 0.0
+                    cand to (rawDist - ctxDiscount).coerceAtLeast(0.01)
+                }
                 .filter { (_, dist) -> dist > 0.0 && dist <= 0.85 }
                 .minWithOrNull(compareBy<Pair<String, Double>> { it.second }.thenByDescending { dictionaryStore.wordScore(it.first) })
                 ?.first
@@ -429,26 +500,31 @@ object SuggestionEngine {
             }
         }
 
-        // Safe high-confidence proximity/transposition autocorrect against primary vocabulary
-        // (e.g. "huete" -> "heute", "hsllo" -> "hallo", "raelly" -> "really").
-        // Requires a single unambiguous winner (distance <= 0.68 and clear margin over runner-up).
-        if (word.length >= 4) {
+        // Safe context-aware proximity/transposition autocorrect against primary vocabulary
+        // (e.g. "huete" -> "heute", "hsllo" -> "hallo", "ich bkn" -> "bin").
+        if (word.length >= 3) {
             var bestWord: String? = null
-            var bestDist = 99.0
-            var secondDist = 99.0
+            var bestScore = 99.0
+            var secondScore = 99.0
+            val maxAllowed = if (word.length == 3) 0.50 else 0.68
             for (cand in primaryVocab) {
                 if (kotlin.math.abs(cand.length - word.length) > 1) continue
-                val dist = weightedKeyboardDistance(lower, cand.lowercase(), locale, maxDistance = 0.95)
-                if (dist <= 0.0 || dist >= 0.95) continue
-                if (dist < bestDist) {
-                    secondDist = bestDist
-                    bestDist = dist
+                val cl = cand.lowercase()
+                // For 3-letter words, only autocorrect when the target is strongly supported by sentence context
+                val inContext = cl in contextNext
+                if (word.length == 3 && !inContext) continue
+                val rawDist = weightedKeyboardDistance(lower, cl, locale, maxDistance = 0.95)
+                if (rawDist <= 0.0 || rawDist >= 0.95) continue
+                val effectiveScore = (rawDist - if (inContext) 0.22 else 0.0).coerceAtLeast(0.01)
+                if (effectiveScore < bestScore) {
+                    secondScore = bestScore
+                    bestScore = effectiveScore
                     bestWord = cand
-                } else if (dist < secondDist) {
-                    secondDist = dist
+                } else if (effectiveScore < secondScore) {
+                    secondScore = effectiveScore
                 }
             }
-            if (bestWord != null && bestDist <= 0.68 && (secondDist - bestDist) >= 0.20) {
+            if (bestWord != null && bestScore <= maxAllowed && (secondScore - bestScore) >= 0.18) {
                 return adjustCandidateCase(word, bestWord, locale, atSentenceStart, dictionaryStore)
             }
         }

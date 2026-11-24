@@ -150,6 +150,70 @@ object NaturalVoiceCleaner {
         )
     }
 
+    private val wordTokenRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
+    private val nonWhitespaceRegex = Regex("""\S+""")
+    private val multiSpacesRegex = Regex("""[ \t]+""")
+    private val spaceBeforePunctRegex = Regex(""" *([.,!?:;])""")
+    private val spacesAroundNewlineRegex = Regex(""" *\n+ *""")
+
+    private val spokenPunctByLang: Map<String, List<Pair<Regex, String>>> = mapOf(
+        "de" to listOf(
+            Regex("""\bneuer absatz\b""", RegexOption.IGNORE_CASE) to "\n\n",
+            Regex("""\bneue zeile\b""", RegexOption.IGNORE_CASE) to "\n",
+            Regex("""\b(?:stichpunkt|aufzählungspunkt)\b\s*""", RegexOption.IGNORE_CASE) to "\n• ",
+            Regex("""\bfragezeichen\b""", RegexOption.IGNORE_CASE) to "?",
+            Regex("""\bausrufezeichen\b""", RegexOption.IGNORE_CASE) to "!",
+            Regex("""\bdoppelpunkt\b""", RegexOption.IGNORE_CASE) to ":",
+            Regex("""\bsemikolon\b""", RegexOption.IGNORE_CASE) to ";",
+            Regex("""\bkomma\b""", RegexOption.IGNORE_CASE) to ",",
+            Regex("""\bpunkt\b""", RegexOption.IGNORE_CASE) to ".",
+            Regex("""\bgedankenstrich\b""", RegexOption.IGNORE_CASE) to " – ",
+            Regex("""\bschrägstrich\b""", RegexOption.IGNORE_CASE) to "/",
+            Regex("""\bklammer auf\b""", RegexOption.IGNORE_CASE) to "(",
+            Regex("""\bklammer zu\b""", RegexOption.IGNORE_CASE) to ")",
+            Regex("""\blächelndes emoji\b""", RegexOption.IGNORE_CASE) to "😊",
+            Regex("""\blachendes emoji\b""", RegexOption.IGNORE_CASE) to "😂",
+            Regex("""\bherz emoji\b""", RegexOption.IGNORE_CASE) to "❤️",
+            Regex("""\bfeuer emoji\b""", RegexOption.IGNORE_CASE) to "🔥",
+            Regex("""\bdaumen hoch emoji\b""", RegexOption.IGNORE_CASE) to "👍"
+        ),
+        "fr" to listOf(
+            Regex("""\bnouveau paragraphe\b""", RegexOption.IGNORE_CASE) to "\n\n",
+            Regex("""\bnouvelle ligne\b""", RegexOption.IGNORE_CASE) to "\n",
+            Regex("""\bpoint d'interrogation\b""", RegexOption.IGNORE_CASE) to "?",
+            Regex("""\bpoint d'exclamation\b""", RegexOption.IGNORE_CASE) to "!",
+            Regex("""\bvirgule\b""", RegexOption.IGNORE_CASE) to ",",
+            Regex("""\bpoint\b""", RegexOption.IGNORE_CASE) to "."
+        ),
+        "es" to listOf(
+            Regex("""\bnuevo párrafo\b""", RegexOption.IGNORE_CASE) to "\n\n",
+            Regex("""\bnueva línea\b""", RegexOption.IGNORE_CASE) to "\n",
+            Regex("""\bcoma\b""", RegexOption.IGNORE_CASE) to ",",
+            Regex("""\bpunto\b""", RegexOption.IGNORE_CASE) to "."
+        ),
+        "en" to listOf(
+            Regex("""\bnew paragraph\b""", RegexOption.IGNORE_CASE) to "\n\n",
+            Regex("""\bnew line\b""", RegexOption.IGNORE_CASE) to "\n",
+            Regex("""\bbullet point\b\s*""", RegexOption.IGNORE_CASE) to "\n• ",
+            Regex("""\bquestion mark\b""", RegexOption.IGNORE_CASE) to "?",
+            Regex("""\bexclamation mark\b""", RegexOption.IGNORE_CASE) to "!",
+            Regex("""\bexclamation point\b""", RegexOption.IGNORE_CASE) to "!",
+            Regex("""\bcolon\b""", RegexOption.IGNORE_CASE) to ":",
+            Regex("""\bsemicolon\b""", RegexOption.IGNORE_CASE) to ";",
+            Regex("""\bcomma\b""", RegexOption.IGNORE_CASE) to ",",
+            Regex("""\bperiod\b""", RegexOption.IGNORE_CASE) to ".",
+            Regex("""\bdash\b""", RegexOption.IGNORE_CASE) to " – ",
+            Regex("""\bslash\b""", RegexOption.IGNORE_CASE) to "/",
+            Regex("""\bopen parenthesis\b""", RegexOption.IGNORE_CASE) to "(",
+            Regex("""\bclose parenthesis\b""", RegexOption.IGNORE_CASE) to ")",
+            Regex("""\bsmiling emoji\b""", RegexOption.IGNORE_CASE) to "😊",
+            Regex("""\blaughing emoji\b""", RegexOption.IGNORE_CASE) to "😂",
+            Regex("""\bheart emoji\b""", RegexOption.IGNORE_CASE) to "❤️",
+            Regex("""\bfire emoji\b""", RegexOption.IGNORE_CASE) to "🔥",
+            Regex("""\bthumbs up emoji\b""", RegexOption.IGNORE_CASE) to "👍"
+        )
+    )
+
     fun clean(
         rawTranscript: String,
         locale: String,
@@ -171,8 +235,7 @@ object NaturalVoiceCleaner {
         text = normalizeWhitespaceAndPunctuation(text)
 
         if (dictionaryStore != null && text.isNotEmpty()) {
-            val wordRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
-            text = wordRegex.replace(text) { match ->
+            text = wordTokenRegex.replace(text) { match ->
                 dictionaryStore.canonicalMidSentenceCasingFor(match.value, locale) ?: match.value
             }
         }
@@ -204,7 +267,7 @@ object NaturalVoiceCleaner {
 
     private fun stripFillers(input: String, baseLang: String): String {
         val fillers = fillersByLang[baseLang].orEmpty()
-        val withoutFillers = Regex("""\S+""").replace(input) { match ->
+        val withoutFillers = nonWhitespaceRegex.replace(input) { match ->
             if (match.value.lowercase().trim(',', '.', '!', '?', '…') in fillers) "" else match.value
         }
         return consecutiveDuplicateWord.replace(withoutFillers) { match ->
@@ -215,54 +278,7 @@ object NaturalVoiceCleaner {
 
     private fun replaceSpokenPunctuation(input: String, baseLang: String): String {
         var text = input
-        val replacements = when (baseLang) {
-            "de" -> listOf(
-                Regex("""\bneuer absatz\b""", RegexOption.IGNORE_CASE) to "\n\n",
-                Regex("""\bneue zeile\b""", RegexOption.IGNORE_CASE) to "\n",
-                Regex("""\b(?:stichpunkt|aufzählungspunkt)\b\s*""", RegexOption.IGNORE_CASE) to "\n• ",
-                Regex("""\bfragezeichen\b""", RegexOption.IGNORE_CASE) to "?",
-                Regex("""\bausrufezeichen\b""", RegexOption.IGNORE_CASE) to "!",
-                Regex("""\bdoppelpunkt\b""", RegexOption.IGNORE_CASE) to ":",
-                Regex("""\bsemikolon\b""", RegexOption.IGNORE_CASE) to ";",
-                Regex("""\bkomma\b""", RegexOption.IGNORE_CASE) to ",",
-                Regex("""\bpunkt\b""", RegexOption.IGNORE_CASE) to ".",
-                Regex("""\bgedankenstrich\b""", RegexOption.IGNORE_CASE) to " – ",
-                Regex("""\bschrägstrich\b""", RegexOption.IGNORE_CASE) to "/",
-                Regex("""\blächelndes emoji\b""", RegexOption.IGNORE_CASE) to "😊",
-                Regex("""\bdaumen hoch emoji\b""", RegexOption.IGNORE_CASE) to "👍"
-            )
-            "fr" -> listOf(
-                Regex("""\bnouveau paragraphe\b""", RegexOption.IGNORE_CASE) to "\n\n",
-                Regex("""\bnouvelle ligne\b""", RegexOption.IGNORE_CASE) to "\n",
-                Regex("""\bpoint d'interrogation\b""", RegexOption.IGNORE_CASE) to "?",
-                Regex("""\bpoint d'exclamation\b""", RegexOption.IGNORE_CASE) to "!",
-                Regex("""\bvirgule\b""", RegexOption.IGNORE_CASE) to ",",
-                Regex("""\bpoint\b""", RegexOption.IGNORE_CASE) to "."
-            )
-            "es" -> listOf(
-                Regex("""\bnuevo párrafo\b""", RegexOption.IGNORE_CASE) to "\n\n",
-                Regex("""\bnueva línea\b""", RegexOption.IGNORE_CASE) to "\n",
-                Regex("""\bcoma\b""", RegexOption.IGNORE_CASE) to ",",
-                Regex("""\bpunto\b""", RegexOption.IGNORE_CASE) to "."
-            )
-            else -> listOf(
-                Regex("""\bnew paragraph\b""", RegexOption.IGNORE_CASE) to "\n\n",
-                Regex("""\bnew line\b""", RegexOption.IGNORE_CASE) to "\n",
-                Regex("""\bbullet point\b\s*""", RegexOption.IGNORE_CASE) to "\n• ",
-                Regex("""\bquestion mark\b""", RegexOption.IGNORE_CASE) to "?",
-                Regex("""\bexclamation mark\b""", RegexOption.IGNORE_CASE) to "!",
-                Regex("""\bexclamation point\b""", RegexOption.IGNORE_CASE) to "!",
-                Regex("""\bcolon\b""", RegexOption.IGNORE_CASE) to ":",
-                Regex("""\bsemicolon\b""", RegexOption.IGNORE_CASE) to ";",
-                Regex("""\bcomma\b""", RegexOption.IGNORE_CASE) to ",",
-                Regex("""\bperiod\b""", RegexOption.IGNORE_CASE) to ".",
-                Regex("""\bdash\b""", RegexOption.IGNORE_CASE) to " – ",
-                Regex("""\bslash\b""", RegexOption.IGNORE_CASE) to "/",
-                Regex("""\bsmiling emoji\b""", RegexOption.IGNORE_CASE) to "😊",
-                Regex("""\bthumbs up emoji\b""", RegexOption.IGNORE_CASE) to "👍"
-            )
-        }
-
+        val replacements = spokenPunctByLang[baseLang] ?: spokenPunctByLang["en"].orEmpty()
         for ((pattern, symbol) in replacements) {
             text = text.replace(pattern, symbol)
         }
@@ -271,9 +287,9 @@ object NaturalVoiceCleaner {
 
     private fun normalizeWhitespaceAndPunctuation(input: String): String {
         return input
-            .replace(Regex("""[ \t]+"""), " ")
-            .replace(Regex(""" *([.,!?:;])"""), "$1")
-            .replace(Regex(""" *\n+ *""")) { match ->
+            .replace(multiSpacesRegex, " ")
+            .replace(spaceBeforePunctRegex, "$1")
+            .replace(spacesAroundNewlineRegex) { match ->
                 if (match.value.contains("\n\n")) "\n\n" else "\n"
             }
             .trim()

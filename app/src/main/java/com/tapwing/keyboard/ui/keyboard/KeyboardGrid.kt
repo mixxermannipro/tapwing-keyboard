@@ -106,6 +106,7 @@ fun KeyboardGrid(
     onSwipeWord: (List<SwipePoint>, List<KeyCenter>) -> Unit = { _, _ -> },
     onCursorMove: (Int, Int) -> Unit,
     onDeletePreviousWord: () -> Unit,
+    onSwipeBackspaceEnd: () -> Unit = {},
     onSwitchLanguage: () -> Unit,
     onToggleOneHandedSide: () -> Unit = {},
     onExitOneHanded: () -> Unit = {}
@@ -130,10 +131,11 @@ fun KeyboardGrid(
     var lastAltPopup by remember { mutableStateOf<AlternatePopup?>(null) }
     var activePreview by remember { mutableStateOf<KeyPreviewBubble?>(null) }
     var trackpadModeActive by remember { mutableStateOf(false) }
-    var gridLeftRoot by remember { mutableFloatStateOf(0f) }
-    var gridTopRoot by remember { mutableFloatStateOf(0f) }
-    var gridWidthPx by remember { mutableFloatStateOf(0f) }
-    val keyCenterMap = remember { mutableStateMapOf<String, KeyCenter>() }
+    var trackpadLastDir by remember { mutableStateOf(0 to 0) }
+    var isSwipingActive by remember { mutableStateOf(false) }
+    // Non-snapshot geometry holders so onGloballyPositioned NEVER triggers cascading recompositions
+    val gridGeometry = remember { GridGeometry() }
+    val keyCenterMap = remember { HashMap<String, KeyCenter>(36) }
     val swipeTrail = remember { mutableStateListOf<SwipePoint>() }
 
     val view = LocalView.current
@@ -165,19 +167,26 @@ fun KeyboardGrid(
         altPopup = null
         lastAltPopup = null
         trackpadModeActive = false
+        trackpadLastDir = 0 to 0
+        isSwipingActive = false
         swipeTrail.clear()
         keyCenterMap.clear()
     }
 
+    val isNumpadPage = layoutPage == KeyboardLayoutPage.NUMPAD || layoutPage == KeyboardLayoutPage.PHONE_PAD
     // Continuous dynamic height scaling (75%..135%) applied smoothly on top of keyboardHeight preset
-    val baseDp = if (prefs.showNumberRow) 46f else prefs.keyboardHeight.rowHeightDp.toFloat()
+    val baseDp = when {
+        isNumpadPage -> 54f
+        prefs.showNumberRow -> 46f
+        else -> prefs.keyboardHeight.rowHeightDp.toFloat()
+    }
     val scaleFactor = (prefs.keyboardScalePercent / 100f) * (prefs.keyboardHeight.rowHeightDp / 48f)
-    val rowHeight = (baseDp * scaleFactor).coerceIn(33f, 70f).dp
-    val rowGap = if (prefs.showNumberRow) 6.dp else 8.dp
+    val rowHeight = (baseDp * scaleFactor).coerceIn(33f, 74f).dp
+    val rowGap = if (prefs.showNumberRow && !isNumpadPage) 6.dp else 8.dp
     val halfRowGap = rowGap / 2
 
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    val isSplitActive = prefs.oneHandedMode == OneHandedMode.OFF && when (prefs.splitKeyboardMode) {
+    val isSplitActive = !isNumpadPage && prefs.oneHandedMode == OneHandedMode.OFF && when (prefs.splitKeyboardMode) {
         SplitKeyboardMode.OFF -> false
         SplitKeyboardMode.ALWAYS -> true
         SplitKeyboardMode.AUTO -> screenWidthDp >= 600
@@ -200,9 +209,9 @@ fun KeyboardGrid(
                 .weight(1f)
                 .onGloballyPositioned {
                     val pos = it.positionInRoot()
-                    gridLeftRoot = pos.x
-                    gridTopRoot = pos.y
-                    gridWidthPx = it.size.width.toFloat()
+                    gridGeometry.leftRoot = pos.x
+                    gridGeometry.topRoot = pos.y
+                    gridGeometry.widthPx = it.size.width.toFloat()
                 }
         ) {
             Column(
@@ -212,7 +221,7 @@ fun KeyboardGrid(
                     .padding(horizontal = 2.5.dp, vertical = 1.dp)
             ) {
                 rows.forEachIndexed { rowIndex, row ->
-                    val isIndentedAlphaRow = !isSplitActive && row.size == 9 && row.first().type == KeyActionType.CHAR
+                    val isIndentedAlphaRow = !isSplitActive && !isNumpadPage && row.size == 9 && row.first().type == KeyActionType.CHAR
                     val renderRowKeys = remember(row, isSplitActive) {
                         if (isSplitActive) splitKeyboardRow(row) else listOf(row)
                     }
@@ -256,17 +265,18 @@ fun KeyboardGrid(
                                         cursorStepYPx = cursorStepYPx,
                                         cursorSlopPx = cursorSlopPx,
                                         backspaceSwipeWordPx = backspaceSwipeWordPx,
+                                        isNumpadKey = isNumpadPage,
                                         onCenterMeasured = { cx, cy ->
                                             if (isLetterCharKey) {
                                                 keyCenterMap[keySpec.label] = KeyCenter(
                                                     char = keySpec.label[0],
-                                                    x = cx - gridLeftRoot,
-                                                    y = cy - gridTopRoot
+                                                    x = cx - gridGeometry.leftRoot,
+                                                    y = cy - gridGeometry.topRoot
                                                 )
                                             }
                                         },
                                         onPressStateChanged = { isDown, cx, topY ->
-                                            if (isDown && keySpec.type == KeyActionType.CHAR) {
+                                            if (isDown && keySpec.type == KeyActionType.CHAR && !isNumpadPage) {
                                                 activePreview = KeyPreviewBubble(
                                                     keyId = keyIdentity,
                                                     char = applyShiftCase(keySpec.label, currentShiftState),
@@ -296,12 +306,12 @@ fun KeyboardGrid(
                                                     val sorted = keySpec.alternates.sortedBy { alt ->
                                                         if (alt.firstOrNull()?.isLetter() == true) 0 else 1
                                                     }
-                                                    val isRightHalf = centerX > gridLeftRoot + gridWidthPx * 0.55f
+                                                    val isRightHalf = centerX > gridGeometry.leftRoot + gridGeometry.widthPx * 0.55f
                                                     val items = if (isRightHalf) sorted.reversed() else sorted
                                                     val defaultIndex = if (isRightHalf) items.lastIndex else 0
                                                     val total = items.size * itemWidthPx
-                                                    val minLeft = gridLeftRoot + edgePx
-                                                    val maxLeft = (gridLeftRoot + gridWidthPx - total - edgePx).coerceAtLeast(minLeft)
+                                                    val minLeft = gridGeometry.leftRoot + edgePx
+                                                    val maxLeft = (gridGeometry.leftRoot + gridGeometry.widthPx - total - edgePx).coerceAtLeast(minLeft)
                                                     val rawLeft = if (isRightHalf) {
                                                         centerX - total + itemWidthPx / 2f
                                                     } else {
@@ -343,12 +353,13 @@ fun KeyboardGrid(
                                         },
                                         onSwipeStart = { rx, ry ->
                                             activePreview = null
+                                            isSwipingActive = true
                                             swipeTrail.clear()
-                                            swipeTrail.add(SwipePoint(rx - gridLeftRoot, ry - gridTopRoot))
+                                            swipeTrail.add(SwipePoint(rx - gridGeometry.leftRoot, ry - gridGeometry.topRoot))
                                         },
                                         onSwipeMove = { rx, ry ->
-                                            val lx = rx - gridLeftRoot
-                                            val ly = ry - gridTopRoot
+                                            val lx = rx - gridGeometry.leftRoot
+                                            val ly = ry - gridGeometry.topRoot
                                             val last = swipeTrail.lastOrNull()
                                             if (last == null || hypot(lx - last.x, ly - last.y) >= 6f) {
                                                 swipeTrail.add(SwipePoint(lx, ly))
@@ -357,20 +368,29 @@ fun KeyboardGrid(
                                         onSwipeFinish = {
                                             val pts = swipeTrail.toList()
                                             swipeTrail.clear()
+                                            isSwipingActive = false
                                             if (pts.size >= 2) {
                                                 currentOnSwipeWord(pts, keyCenterMap.values.toList())
                                             }
                                         },
-                                        onSwipeCancel = { swipeTrail.clear() },
-                                        onCursorMove = onCursorMove,
+                                        onSwipeCancel = {
+                                            swipeTrail.clear()
+                                            isSwipingActive = false
+                                        },
+                                        onCursorMove = { dx, dy ->
+                                            if (trackpadModeActive) trackpadLastDir = dx to dy
+                                            onCursorMove(dx, dy)
+                                        },
                                         onTrackpadModeChanged = { active ->
                                             trackpadModeActive = active
+                                            if (!active) trackpadLastDir = 0 to 0
                                             if (active) {
                                                 activePreview = null
                                                 altPopup = null
                                             }
                                         },
-                                        onSwipeBackspaceWord = onDeletePreviousWord
+                                        onSwipeBackspaceWord = onDeletePreviousWord,
+                                        onSwipeBackspaceEnd = onSwipeBackspaceEnd
                                     )
                                     }
                                 }
@@ -380,7 +400,7 @@ fun KeyboardGrid(
                 }
             }
 
-            // 2D Spacebar Trackpad overlay badge
+            // 2D Spacebar Trackpad overlay badge with live directional highlight
             androidx.compose.animation.AnimatedVisibility(
                 visible = trackpadModeActive,
                 enter = fadeIn(tween(110)) + scaleIn(initialScale = 0.94f, animationSpec = tween(140)),
@@ -394,36 +414,42 @@ fun KeyboardGrid(
                     shadowElevation = 8.dp
                 ) {
                     val isDe = com.tapwing.keyboard.data.KeyboardLocales.baseLang(prefs.activeLocale) == "de"
-                    Text(
-                        text = if (isDe) "Cursor-Trackpad  ← ↑ ↓ →" else "Cursor Trackpad  ← ↑ ↓ →",
-                        color = kbColors.keyText,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
-                    )
+                    val (dirX, dirY) = trackpadLastDir
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (isDe) "Trackpad" else "Trackpad",
+                            color = kbColors.keyText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        val arrows = listOf(
+                            "←" to (dirX < 0),
+                            "↑" to (dirY < 0),
+                            "↓" to (dirY > 0),
+                            "→" to (dirX > 0)
+                        )
+                        arrows.forEach { (glyph, lit) ->
+                            Text(
+                                text = glyph,
+                                color = if (lit) kbColors.actionSurface else kbColors.keyHintText,
+                                fontSize = if (lit) 15.sp else 13.sp,
+                                fontWeight = if (lit) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
                 }
             }
 
-            // Smooth Glide/Swipe trail overlay
-            if (swipeTrail.size >= 2) {
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    val path = Path().apply {
-                        moveTo(swipeTrail.first().x, swipeTrail.first().y)
-                        for (i in 1 until swipeTrail.size) {
-                            lineTo(swipeTrail[i].x, swipeTrail[i].y)
-                        }
-                    }
-                    drawPath(
-                        path = path,
-                        color = kbColors.actionSurface.copy(alpha = 0.78f),
-                        style = Stroke(
-                            width = 7.dp.toPx(),
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        )
-                    )
-                }
-            }
+            // Isolated smooth Bezier Glide/Swipe trail overlay (never recomposes keys!)
+            SwipeTrailOverlay(
+                swipeTrail = swipeTrail,
+                trailColor = kbColors.actionSurface,
+                modifier = Modifier.matchParentSize()
+            )
 
             // Alternate-character popup
             androidx.compose.animation.AnimatedVisibility(
@@ -432,7 +458,7 @@ fun KeyboardGrid(
                 exit = fadeOut(tween(90)),
                 modifier = Modifier.offset {
                     IntOffset(
-                        ((lastAltPopup?.leftRootPx ?: 0f) - gridLeftRoot).roundToInt(),
+                        ((lastAltPopup?.leftRootPx ?: 0f) - gridGeometry.leftRoot).roundToInt(),
                         -popupRaisePx
                     )
                 }
@@ -475,15 +501,15 @@ fun KeyboardGrid(
             // Per-key positioned floating preview bubble
             val preview = activePreview
             androidx.compose.animation.AnimatedVisibility(
-                visible = preview != null && altPopup == null && swipeTrail.isEmpty() && !trackpadModeActive,
+                visible = preview != null && altPopup == null && !isSwipingActive && !trackpadModeActive,
                 enter = fadeIn(tween(60)) + scaleIn(initialScale = 0.88f, animationSpec = tween(80)),
                 exit = fadeOut(tween(70)),
                 modifier = Modifier.offset {
                     val bubbleHalfPx = 22.dp.toPx()
-                    val x = ((preview?.centerXRoot ?: gridLeftRoot) - gridLeftRoot - bubbleHalfPx)
-                        .coerceIn(0f, (gridWidthPx - bubbleHalfPx * 2f).coerceAtLeast(0f))
+                    val x = ((preview?.centerXRoot ?: gridGeometry.leftRoot) - gridGeometry.leftRoot - bubbleHalfPx)
+                        .coerceIn(0f, (gridGeometry.widthPx - bubbleHalfPx * 2f).coerceAtLeast(0f))
                         .roundToInt()
-                    val y = ((preview?.topYRoot ?: gridTopRoot) - gridTopRoot - 46.dp.toPx()).roundToInt()
+                    val y = ((preview?.topYRoot ?: gridGeometry.topRoot) - gridGeometry.topRoot - 46.dp.toPx()).roundToInt()
                     IntOffset(x, y)
                 }
             ) {
@@ -577,6 +603,54 @@ private val MODIFIER_KEY_TYPES = setOf(
 )
 
 @Composable
+private fun SwipeTrailOverlay(
+    swipeTrail: List<SwipePoint>,
+    trailColor: Color,
+    modifier: Modifier = Modifier
+) {
+    if (swipeTrail.size < 2) return
+    val reusablePath = remember { Path() }
+    Canvas(modifier = modifier) {
+        val count = swipeTrail.size
+        // Draw tapered comet ribbon using quadratic Bezier midpoints for buttery Gboard-grade glide feel
+        val tailStart = (count - 22).coerceAtLeast(0)
+        val visibleCount = count - tailStart
+        if (visibleCount < 2) return@Canvas
+
+        // Soft glow under-stroke
+        reusablePath.reset()
+        reusablePath.moveTo(swipeTrail[tailStart].x, swipeTrail[tailStart].y)
+        for (i in tailStart + 1 until count - 1) {
+            val midX = (swipeTrail[i].x + swipeTrail[i + 1].x) * 0.5f
+            val midY = (swipeTrail[i].y + swipeTrail[i + 1].y) * 0.5f
+            reusablePath.quadraticTo(swipeTrail[i].x, swipeTrail[i].y, midX, midY)
+        }
+        reusablePath.lineTo(swipeTrail[count - 1].x, swipeTrail[count - 1].y)
+        drawPath(
+            path = reusablePath,
+            color = trailColor.copy(alpha = 0.25f),
+            style = Stroke(width = 11.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Tapered segments from thin tail to bold tip
+        val minW = 2.5.dp.toPx()
+        val maxW = 7.5.dp.toPx()
+        for (i in tailStart until count - 1) {
+            val t = (i - tailStart + 1).toFloat() / visibleCount.toFloat()
+            val strokeW = minW + (maxW - minW) * t
+            val alpha = (0.25f + 0.65f * t).coerceIn(0.25f, 0.9f)
+            drawLine(
+                color = trailColor.copy(alpha = alpha),
+                start = Offset(swipeTrail[i].x, swipeTrail[i].y),
+                end = Offset(swipeTrail[i + 1].x, swipeTrail[i + 1].y),
+                strokeWidth = strokeW,
+                cap = StrokeCap.Round
+            )
+        }
+    }
+}
+
+@Composable
 private fun ExpressiveKeyCap(
     modifier: Modifier,
     innerPaddingHorizontal: androidx.compose.ui.unit.Dp,
@@ -593,6 +667,7 @@ private fun ExpressiveKeyCap(
     cursorStepYPx: Float,
     cursorSlopPx: Float,
     backspaceSwipeWordPx: Float,
+    isNumpadKey: Boolean = false,
     onCenterMeasured: (Float, Float) -> Unit,
     onPressStateChanged: (Boolean, Float, Float) -> Unit,
     onKeySound: () -> Unit,
@@ -606,16 +681,14 @@ private fun ExpressiveKeyCap(
     onSwipeCancel: () -> Unit,
     onCursorMove: (Int, Int) -> Unit,
     onTrackpadModeChanged: (Boolean) -> Unit,
-    onSwipeBackspaceWord: () -> Unit
+    onSwipeBackspaceWord: () -> Unit,
+    onSwipeBackspaceEnd: () -> Unit = {}
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val view = LocalView.current
     val scope = gestureScope
     var pressed by remember(keyIdentity) { mutableStateOf(false) }
-    var keyLeftRoot by remember { mutableFloatStateOf(0f) }
-    var keyTopRoot by remember { mutableFloatStateOf(0f) }
-    var keyWidthPx by remember { mutableFloatStateOf(0f) }
-    var keyHeightPx by remember { mutableFloatStateOf(0f) }
+    val bounds = remember(keyIdentity) { KeyBounds() }
 
     // Keep fresh lambdas & state inside rememberUpdatedState so pointerInput NEVER restarts mid-touch!
     val currentKey by rememberUpdatedState(key)
@@ -635,6 +708,7 @@ private fun ExpressiveKeyCap(
     val currentOnCursorMove by rememberUpdatedState(onCursorMove)
     val currentOnTrackpadModeChanged by rememberUpdatedState(onTrackpadModeChanged)
     val currentOnSwipeBackspaceWord by rememberUpdatedState(onSwipeBackspaceWord)
+    val currentOnSwipeBackspaceEnd by rememberUpdatedState(onSwipeBackspaceEnd)
 
     val pressScale by animateFloatAsState(
         targetValue = if (pressed) (if (kbColors.appleLiquidGlass) 0.95f else 0.97f) else 1f,
@@ -649,6 +723,7 @@ private fun ExpressiveKeyCap(
     val isModifierKey = key.type in MODIFIER_KEY_TYPES
 
     val cornerShape: Shape = when {
+        isNumpadKey -> RoundedCornerShape(18.dp)
         kbColors.appleLiquidGlass || prefs.roundedExpressiveKeys -> RoundedCornerShape(percent = 50)
         else -> RoundedCornerShape(5.dp)
     }
@@ -769,6 +844,7 @@ private fun ExpressiveKeyCap(
                 }
                 currentOnKeySound()
                 var triggeredRepeatOrSwipe = false
+                var usedWordSwipe = false
                 var anchorX = down.position.x
                 val holdJob: Job = scope.launch {
                     delay(320L)
@@ -790,8 +866,13 @@ private fun ExpressiveKeyCap(
                             if (dx <= -backspaceSwipeWordPx) {
                                 holdJob.cancel()
                                 triggeredRepeatOrSwipe = true
+                                usedWordSwipe = true
                                 anchorX = change.position.x
+                                if (currentPrefs.hapticFeedback) {
+                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                }
                                 currentOnSwipeBackspaceWord()
+                                change.consume()
                             }
                         }
                     }
@@ -800,6 +881,9 @@ private fun ExpressiveKeyCap(
                     }
                 } finally {
                     holdJob.cancel()
+                    if (usedWordSwipe) {
+                        currentOnSwipeBackspaceEnd()
+                    }
                     pressed = false
                 }
             }
@@ -809,10 +893,10 @@ private fun ExpressiveKeyCap(
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 val pid: PointerId = down.id
-                val startRootX = keyLeftRoot + down.position.x
-                val startRootY = keyTopRoot + down.position.y
+                val startRootX = bounds.leftRoot + down.position.x
+                val startRootY = bounds.topRoot + down.position.y
                 pressed = true
-                currentOnPressChanged(true, keyLeftRoot + keyWidthPx / 2f, keyTopRoot)
+                currentOnPressChanged(true, bounds.leftRoot + bounds.widthPx / 2f, bounds.topRoot)
                 if (currentPrefs.hapticFeedback) {
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                 }
@@ -830,7 +914,7 @@ private fun ExpressiveKeyCap(
                             if (currentPrefs.hapticFeedback) {
                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                             }
-                            currentOnLongPress(keyLeftRoot + keyWidthPx / 2f)
+                            currentOnLongPress(bounds.leftRoot + bounds.widthPx / 2f)
                         }
                     }
                 }
@@ -839,8 +923,8 @@ private fun ExpressiveKeyCap(
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == pid } ?: break
                         if (!change.pressed) break
-                        val curRootX = keyLeftRoot + change.position.x
-                        val curRootY = keyTopRoot + change.position.y
+                        val curRootX = bounds.leftRoot + change.position.x
+                        val curRootY = bounds.topRoot + change.position.y
 
                         if (triggeredLong) {
                             currentOnAltDrag(curRootX)
@@ -897,10 +981,10 @@ private fun ExpressiveKeyCap(
         modifier = modifier
             .onGloballyPositioned {
                 val pos = it.positionInRoot()
-                keyLeftRoot = pos.x
-                keyTopRoot = pos.y
-                keyWidthPx = it.size.width.toFloat()
-                keyHeightPx = it.size.height.toFloat()
+                bounds.leftRoot = pos.x
+                bounds.topRoot = pos.y
+                bounds.widthPx = it.size.width.toFloat()
+                bounds.heightPx = it.size.height.toFloat()
                 onCenterMeasured(pos.x + it.size.width / 2f, pos.y + it.size.height / 2f)
             }
             .then(touchModifier)
@@ -1018,8 +1102,8 @@ private fun ExpressiveKeyCap(
                     else -> Text(
                         text = displayText,
                         color = fgColor,
-                        fontSize = 21.sp,
-                        fontWeight = FontWeight.Normal,
+                        fontSize = if (isNumpadKey) 24.sp else 21.sp,
+                        fontWeight = if (isNumpadKey) FontWeight.Medium else FontWeight.Normal,
                         modifier = Modifier.padding(
                             top = if (key.hint != null && key.type == KeyActionType.CHAR) 7.dp else 0.dp
                         )
@@ -1051,6 +1135,19 @@ private fun applyShiftCase(raw: String, shiftState: ShiftState): String {
     if (shiftState == ShiftState.OFF) return raw
     return if (raw == "ß") "ẞ" else raw.uppercase()
 }
+
+private class GridGeometry(
+    var leftRoot: Float = 0f,
+    var topRoot: Float = 0f,
+    var widthPx: Float = 0f
+)
+
+private class KeyBounds(
+    var leftRoot: Float = 0f,
+    var topRoot: Float = 0f,
+    var widthPx: Float = 0f,
+    var heightPx: Float = 0f
+)
 
 private data class AlternatePopup(
     val items: List<String>,

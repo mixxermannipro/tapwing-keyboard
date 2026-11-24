@@ -25,17 +25,39 @@ object LanguageVocabularies {
         "nie", "oft", "gerne", "gern", "bitte", "danke", "ja", "nein", "okay", "ok"
     )
 
+    val germanNounPrecursors = setOf(
+        "der", "die", "das", "den", "dem", "des",
+        "ein", "eine", "einen", "einem", "einer", "eines",
+        "kein", "keine", "keinen", "keinem", "keiner",
+        "mein", "meine", "meinen", "meinem", "meiner",
+        "dein", "deine", "deinen", "deinem", "deiner",
+        "sein", "seine", "unser", "unsere", "euer", "eure",
+        "im", "am", "zum", "zur", "vom", "beim", "ins", "ans", "aufs"
+    )
+
     val germanCapitalNouns = setOf(
-        "zeit", "tag", "jahr", "woche", "monat", "stunde", "minute", "uhr", "termin",
-        "nachricht", "text", "bild", "foto", "handy", "telefon", "antwort", "frage",
-        "problem", "lösung", "projekt", "arbeit", "büro", "haus", "auto",
-        "freund", "familie", "kollege", "kunde", "meeting", "kaffee", "wasser",
-        "idee", "grund", "beispiel", "dokument", "tastatur", "sprache", "einstellung",
-        "rechnung", "adresse", "name", "nummer", "datum", "montag", "dienstag",
-        "mittwoch", "donnerstag", "freitag", "samstag", "sonntag", "januar", "februar",
-        "märz", "april", "mai", "juni", "juli", "august", "september", "oktober",
-        "november", "dezember", "wochenende", "urlaub", "flug", "zug", "bahnhof",
-        "stadt", "land", "welt", "abend", "nacht", "mittag", "grüße", "danke"
+        "zeit", "tag", "jahr", "woche", "monat", "stunde", "minute", "sekunde", "uhr", "termin",
+        "nachricht", "text", "bild", "foto", "video", "handy", "telefon", "anruf", "antwort", "frage",
+        "problem", "lösung", "projekt", "arbeit", "büro", "firma", "team", "chef", "haus", "wohnung",
+        "zimmer", "küche", "auto", "fahrrad", "bus", "freund", "freundin", "familie", "mutter", "vater",
+        "bruder", "schwester", "kind", "kinder", "kollege", "kollegin", "kunde", "meeting", "kaffee",
+        "tee", "wasser", "essen", "frühstück", "mittagessen", "abendessen", "restaurant", "supermarkt",
+        "idee", "grund", "beispiel", "dokument", "datei", "ordner", "link", "seite", "app", "system",
+        "tastatur", "sprache", "einstellung", "einstellungen", "update", "version", "fehler", "funktion",
+        "rechnung", "vertrag", "angebot", "bestellung", "lieferung", "paket", "preis", "geld", "euro",
+        "bank", "konto", "karte", "adresse", "name", "vorname", "nachname", "nummer", "passwort",
+        "datum", "kalender", "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag",
+        "sonntag", "januar", "februar", "märz", "april", "mai", "juni", "juli", "august", "september",
+        "oktober", "november", "dezember", "wochenende", "urlaub", "ferien", "reise", "hotel", "flug",
+        "flughafen", "zug", "bahnhof", "straße", "platz", "stadt", "dorf", "land", "welt", "wetter",
+        "sonne", "regen", "schnee", "wind", "sommer", "winter", "frühling", "herbst", "abend", "nacht",
+        "mittag", "nachmittag", "vormittag", "grüße", "gruß", "dank", "hilfe", "erfolg", "glück",
+        "spaß", "freude", "liebe", "herz", "kopf", "hand", "auge", "augen", "arzt", "krankenhaus",
+        "apotheke", "schule", "uni", "universität", "prüfung", "kurs", "buch", "film", "musik", "spiel",
+        "sport", "training", "verein", "party", "geburtstag", "geschenk", "plan", "ziel", "weg",
+        "richtung", "anfang", "ende", "mitte", "pause", "chance", "meinung", "erfahrung", "gefühl",
+        "gedanke", "entscheidung", "überraschung", "möglichkeit", "situation", "moment", "augenblick",
+        "danke"
     )
 
     private val germanTypoMap = mapOf(
@@ -249,7 +271,7 @@ object LanguageVocabularies {
         "ich", "und", "die", "der", "das", "ist", "nicht", "ein", "es", "du", "zu", "in",
         "wir", "auf", "mit", "sie", "für", "auch", "eine", "haben", "so", "wie", "aber",
         "noch", "mir", "mich", "wenn", "was", "dann", "an", "am", "im", "von", "zu",
-        "kann", "habe", "hat", "sind", "war", "wird", "werden", "dass", "bei", "nach",
+        "kann", "kannst", "habe", "hast", "hat", "bin", "bist", "sind", "war", "wird", "werden", "dass", "bei", "nach",
         "oder", "nur", "schon", "hier", "mal", "ja", "nein", "danke", "bitte", "hallo",
         "gut", "gute", "guten", "heute", "morgen", "gestern", "jetzt", "gleich", "gerade",
         "immer", "wieder", "mehr", "sehr", "viel", "viele", "vielleicht", "eigentlich",
@@ -408,8 +430,21 @@ object LanguageVocabularies {
         "zeit" to "⏰", "time" to "⏰", "uhr" to "⏰",
         "geld" to "💶", "money" to "💵",
         "hallo" to "👋", "hello" to "👋", "hey" to "👋", "bonjour" to "👋", "hola" to "👋", "ciao" to "👋", "merhaba" to "👋",
+        "tschüss" to "👋", "bye" to "👋",
         "traurig" to "😢", "sad" to "😢",
-        "check" to "✅", "erledigt" to "✅", "done" to "✅"
+        "check" to "✅", "erledigt" to "✅", "done" to "✅",
+        "geburtstag" to "🎂", "birthday" to "🎂",
+        "urlaub" to "🏖️", "vacation" to "🏖️", "strand" to "🏖️",
+        "flug" to "✈️", "flight" to "✈️", "reise" to "✈️",
+        "pizza" to "🍕", "essen" to "🍽️", "hunger" to "😋",
+        "bier" to "🍺", "beer" to "🍺", "wein" to "🍷",
+        "regen" to "🌧️", "rain" to "🌧️", "schnee" to "❄️", "snow" to "❄️",
+        "sport" to "🏃", "gym" to "💪", "stark" to "💪",
+        "auto" to "🚗", "car" to "🚗", "zug" to "🚆",
+        "hund" to "🐶", "dog" to "🐶", "katze" to "🐱", "cat" to "🐱",
+        "kuss" to "😘", "kiss" to "😘", "umarmung" to "🤗", "hug" to "🤗",
+        "müde" to "😴", "tired" to "😴", "schlafen" to "😴", "sleep" to "😴",
+        "wichtig" to "❗", "achtung" to "⚠️", "warnung" to "⚠️"
     )
 
     fun vocabularyFor(locale: String): List<String> = when (KeyboardLocales.baseLang(locale)) {
@@ -452,9 +487,16 @@ object LanguageVocabularies {
         "danke" to listOf("dir", "für", "vielmals"),
         "vielen" to listOf("Dank", "Grüßen"),
         "guten" to listOf("Morgen", "Tag", "Abend"),
+        "gute" to listOf("Nacht", "Idee", "Besserung"),
+        "liebe" to listOf("Grüße", "dich", "das"),
+        "viele" to listOf("Grüße", "Dank", "Sachen"),
         "bis" to listOf("gleich", "morgen", "später"),
         "alles" to listOf("klar", "Gute", "gut"),
         "morgen" to listOf("früh", "wieder", "um"),
+        "heute" to listOf("Abend", "Nachmittag", "noch"),
+        "wie" to listOf("geht", "spät", "lange"),
+        "was" to listOf("machst", "ist", "gibts"),
+        "kein" to listOf("Problem", "Stress", "Ding"),
         "und" to listOf("dann", "ich", "so")
     )
     private val englishNextWords = mapOf(
@@ -472,6 +514,9 @@ object LanguageVocabularies {
         "good" to listOf("morning", "night", "luck"),
         "have" to listOf("a", "to", "been"),
         "can" to listOf("you", "we", "I"),
+        "how" to listOf("are", "is", "about"),
+        "no" to listOf("problem", "worries", "way"),
+        "sounds" to listOf("good", "great", "like"),
         "the" to listOf("same", "next", "first"),
         "and" to listOf("then", "the", "I")
     )
@@ -493,7 +538,13 @@ object LanguageVocabularies {
             "ich wünsche" to listOf("dir", "euch", "Ihnen"),
             "einen schönen" to listOf("Tag", "Abend", "Sonntag"),
             "im anhang" to listOf("findest", "finden", "ist"),
-            "danke für" to listOf("deine", "Ihre", "die")
+            "danke für" to listOf("deine", "Ihre", "die"),
+            "wie geht" to listOf("es", "das"),
+            "wie geht's" to listOf("dir", "euch"),
+            "geht es" to listOf("dir", "euch", "Ihnen"),
+            "mit freundlichen" to listOf("Grüßen"),
+            "keine sorge" to listOf("ich", "das"),
+            "alles gute" to listOf("zum", "für")
         ),
         "en" to mapOf(
             "i am" to listOf("ready", "on", "going"),
@@ -507,7 +558,10 @@ object LanguageVocabularies {
             "i will" to listOf("be", "send", "check"),
             "looking forward" to listOf("to"),
             "i would" to listOf("like", "love", "suggest"),
-            "please let" to listOf("me", "us")
+            "please let" to listOf("me", "us"),
+            "how are" to listOf("you", "things"),
+            "sounds good" to listOf("to", "thanks"),
+            "talk to" to listOf("you")
         ),
         "fr" to mapOf("je suis" to listOf("en", "prêt", "désolé"), "merci pour" to listOf("votre", "ton", "tout")),
         "es" to mapOf("muchas gracias" to listOf("por", "de"), "yo estoy" to listOf("bien", "en", "listo")),
