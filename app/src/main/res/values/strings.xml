@@ -147,4 +147,18 @@
     <string name="settings_tab_writing">Writing</string>
     <string name="settings_tab_keyboard">Keyboard</string>
     <string name="settings_tab_tools">Tools</string>
+    <string name="nav_languages_short">Languages</string>
+    <string name="nav_preferences">Preferences</string>
+    <string name="nav_theme_short">Theme</string>
+    <string name="nav_text_correction">Text correction</string>
+    <string name="nav_glide_typing">Glide typing</string>
+    <string name="nav_voice_typing">Voice typing</string>
+    <string name="nav_dictionary_short">Dictionary</string>
+    <string name="nav_clipboard_short">Clipboard</string>
+    <string name="nav_emojis_short">Emojis</string>
+    <string name="settings_section_basics">Keyboard</string>
+    <string name="settings_section_typing">Typing &amp; input</string>
+    <string name="settings_section_content">Content &amp; toolbar</string>
+    <string name="settings_section_ai">AI &amp; smart services</string>
+    <string name="settings_section_system">Insights &amp; system</string>
 </resources>

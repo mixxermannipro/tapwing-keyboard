@@ -60,6 +60,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
@@ -70,8 +71,10 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.DashboardCustomize
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
@@ -87,6 +90,7 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SpaceBar
 import androidx.compose.material.icons.rounded.Spellcheck
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.UploadFile
@@ -94,7 +98,6 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -106,6 +109,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -211,23 +215,23 @@ import kotlin.math.roundToInt
 
 enum class SettingsRoute {
     HOME,
-    APPEARANCE,
-    QUICK_BAR,
-    QUICK_SEARCH,
-    AUTOFILL,
     LANGUAGES,
-    DICTIONARY,
+    PREFERENCES,
+    APPEARANCE,
     CORRECTIONS,
+    GLIDE_TYPING,
     VOICE,
-    WRITING_TOOLS,
-    API_KEYS,
+    DICTIONARY,
     CLIPBOARD,
     EMOJI,
+    QUICK_BAR,
+    WRITING_TOOLS,
+    API_KEYS,
+    QUICK_SEARCH,
+    AUTOFILL,
     STATS,
     ABOUT
 }
-
-private data class SettingsDestination(val route: SettingsRoute, val tab: SettingsTab)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -245,35 +249,17 @@ fun TapwingSettingsApp(
     val focusManager = LocalFocusManager.current
     var backStack by rememberSaveable(stateSaver = listSaver(
         save = { stack: List<SettingsRoute> -> stack.map { it.name } },
-        restore = { saved -> saved.map { SettingsRoute.valueOf(it) } }
+        restore = { saved ->
+            val restored = saved.mapNotNull { name ->
+                runCatching { SettingsRoute.valueOf(name) }.getOrNull()
+            }
+            if (restored.isEmpty()) listOf(SettingsRoute.HOME) else restored
+        }
     )) { mutableStateOf(listOf(SettingsRoute.HOME)) }
     val stateHolder = rememberSaveableStateHolder()
     val route = backStack.last()
-    var homeTab by rememberSaveable { mutableStateOf(SettingsTab.START) }
-    val selectedTab = if (route == SettingsRoute.HOME) homeTab else SettingsTab.forRoute(route)
-    val destination = SettingsDestination(route, selectedTab)
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
-    var barRevealed by remember(destination) { mutableStateOf(true) }
-    val barVisible = barRevealed && !imeVisible
-    val barSpace by animateDpAsState(
-        targetValue = if (barVisible) settingsBarSpace else 0.dp,
-        animationSpec = tween(settingsBarMotionMillis, easing = FastOutSlowInEasing),
-        label = "settingsBarSpace"
-    )
-    val scrollConnection = remember(destination, density) {
-        val scroll = SettingsBarScroll()
-        val threshold = with(density) { 12.dp.toPx() }
-        object : NestedScrollConnection {
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                val gesture = consumed + available
-                if (source == NestedScrollSource.UserInput && abs(gesture.y) > abs(gesture.x)) {
-                    scroll.update(barRevealed, consumed.y, available.y, threshold)?.let { barRevealed = it }
-                }
-                return Offset.Zero
-            }
-        }
-    }
     var navigatingBack by remember { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var testInputText by remember { mutableStateOf("") }
@@ -297,9 +283,6 @@ fun TapwingSettingsApp(
         if (backStack.size > 1) {
             navigatingBack = true
             backStack = backStack.dropLast(1)
-        } else if (homeTab != SettingsTab.START) {
-            navigatingBack = true
-            homeTab = SettingsTab.START
         } else if (searchQuery.isNotEmpty()) {
             focusManager.clearFocus()
             searchQuery = ""
@@ -307,7 +290,7 @@ fun TapwingSettingsApp(
     }
 
     BackHandler(
-        enabled = !imeVisible && (backStack.size > 1 || homeTab != SettingsTab.START || searchQuery.isNotEmpty())
+        enabled = !imeVisible && (backStack.size > 1 || searchQuery.isNotEmpty())
     ) {
         navigateBack()
     }
@@ -354,25 +337,25 @@ fun TapwingSettingsApp(
     ) {
         Box(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             AnimatedContent(
-                modifier = Modifier.fillMaxSize().padding(bottom = barSpace).nestedScroll(scrollConnection),
-                targetState = destination,
+                modifier = Modifier.fillMaxSize(),
+                targetState = route,
                 transitionSpec = {
                     val direction = if (navigatingBack) -1 else 1
-                    (slideInHorizontally(tween(270, easing = FastOutSlowInEasing)) { direction * it / 8 } +
-                        fadeIn(tween(220))) togetherWith
-                        (slideOutHorizontally(tween(230, easing = FastOutSlowInEasing)) { -direction * it / 12 } +
-                            fadeOut(tween(160)))
+                    (slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { direction * it / 8 } +
+                        fadeIn(tween(200))) togetherWith
+                        (slideOutHorizontally(tween(220, easing = FastOutSlowInEasing)) { -direction * it / 12 } +
+                            fadeOut(tween(150)))
                 },
                 label = "settingsNavigation"
-            ) { active ->
-                val activeRoute = active.route
-                stateHolder.SaveableStateProvider(if (activeRoute == SettingsRoute.HOME) active.tab.name else activeRoute.name) {
+            ) { activeRoute ->
+                stateHolder.SaveableStateProvider(activeRoute.name) {
                     Column(Modifier.fillMaxSize()) {
                         if (activeRoute != SettingsRoute.HOME) SettingsHeader(activeRoute, ::navigateBack)
                         when (activeRoute) {
                             SettingsRoute.HOME -> HomeSettingsScreen(
-                                tab = active.tab,
                                 prefs = prefs,
+                                de = de,
+                                stats = liveStats,
                                 imeEnabled = imeEnabled,
                                 imeSelected = imeSelected,
                                 hasAutofillProvider = hasAutofillProvider,
@@ -389,7 +372,14 @@ fun TapwingSettingsApp(
                                 },
                                 onNavigate = { navigateTo(it) }
                             )
+                            SettingsRoute.PREFERENCES -> PreferencesScreen(
+                                prefs = prefs,
+                                de = de,
+                                onOpenQuickBar = { navigateTo(SettingsRoute.QUICK_BAR) },
+                                onUpdatePrefs = onUpdatePrefs
+                            )
                             SettingsRoute.APPEARANCE -> AppearanceScreen(prefs, de, onUpdatePrefs)
+                            SettingsRoute.GLIDE_TYPING -> GlideTypingScreen(prefs, de, onUpdatePrefs)
                             SettingsRoute.QUICK_BAR -> QuickBarSettingsScreen(prefs, de, onUpdatePrefs)
                             SettingsRoute.QUICK_SEARCH -> QuickSearchSettingsScreen(prefs, installedSearchApp, onUpdatePrefs)
                             SettingsRoute.AUTOFILL -> AutofillSettingsScreen(prefs, hasAutofillProvider, onUpdatePrefs)
@@ -460,18 +450,6 @@ fun TapwingSettingsApp(
                     }
                 }
             }
-            SettingsBottomBar(
-                visible = barVisible,
-                selected = selectedTab,
-                onSelect = { tab ->
-                    if (route != SettingsRoute.HOME || tab != homeTab) {
-                        navigatingBack = tab.ordinal < selectedTab.ordinal
-                        homeTab = tab
-                        backStack = listOf(SettingsRoute.HOME)
-                    }
-                },
-                modifier = Modifier.align(Alignment.BottomCenter)
-            )
         }
     }
 }
@@ -479,51 +457,198 @@ fun TapwingSettingsApp(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsHeader(route: SettingsRoute, onBack: () -> Unit) {
-    CenterAlignedTopAppBar(
-        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+    TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         title = {
-            Text(stringResource(route.label()), style = MaterialTheme.typography.titleMedium,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                text = stringResource(route.label()),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         },
         navigationIcon = {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, stringResource(R.string.cd_back),
-                    tint = MaterialTheme.colorScheme.primary)
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = stringResource(R.string.cd_back),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
         },
         windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0)
     )
 }
 
-private fun SettingsRoute.label(): Int = when (this) {
+internal fun SettingsRoute.label(): Int = when (this) {
     SettingsRoute.HOME -> R.string.settings_title
-    SettingsRoute.APPEARANCE -> R.string.nav_appearance
+    SettingsRoute.LANGUAGES -> R.string.nav_languages_short
+    SettingsRoute.PREFERENCES -> R.string.nav_preferences
+    SettingsRoute.APPEARANCE -> R.string.nav_theme_short
+    SettingsRoute.CORRECTIONS -> R.string.nav_text_correction
+    SettingsRoute.GLIDE_TYPING -> R.string.nav_glide_typing
+    SettingsRoute.VOICE -> R.string.nav_voice_typing
+    SettingsRoute.DICTIONARY -> R.string.nav_dictionary_short
+    SettingsRoute.CLIPBOARD -> R.string.nav_clipboard_short
+    SettingsRoute.EMOJI -> R.string.nav_emojis_short
     SettingsRoute.QUICK_BAR -> R.string.nav_quick_bar
-    SettingsRoute.QUICK_SEARCH -> R.string.nav_quick_search
-    SettingsRoute.AUTOFILL -> R.string.nav_autofill
-    SettingsRoute.LANGUAGES -> R.string.nav_languages
-    SettingsRoute.DICTIONARY -> R.string.nav_dictionary
-    SettingsRoute.CORRECTIONS -> R.string.nav_corrections
-    SettingsRoute.VOICE -> R.string.nav_voice
     SettingsRoute.WRITING_TOOLS -> R.string.nav_writing_tools
     SettingsRoute.API_KEYS -> R.string.nav_api_keys
-    SettingsRoute.CLIPBOARD -> R.string.nav_clipboard
-    SettingsRoute.EMOJI -> R.string.nav_emoji
+    SettingsRoute.QUICK_SEARCH -> R.string.nav_quick_search
+    SettingsRoute.AUTOFILL -> R.string.nav_autofill
     SettingsRoute.STATS -> R.string.nav_typing_stats
     SettingsRoute.ABOUT -> R.string.nav_about
 }
 
-private data class SettingsRow(
-    val route: SettingsRoute,
-    val icon: ImageVector,
-    val keywords: String,
-    val summary: String = ""
-)
+private fun SettingsRoute.icon(): ImageVector = when (this) {
+    SettingsRoute.HOME -> Icons.Rounded.Keyboard
+    SettingsRoute.LANGUAGES -> Icons.Rounded.Language
+    SettingsRoute.PREFERENCES -> Icons.Rounded.Tune
+    SettingsRoute.APPEARANCE -> Icons.Rounded.Palette
+    SettingsRoute.CORRECTIONS -> Icons.Rounded.Spellcheck
+    SettingsRoute.GLIDE_TYPING -> Icons.Rounded.Gesture
+    SettingsRoute.VOICE -> Icons.Rounded.Mic
+    SettingsRoute.DICTIONARY -> Icons.Rounded.Book
+    SettingsRoute.CLIPBOARD -> Icons.Rounded.ContentPaste
+    SettingsRoute.EMOJI -> Icons.Rounded.EmojiEmotions
+    SettingsRoute.QUICK_BAR -> Icons.Rounded.DashboardCustomize
+    SettingsRoute.WRITING_TOOLS -> Icons.Rounded.AutoAwesome
+    SettingsRoute.API_KEYS -> Icons.Rounded.Key
+    SettingsRoute.QUICK_SEARCH -> Icons.Rounded.Search
+    SettingsRoute.AUTOFILL -> Icons.Rounded.Key
+    SettingsRoute.STATS -> Icons.Rounded.BarChart
+    SettingsRoute.ABOUT -> Icons.Rounded.Info
+}
+
+@Composable
+private fun SettingsRoute.iconTint(): Color {
+    val scheme = MaterialTheme.colorScheme
+    return when (this) {
+        SettingsRoute.LANGUAGES, SettingsRoute.PREFERENCES, SettingsRoute.APPEARANCE -> scheme.primary
+        SettingsRoute.CORRECTIONS, SettingsRoute.GLIDE_TYPING, SettingsRoute.VOICE, SettingsRoute.DICTIONARY -> scheme.tertiary
+        SettingsRoute.CLIPBOARD, SettingsRoute.EMOJI, SettingsRoute.QUICK_BAR -> scheme.secondary
+        SettingsRoute.WRITING_TOOLS, SettingsRoute.API_KEYS -> scheme.primary
+        SettingsRoute.QUICK_SEARCH, SettingsRoute.AUTOFILL -> scheme.tertiary
+        SettingsRoute.STATS, SettingsRoute.ABOUT, SettingsRoute.HOME -> scheme.secondary
+    }
+}
+
+private fun themePreviewAccent(mode: ThemeMode, fallback: Color): Color = when (mode) {
+    ThemeMode.PIXEL_SLATE -> Color(0xFF5F6368)
+    ThemeMode.EXPRESSIVE_LAVENDER -> Color(0xFF6750A4)
+    ThemeMode.DYNAMIC -> fallback
+    ThemeMode.PIXEL_BLUE -> Color(0xFF1A73E8)
+    ThemeMode.AMOLED_DARK -> Color(0xFF2B2B33)
+}
+
+private fun SettingsRoute.liveSummary(
+    prefs: TapwingPrefs,
+    de: Boolean,
+    stats: TypingStats,
+    hasAutofillProvider: Boolean
+): String = when (this) {
+    SettingsRoute.LANGUAGES -> {
+        val active = KeyboardLocales.specFor(prefs.activeLocale).nativeLabel.substringBefore(" ")
+        val count = prefs.enabledLocales.size
+        if (count > 1) "$active · +${count - 1}" else active
+    }
+    SettingsRoute.PREFERENCES -> {
+        val haptic = if (prefs.hapticFeedback) (if (de) "Haptik an" else "Haptics on") else (if (de) "Haptik aus" else "Haptics off")
+        "${prefs.keyboardScalePercent}% · $haptic"
+    }
+    SettingsRoute.APPEARANCE -> {
+        val themeName = when (prefs.themeMode) {
+            ThemeMode.PIXEL_SLATE -> if (de) "Gboard-Stil" else "Gboard Style"
+            ThemeMode.EXPRESSIVE_LAVENDER -> if (de) "Lavendel" else "Lavender"
+            ThemeMode.DYNAMIC -> "Material You"
+            ThemeMode.PIXEL_BLUE -> "Pixel Blue"
+            ThemeMode.AMOLED_DARK -> "AMOLED Dark"
+        }
+        val mode = when (prefs.darkMode) {
+            DarkModePreference.SYSTEM -> if (de) "System" else "Auto"
+            DarkModePreference.LIGHT -> if (de) "Hell" else "Light"
+            DarkModePreference.DARK -> if (de) "Dunkel" else "Dark"
+        }
+        if (prefs.appleModeEnabled) "$themeName · Liquid Glass" else "$themeName · $mode"
+    }
+    SettingsRoute.CORRECTIONS -> {
+        val parts = buildList {
+            if (prefs.autoCorrect) add(if (de) "Autokorrektur" else "Auto-correct")
+            if (prefs.smartBackspaceUndo) add(if (de) "Rückgängig" else "Undo")
+            if (prefs.incognitoMode) add(if (de) "Inkognito" else "Incognito")
+        }
+        if (parts.isEmpty()) (if (de) "Manuell" else "Manual") else parts.joinToString(" · ")
+    }
+    SettingsRoute.GLIDE_TYPING -> {
+        if (prefs.glideTypingEnabled) {
+            if (de) "Aktiv · 2D-Cursor & Wisch-Löschen" else "On · 2D cursor & swipe delete"
+        } else {
+            if (de) "Aus · 2D-Cursor aktiv" else "Off · 2D cursor active"
+        }
+    }
+    SettingsRoute.VOICE -> when (prefs.voiceEngine) {
+        VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) "Automatisch (Lokal zuerst)" else "Auto (Local first)"
+        VoiceEngineMode.LOCAL_WHISPER -> if (de) "Lokal (Whisper)" else "On-device (Whisper)"
+        VoiceEngineMode.ON_DEVICE_SPEECH -> if (de) "Android On-Device" else "Android On-Device"
+        VoiceEngineMode.CLOUD -> if (de) "Cloud-Diktat" else "Cloud speech"
+        VoiceEngineMode.GEMINI_LIVE -> "Gemini Live"
+        VoiceEngineMode.SYSTEM_SPEECH -> if (de) "System-Spracheingabe" else "System speech"
+    }
+    SettingsRoute.DICTIONARY -> {
+        if (prefs.learningEnabled) {
+            if (de) "Adaptives Lernen · Offline-Pakete" else "Adaptive learning · Offline packs"
+        } else {
+            if (de) "Persönliches Wörterbuch" else "Personal dictionary"
+        }
+    }
+    SettingsRoute.CLIPBOARD -> {
+        if (prefs.clipboardEnabled) {
+            if (de) "Verlauf aktiv · OCR & Screenshots" else "History on · OCR & screenshots"
+        } else {
+            if (de) "Deaktiviert" else "Off"
+        }
+    }
+    SettingsRoute.EMOJI -> {
+        if (prefs.candidateEmojiSuggestions) {
+            if (de) "Vorschläge an · Größe ${prefs.emojiScale}" else "Suggestions on · Size ${prefs.emojiScale}"
+        } else {
+            if (de) "Größe ${prefs.emojiScale}" else "Size ${prefs.emojiScale}"
+        }
+    }
+    SettingsRoute.QUICK_BAR -> {
+        if (de) "${prefs.quickBarActions.size} Aktionen in der Leiste" else "${prefs.quickBarActions.size} toolbar shortcuts"
+    }
+    SettingsRoute.WRITING_TOOLS -> {
+        if (de) "Korrigieren, Umformulieren & KI" else "Proofread, rewrite & AI"
+    }
+    SettingsRoute.API_KEYS -> {
+        if (de) "Verschlüsselter Schlüssel-Tresor" else "Encrypted provider vault"
+    }
+    SettingsRoute.QUICK_SEARCH -> prefs.quickSearchEngine.label
+    SettingsRoute.AUTOFILL -> {
+        if (hasAutofillProvider && prefs.inlineAutofillEnabled) {
+            if (de) "Inline-Vorschläge aktiv" else "Inline suggestions on"
+        } else {
+            if (de) "Passwortmanager verknüpfen" else "Connect password manager"
+        }
+    }
+    SettingsRoute.STATS -> {
+        if (stats.estimatedWpm > 0) {
+            "${stats.estimatedWpm} WPM · ${stats.wordsTyped} ${if (de) "Wörter" else "words"}"
+        } else {
+            if (de) "100% lokal auf deinem Gerät" else "100% on-device insights"
+        }
+    }
+    SettingsRoute.ABOUT -> "Version ${BuildConfig.VERSION_NAME} · Tapwing"
+    SettingsRoute.HOME -> ""
+}
 
 @Composable
 private fun HomeSettingsScreen(
-    tab: SettingsTab,
     prefs: TapwingPrefs,
+    de: Boolean,
+    stats: TypingStats,
     imeEnabled: Boolean,
     imeSelected: Boolean,
     hasAutofillProvider: Boolean,
@@ -535,70 +660,105 @@ private fun HomeSettingsScreen(
     onShowImePicker: () -> Unit,
     onNavigate: (SettingsRoute) -> Unit
 ) {
-    val typing = listOf(
-        SettingsRow(SettingsRoute.LANGUAGES, Icons.Rounded.Language, "sprache qwertz qwerty azerty layout",
-            KeyboardLocales.specFor(prefs.activeLocale).nativeLabel.substringBefore(" ")),
-        SettingsRow(SettingsRoute.CORRECTIONS, Icons.Rounded.Spellcheck, "autocorrect autokorrektur rückgängig undo grammatik inkognito enter"),
-        SettingsRow(SettingsRoute.DICTIONARY, Icons.Rounded.Book, "wörter lernen learn zip import export local offline"),
-        SettingsRow(SettingsRoute.VOICE, Icons.Rounded.Mic, "sprachaufnahme mikrofon speech dictation diktat whisper")
-    )
-    val tools = listOf(
-        SettingsRow(SettingsRoute.QUICK_SEARCH, Icons.Rounded.Search, "browser google duckduckgo bing startpage brave ecosia internet", prefs.quickSearchEngine.label),
-        SettingsRow(SettingsRoute.CLIPBOARD, Icons.Rounded.ContentPaste, "clipboard kopieren copy ocr screenshot kamera"),
-        SettingsRow(SettingsRoute.AUTOFILL, Icons.Rounded.Key, "bitwarden autofill passwort password anmelden login benutzername 2fa otp"),
-        SettingsRow(SettingsRoute.WRITING_TOOLS, Icons.Rounded.AutoAwesome, "ki ai modell model openai groq gemini grok openrouter"),
-        SettingsRow(SettingsRoute.API_KEYS, Icons.Rounded.Key, "anbieter provider API schlüssel key modell model")
-    )
-    val keyboard = listOf(
-        SettingsRow(SettingsRoute.APPEARANCE, Icons.Rounded.Palette, "theme apple design farbe größe höhe abstand haptik"),
-        SettingsRow(SettingsRoute.QUICK_BAR, Icons.Rounded.Tune, "toolbar schnellleiste kurzbefehle reihenfolge"),
-        SettingsRow(SettingsRoute.EMOJI, Icons.Rounded.EmojiEmotions, "emoji smileys symbole"),
-        SettingsRow(SettingsRoute.STATS, Icons.Rounded.BarChart, "statistik stats keystrokes"),
-        SettingsRow(SettingsRoute.ABOUT, Icons.Rounded.Info, "datenschutz privacy lizenz version")
-    )
-    val search = searchQuery.trim().lowercase()
-    val allRows = typing + tools + keyboard
-    val tabRows = allRows.filter { it.route in tab.routes }
-    val searchRows = allRows.filter {
-        stringResource(it.route.label()).lowercase().contains(search) || it.keywords.contains(search)
+    val context = LocalContext.current
+    val search = searchQuery.trim()
+    val searchMatches = remember(search, de) {
+        if (search.isEmpty()) emptyList()
+        else SettingsCatalog.search(search) { r -> context.getString(r.label()) }
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
-        contentPadding = PaddingValues(top = 20.dp, bottom = 28.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 14.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        item(key = "search") {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    text = stringResource(if (tab == SettingsTab.START) R.string.settings_title else tab.label),
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.9).sp,
-                    modifier = Modifier.padding(start = 2.dp)
-                )
-                if (tab == SettingsTab.START) {
-                    AppleSearchPill(searchQuery, onSearchQueryChange, stringResource(R.string.settings_search_placeholder))
+        // Pixel / Gboard Expressive Header + Pill Search Bar
+        item(key = "header") {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_title),
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.6).sp,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Keyboard,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = "Tapwing",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
                 }
+                AppleSearchPill(
+                    query = searchQuery,
+                    onQueryChange = onSearchQueryChange,
+                    placeholder = stringResource(R.string.settings_search_placeholder)
+                )
             }
         }
 
-        if (tab != SettingsTab.START) {
-            item(key = "category") { SettingsGroup(null, tabRows, onNavigate) }
-        } else if (search.isNotEmpty()) {
-            item(key = "results") {
-                if (searchRows.isEmpty()) AppleSectionFooter(stringResource(R.string.settings_no_results))
-                else SettingsGroup(null, searchRows, onNavigate)
+        if (search.isNotEmpty()) {
+            item(key = "search_results") {
+                if (searchMatches.isEmpty()) {
+                    AppleSectionFooter(stringResource(R.string.settings_no_results))
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        searchMatches.forEachIndexed { index, target ->
+                            ExpressiveNavCard(
+                                icon = target.icon(),
+                                iconTint = target.iconTint(),
+                                title = stringResource(target.label()),
+                                subtitle = target.liveSummary(prefs, de, stats, hasAutofillProvider),
+                                shape = expressiveItemShape(index, searchMatches.size),
+                                swatchColor = if (target == SettingsRoute.APPEARANCE) {
+                                    themePreviewAccent(prefs.themeMode, MaterialTheme.colorScheme.primary)
+                                } else null,
+                                onClick = { onNavigate(target) }
+                            )
+                        }
+                    }
+                }
             }
         } else {
-            item(key = "setup") {
+            // Setup Hero Card (when not enabled/active) OR Live Keyboard Test Pill (when ready)
+            item(key = "setup_or_test") {
                 AnimatedContent(
                     targetState = imeEnabled to imeSelected,
                     transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(140)) },
                     label = "setupStatus"
                 ) { (enabled, selected) ->
                     if (enabled && selected) {
-                        AppleGroupedSurface {
+                        Surface(
+                            shape = RoundedCornerShape(22.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             AppleInlineField(
                                 value = testInputText,
                                 onValueChange = onTestInputChange,
@@ -609,15 +769,45 @@ private fun HomeSettingsScreen(
                             )
                         }
                     } else {
-                        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(20.dp)) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Column(
-                                modifier = Modifier.fillMaxWidth().padding(18.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text(stringResource(R.string.settings_setup_title), style = MaterialTheme.typography.titleMedium)
-                                Text(stringResource(if (!enabled) R.string.setup_enable_tapwing else R.string.setup_select_tapwing),
-                                    style = MaterialTheme.typography.bodyMedium)
-                                Button(onClick = if (!enabled) onOpenImeSystemSettings else onShowImePicker) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Keyboard,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_setup_title),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                                Text(
+                                    text = stringResource(
+                                        if (!enabled) R.string.setup_enable_tapwing else R.string.setup_select_tapwing
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                )
+                                Button(
+                                    onClick = if (!enabled) onOpenImeSystemSettings else onShowImePicker,
+                                    shape = CircleShape
+                                ) {
                                     Text(stringResource(if (!enabled) R.string.settings_enable else R.string.settings_select))
                                 }
                             }
@@ -625,46 +815,28 @@ private fun HomeSettingsScreen(
                     }
                 }
             }
-            item(key = "recommendations") {
-                val recommendation = when {
-                    !prefs.learningEnabled && !prefs.incognitoMode -> SettingsRoute.DICTIONARY to R.string.settings_tip_learning
-                    !hasAutofillProvider || !prefs.inlineAutofillEnabled -> SettingsRoute.AUTOFILL to R.string.settings_tip_autofill
-                    prefs.voiceEngine != VoiceEngineMode.LOCAL_WHISPER -> SettingsRoute.VOICE to R.string.settings_tip_voice
-                    else -> SettingsRoute.QUICK_SEARCH to R.string.settings_tip_search
-                }
-                Column {
-                    AppleSectionHeader(stringResource(R.string.settings_recommendation))
-                    AppleGroupedSurface {
-                        Row(
-                            Modifier.fillMaxWidth().clickable { onNavigate(recommendation.first) }.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(stringResource(recommendation.first.label()), style = MaterialTheme.typography.titleSmall)
-                                Text(stringResource(recommendation.second), style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // Gboard / Pixel Material 3 Expressive Grouped Sections
+            SettingsSection.entries.forEach { section ->
+                item(key = "section_${section.name}") {
+                    Column {
+                        AppleSectionHeader(stringResource(section.titleRes))
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            section.routes.forEachIndexed { index, target ->
+                                ExpressiveNavCard(
+                                    icon = target.icon(),
+                                    iconTint = target.iconTint(),
+                                    title = stringResource(target.label()),
+                                    subtitle = target.liveSummary(prefs, de, stats, hasAutofillProvider),
+                                    shape = expressiveItemShape(index, section.routes.size),
+                                    swatchColor = if (target == SettingsRoute.APPEARANCE) {
+                                        themePreviewAccent(prefs.themeMode, MaterialTheme.colorScheme.primary)
+                                    } else null,
+                                    onClick = { onNavigate(target) }
+                                )
                             }
-                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary)
                         }
                     }
-                }
-            }
-            item(key = "app") { SettingsGroup(null, tabRows, onNavigate) }
-        }
-    }
-}
-
-@Composable
-private fun SettingsGroup(title: String?, rows: List<SettingsRow>, onNavigate: (SettingsRoute) -> Unit) {
-    Column {
-        if (title != null) AppleSectionHeader(title)
-        AppleGroupedSurface {
-            rows.forEachIndexed { index, item ->
-                if (index > 0) AppleHairlineDivider(startIndent = 58.dp)
-                MinimalNavRow(item.icon, MaterialTheme.colorScheme.primary, stringResource(item.route.label()), item.summary) {
-                    onNavigate(item.route)
                 }
             }
         }
@@ -777,38 +949,23 @@ private fun Context.openSettingsLink(url: String) {
 }
 
 @Composable
-private fun AppearanceScreen(
+private fun PreferencesScreen(
     prefs: TapwingPrefs,
     de: Boolean,
+    onOpenQuickBar: () -> Unit,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Darstellung" else "Experience")
-                AppleGroupedSurface {
-                    MinimalToggleRow(
-                        title = if (de) "Apple Modus (Liquid Glass)" else "Apple Mode (Liquid Glass)",
-                        checked = prefs.appleModeEnabled,
-                        onCheckedChange = { v -> onUpdatePrefs { it.copy(appleModeEnabled = v) } }
-                    )
-                }
-                AppleSectionFooter(
-                    if (de) "Durchscheinende Glastasten, Feder-Animationen und ruhige iOS-Oberfläche."
-                    else "Translucent glass keycaps, spring animations, and calm iOS-style UI."
-                )
-            }
-        }
-
+        // Gboard Preferences → Layout section
         item {
             Column {
                 AppleSectionHeader(
-                    text = if (de) "Größe & Abstand" else "Size & Timing",
-                    trailingActionText = "Reset",
+                    text = if (de) "Layout & Größe" else "Layout",
+                    trailingActionText = if (de) "Zurücksetzen" else "Reset",
                     onTrailingAction = {
                         onUpdatePrefs { it.copy(keyboardScalePercent = 100, keyboardBottomLiftDp = 0) }
                     }
@@ -822,7 +979,7 @@ private fun AppearanceScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(if (de) "Höhe" else "Height", fontSize = 15.sp)
+                            Text(if (de) "Tastaturhöhe" else "Keyboard height", fontSize = 15.sp)
                             Text("${prefs.keyboardScalePercent}%", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
                         }
                         Slider(
@@ -850,6 +1007,41 @@ private fun AppearanceScreen(
                         )
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Unten rechts immer neue Zeile" else "Always insert newline on bottom-right",
+                        checked = prefs.enterKeyAlwaysNewline
+                    ) { v -> onUpdatePrefs { it.copy(enterKeyAlwaysNewline = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalNavRow(
+                        icon = Icons.Rounded.DashboardCustomize,
+                        badgeColor = MaterialTheme.colorScheme.primary,
+                        title = if (de) "Schnellleiste anpassen" else "Customize Quick Bar",
+                        value = "${prefs.quickBarActions.size}",
+                        onClick = onOpenQuickBar
+                    )
+                }
+                AppleSectionFooter(
+                    if (de) "Aus (Empfohlen): Passt die Enter-Taste automatisch an (Suchen, Go oder Zeilenumbruch)."
+                    else "Off (Recommended): Adapts the bottom-right key automatically (Search, Go, or newline)."
+                )
+            }
+        }
+
+        // Gboard Preferences → Key press section
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Tastendruck" else "Key press")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        title = if (de) "Haptisches Feedback bei Tastendruck" else "Haptic feedback on keypress",
+                        checked = prefs.hapticFeedback
+                    ) { v -> onUpdatePrefs { it.copy(hapticFeedback = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Ton bei Tastendruck" else "Sound on keypress",
+                        checked = prefs.soundOnKeypress
+                    ) { v -> onUpdatePrefs { it.copy(soundOnKeypress = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
                     Column(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -858,7 +1050,7 @@ private fun AppearanceScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(if (de) "Haltedauer" else "Long-press delay", fontSize = 15.sp)
+                            Text(if (de) "Verzögerung bei Gedrückthalten" else "Key long press delay", fontSize = 15.sp)
                             Text("${prefs.longPressDelayMs} ms", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
                         }
                         Slider(
@@ -871,75 +1063,16 @@ private fun AppearanceScreen(
             }
         }
 
+        // One-handed mode
         item {
             Column {
-                AppleSectionHeader(if (de) "Farbschema" else "Theme")
+                AppleSectionHeader(if (de) "Einhandmodus" else "One-handed mode")
                 AppleGroupedSurface {
-                    val modes = listOf(
-                        ThemeMode.PIXEL_SLATE to (if (de) "Gboard-Stil (Standard)" else "Gboard Style (Default)"),
-                        ThemeMode.EXPRESSIVE_LAVENDER to (if (de) "Expressive Lavendel" else "Lavender"),
-                        ThemeMode.DYNAMIC to "Material You",
-                        ThemeMode.PIXEL_BLUE to "Pixel Blue",
-                        ThemeMode.AMOLED_DARK to "AMOLED Pure Dark"
-                    )
-                    modes.forEachIndexed { idx, (mode, label) ->
-                        MinimalCheckRow(label, selected = prefs.themeMode == mode) {
-                            onUpdatePrefs { it.copy(themeMode = mode) }
-                        }
-                        if (idx < modes.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
-                    }
-                }
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Erscheinungsbild" else "Appearance")
-                AppleGroupedSurface {
-                    val darkOptions = listOf(
-                        DarkModePreference.SYSTEM to (if (de) "Automatisch (System)" else "Automatic"),
-                        DarkModePreference.LIGHT to (if (de) "Hell" else "Light"),
-                        DarkModePreference.DARK to (if (de) "Dunkel" else "Dark")
-                    )
-                    darkOptions.forEachIndexed { idx, (mode, label) ->
-                        MinimalCheckRow(label, selected = prefs.darkMode == mode) {
-                            onUpdatePrefs { it.copy(darkMode = mode) }
-                        }
-                        if (idx < darkOptions.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
-                    }
-                }
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Tasten & Einhandmodus" else "Keycaps & One-Handed")
-                AppleGroupedSurface {
-                    MinimalToggleRow(
-                        title = if (de) "Abgerundete Pill-Tasten" else "Capsule keycaps",
-                        checked = prefs.roundedExpressiveKeys
-                    ) { v -> onUpdatePrefs { it.copy(roundedExpressiveKeys = v) } }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(
-                        title = if (de) "Tasten-Umrandung" else "Key borders",
-                        checked = prefs.showKeyBorders
-                    ) { v -> onUpdatePrefs { it.copy(showKeyBorders = v) } }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(
-                        title = if (de) "Haptisches Feedback" else "Haptic feedback",
-                        checked = prefs.hapticFeedback
-                    ) { v -> onUpdatePrefs { it.copy(hapticFeedback = v) } }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(
-                        title = if (de) "Tastenklick-Ton" else "Sound on keypress",
-                        checked = prefs.soundOnKeypress
-                    ) { v -> onUpdatePrefs { it.copy(soundOnKeypress = v) } }
-                    AppleHairlineDivider(startIndent = 16.dp)
                     OneHandedMode.entries.forEachIndexed { idx, mode ->
                         val label = when (mode) {
-                            OneHandedMode.OFF -> if (de) "Einhandmodus: Aus" else "One-handed: Off"
-                            OneHandedMode.RIGHT -> if (de) "Einhandmodus: Rechts" else "One-handed: Right"
-                            OneHandedMode.LEFT -> if (de) "Einhandmodus: Links" else "One-handed: Left"
+                            OneHandedMode.OFF -> if (de) "Aus" else "Off"
+                            OneHandedMode.RIGHT -> if (de) "Rechtshändig" else "Right-handed"
+                            OneHandedMode.LEFT -> if (de) "Linkshändig" else "Left-handed"
                         }
                         MinimalCheckRow(label, selected = prefs.oneHandedMode == mode) {
                             onUpdatePrefs { it.copy(oneHandedMode = mode) }
@@ -950,13 +1083,14 @@ private fun AppearanceScreen(
             }
         }
 
+        // Split keyboard (Tablet & Foldable)
         item {
             Column {
-                AppleSectionHeader(if (de) "Geteilte Tastatur (Tablet & Foldable)" else "Split Keyboard (Tablet & Foldable)")
+                AppleSectionHeader(if (de) "Geteilte Tastatur (Tablet & Foldable)" else "Split keyboard (Tablet & Foldable)")
                 AppleGroupedSurface {
                     SplitKeyboardMode.entries.forEachIndexed { idx, mode ->
                         val label = when (mode) {
-                            SplitKeyboardMode.OFF -> if (de) "Geteiltes Layout: Aus" else "Split layout: Off"
+                            SplitKeyboardMode.OFF -> if (de) "Aus" else "Off"
                             SplitKeyboardMode.AUTO -> if (de) "Automatisch (ab 600dp / Falt-Displays)" else "Auto (tablets & foldables ≥ 600dp)"
                             SplitKeyboardMode.ALWAYS -> if (de) "Immer geteilt anzeigen" else "Always split"
                         }
@@ -970,6 +1104,195 @@ private fun AppearanceScreen(
                     if (de) "Teilt die Tastenreihen ergonomisch für Daumen auf Tablets, Foldables oder im Querformat."
                     else "Splits key rows ergonomically for thumbs on tablets, foldables, or landscape screens."
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppearanceScreen(
+    prefs: TapwingPrefs,
+    de: Boolean,
+    onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    val themeCards = listOf(
+        Triple(
+            ThemeMode.PIXEL_SLATE,
+            if (de) "Gboard-Stil" else "Gboard Style",
+            Triple(Color(0xFF1F2124), Color(0xFF33363B), Color(0xFF8AB4F8))
+        ),
+        Triple(
+            ThemeMode.DYNAMIC,
+            "Material You",
+            Triple(scheme.surfaceVariant, scheme.surface, scheme.primary)
+        ),
+        Triple(
+            ThemeMode.PIXEL_BLUE,
+            "Pixel Blue",
+            Triple(Color(0xFF11151C), Color(0xFF232934), Color(0xFF8AB4F8))
+        ),
+        Triple(
+            ThemeMode.EXPRESSIVE_LAVENDER,
+            if (de) "Lavendel" else "Lavender",
+            Triple(Color(0xFF1E1A26), Color(0xFF302A3C), Color(0xFFD0BCFF))
+        ),
+        Triple(
+            ThemeMode.AMOLED_DARK,
+            "AMOLED Dark",
+            Triple(Color(0xFF000000), Color(0xFF191920), Color(0xFF9A82DB))
+        )
+    )
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        // Visual Gboard-inspired Theme Gallery
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Farbschema" else "Colors")
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    themeCards.chunked(2).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            rowItems.forEach { (mode, label, palette) ->
+                                ExpressiveThemeTile(
+                                    title = label,
+                                    boardColor = palette.first,
+                                    keyColor = palette.second,
+                                    accentColor = palette.third,
+                                    selected = prefs.themeMode == mode,
+                                    onClick = { onUpdatePrefs { it.copy(themeMode = mode) } },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (rowItems.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Light / Dark / System
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Erscheinungsbild" else "Appearance")
+                AppleGroupedSurface {
+                    val darkOptions = listOf(
+                        DarkModePreference.SYSTEM to (if (de) "Systemstandard" else "System auto"),
+                        DarkModePreference.LIGHT to (if (de) "Hell" else "Light"),
+                        DarkModePreference.DARK to (if (de) "Dunkel" else "Dark")
+                    )
+                    darkOptions.forEachIndexed { idx, (mode, label) ->
+                        MinimalCheckRow(label, selected = prefs.darkMode == mode) {
+                            onUpdatePrefs { it.copy(darkMode = mode) }
+                        }
+                        if (idx < darkOptions.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                    }
+                }
+            }
+        }
+
+        // Key borders, Pill keys, and Tapwing's signature Liquid Glass mode
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Tasten & Stil" else "Key style")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        title = if (de) "Tastenumrandung" else "Key borders",
+                        checked = prefs.showKeyBorders
+                    ) { v -> onUpdatePrefs { it.copy(showKeyBorders = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Abgerundete Pill-Tasten" else "Expressive pill keycaps",
+                        checked = prefs.roundedExpressiveKeys
+                    ) { v -> onUpdatePrefs { it.copy(roundedExpressiveKeys = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Liquid Glass Modus (Apple-Stil)" else "Liquid Glass mode (Apple style)",
+                        checked = prefs.appleModeEnabled
+                    ) { v -> onUpdatePrefs { it.copy(appleModeEnabled = v) } }
+                }
+                AppleSectionFooter(
+                    if (de) "Liquid Glass aktiviert durchscheinende Glastasten und sanfte Feder-Animationen."
+                    else "Liquid Glass enables translucent glass keycaps and spring animations."
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlideTypingScreen(
+    prefs: TapwingPrefs,
+    de: Boolean,
+    onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Glide Typing" else "Glide typing")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        title = if (de) "Glide Typing aktivieren" else "Enable glide typing",
+                        checked = prefs.glideTypingEnabled
+                    ) { v -> onUpdatePrefs { it.copy(glideTypingEnabled = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Wisch-Löschen aktivieren (⌫)" else "Enable gesture delete",
+                        checked = prefs.swipeBackspaceDeleteWord
+                    ) { v -> onUpdatePrefs { it.copy(swipeBackspaceDeleteWord = v) } }
+                }
+                AppleSectionFooter(
+                    if (de) "Ziehe deinen Finger über die Buchstaben, um Wörter zu schreiben, oder wische auf der Löschtaste nach links, um ganze Wörter zu entfernen."
+                    else "Input words by sliding through letters, or slide left from the delete key to erase whole words."
+                )
+            }
+        }
+
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Cursor-Steuerung (2D-Trackpad)" else "Gesture cursor control (2D Trackpad)")
+                AppleGroupedSurface {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        AppleIconBadge(
+                            icon = Icons.Rounded.SpaceBar,
+                            tintColor = MaterialTheme.colorScheme.primary
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (de) "Leertaste gedrückt halten" else "Hold spacebar to move cursor",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = if (de) "Bewege den Cursor frei nach links, rechts, oben und unten — wie auf einem Trackpad."
+                                else "Slide left, right, up, or down to position the cursor smoothly in 2D.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -2072,46 +2395,45 @@ private fun DictionaryLearningScreen(
 private fun CorrectionsScreen(
     prefs: TapwingPrefs,
     de: Boolean,
-    onOpenQuickBar: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") onOpenQuickBar: () -> Unit,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         item {
             Column {
-                AppleSectionHeader(if (de) "Taste unten rechts" else "Bottom-right key")
-                AppleGroupedSurface {
-                    MinimalToggleRow(
-                        if (de) "Unten rechts immer neue Zeile" else "Always insert newline on bottom-right",
-                        prefs.enterKeyAlwaysNewline
-                    ) { v -> onUpdatePrefs { it.copy(enterKeyAlwaysNewline = v) } }
-                }
-                AppleSectionFooter(
-                    if (de) "Aus (Empfohlen): Passt die Taste automatisch an — Suchen/Go im Browser, Zeilenumbruch in Chats mit Senden-Button (z. B. WhatsApp). Ein: erzwingt immer neue Zeile."
-                    else "Off (Recommended): Adapts automatically — Search/Go in browsers, newline in chats with a Send button (e.g. WhatsApp). On: always inserts newline."
-                )
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Tippen & Korrektur" else "Typing & Corrections")
+                AppleSectionHeader(if (de) "Korrekturen" else "Corrections")
                 AppleGroupedSurface {
                     MinimalToggleRow(if (de) "Autokorrektur" else "Auto-correction", prefs.autoCorrect) { v ->
                         onUpdatePrefs { it.copy(autoCorrect = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Wisch-Tippen (Glide Typing)" else "Glide / Swipe typing", prefs.glideTypingEnabled) { v ->
-                        onUpdatePrefs { it.copy(glideTypingEnabled = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Rückgängig mit Löschtaste (⌫)" else "Backspace undoes autocorrect", prefs.smartBackspaceUndo) { v ->
+                    MinimalToggleRow(if (de) "Autokorrektur mit ⌫ rückgängig" else "Undo auto-correct on backspace", prefs.smartBackspaceUndo) { v ->
                         onUpdatePrefs { it.copy(smartBackspaceUndo = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(if (de) "Doppeltipp-Punkt" else "Double-space period", prefs.doubleSpacePeriod) { v ->
+                        onUpdatePrefs { it.copy(doubleSpacePeriod = v) }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(if (de) "Rechtschreib- & Grammatik-Chips" else "Spell & grammar chips", prefs.spellGrammarChips) { v ->
+                        onUpdatePrefs { it.copy(spellGrammarChips = v) }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(if (de) "Rückgängig-Button anbieten" else "Show undo shortcut", prefs.proactiveUndo) { v ->
+                        onUpdatePrefs { it.copy(proactiveUndo = v) }
+                    }
+                }
+            }
+        }
+
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Vorschläge & Lernen" else "Suggestions & learning")
+                AppleGroupedSurface {
                     MinimalToggleRow(if (de) "Adaptives Lernen" else "Adaptive learning", prefs.learningEnabled) { v ->
                         onUpdatePrefs { it.copy(learningEnabled = v) }
                     }
@@ -2120,48 +2442,28 @@ private fun CorrectionsScreen(
                         onUpdatePrefs { it.copy(perAppLearningEnabled = v) }
                     }
                     AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Inline-Taschenrechner" else "Inline math", prefs.inlineMathEnabled) { v ->
+                    MinimalToggleRow(if (de) "Inline-Taschenrechner" else "Inline math calculator", prefs.inlineMathEnabled) { v ->
                         onUpdatePrefs { it.copy(inlineMathEnabled = v) }
                     }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Wischen auf ⌫ löscht Wort" else "Swipe backspace deletes word", prefs.swipeBackspaceDeleteWord) { v ->
-                        onUpdatePrefs { it.copy(swipeBackspaceDeleteWord = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Rechtschreib-Chips" else "Spell & grammar chips", prefs.spellGrammarChips) { v ->
-                        onUpdatePrefs { it.copy(spellGrammarChips = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Rückgängig anbieten" else "Show undo shortcut", prefs.proactiveUndo) { v ->
-                        onUpdatePrefs { it.copy(proactiveUndo = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Inkognito-Modus" else "Incognito mode", prefs.incognitoMode) { v ->
-                        onUpdatePrefs { it.copy(incognitoMode = v) }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(if (de) "Doppeltipp-Punkt" else "Double-space period", prefs.doubleSpacePeriod) { v ->
-                        onUpdatePrefs { it.copy(doubleSpacePeriod = v) }
-                    }
                 }
+                AppleSectionFooter(
+                    if (de) "Gelernte Wörter und Kontext-Vorschläge bleiben zu 100 % lokal auf deinem Gerät."
+                    else "Learned words and context suggestions stay 100% on your device."
+                )
             }
         }
 
         item {
             Column {
-                AppleSectionHeader(if (de) "Leiste" else "Toolbar")
+                AppleSectionHeader(if (de) "Datenschutz" else "Privacy")
                 AppleGroupedSurface {
-                    MinimalNavRow(
-                        icon = Icons.Rounded.Tune,
-                        badgeColor = Color(0xFF5AC8FA),
-                        title = if (de) "Schnellleiste anpassen" else "Customize Quick Bar",
-                        value = "${prefs.quickBarActions.size}",
-                        onClick = onOpenQuickBar
-                    )
+                    MinimalToggleRow(if (de) "Inkognito-Modus" else "Incognito mode", prefs.incognitoMode) { v ->
+                        onUpdatePrefs { it.copy(incognitoMode = v) }
+                    }
                 }
                 AppleSectionFooter(
-                    if (de) "Reihenfolge und Symbole über der Tastatur festlegen."
-                    else "Choose order and shortcuts above the keyboard."
+                    if (de) "Pausiert das Lernen neuer Wörter und die Schreibstatistik."
+                    else "Pauses learning new words and typing statistics."
                 )
             }
         }
