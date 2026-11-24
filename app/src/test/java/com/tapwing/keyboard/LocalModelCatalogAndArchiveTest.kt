@@ -44,6 +44,19 @@ class LocalModelCatalogAndArchiveTest {
         assertTrue(parakeet.supportsLocale("pl-PL"))
         assertTrue(parakeet.supportsLocale("de-DE"))
         assertFalse(parakeet.supportsLocale("ja-JP"))
+
+        val parakeetV3 = LocalModelCatalog.findById("sherpa-parakeet-v3-0.6b-int8")!!
+        assertTrue(parakeetV3.displayName.contains("NVIDIA"))
+        assertTrue(parakeetV3.supportsLocale("de-DE"))
+        assertTrue(parakeetV3.supportsLocale("en-US"))
+        assertTrue(parakeetV3.supportsLocale("pl-PL"))
+        assertFalse(parakeetV3.supportsLocale("ja-JP"))
+
+        val parakeetV2 = LocalModelCatalog.findById("sherpa-parakeet-v2-en-int8")!!
+        assertTrue(parakeetV2.displayName.contains("NVIDIA"))
+        assertTrue(parakeetV2.supportsLocale("en-US"))
+        assertTrue(parakeetV2.supportsLocale("en-GB"))
+        assertFalse(parakeetV2.supportsLocale("de-DE"))
     }
 
     @Test
