@@ -6,7 +6,7 @@
 
 Tapwing verbindet Wortvorschläge, Spracheingabe, Schreibhilfe und eine anpassbare Werkzeugleiste. Schreiben, Lernen und viele Werkzeuge laufen direkt auf deinem Gerät.
 
-![Version 2.2.0](https://img.shields.io/badge/Version-2.2.0-6750A4?style=flat-square)
+![Version 2.6.0](https://img.shields.io/badge/Version-2.6.0-6750A4?style=flat-square)
 ![Android 10+](https://img.shields.io/badge/Android-10%2B-307D5D?style=flat-square&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7451BD?style=flat-square&logo=kotlin&logoColor=white)
 ![Apache 2.0](https://img.shields.io/badge/Lizenz-Apache%202.0-405773?style=flat-square)
@@ -16,11 +16,11 @@ Tapwing verbindet Wortvorschläge, Spracheingabe, Schreibhilfe und eine anpassba
 </div>
 
 > [!NOTE]
-> Tapwing 2.2.0 ist im geschlossenen Google-Play-Test. Der Installationslink setzt einen freigeschalteten Testerzugang voraus.
+> Tapwing 2.6.0 ist in Vorbereitung; der geschlossene Google-Play-Test setzt weiterhin einen freigeschalteten Testerzugang voraus.
 
 ## Screenshots
 
-Echte Aufnahmen von Tapwing 2.2.0 auf einem Android-16-Emulator mit Beispieldaten.
+Aufnahmen der Oberfläche (Stand 2.2.0 auf einem Android-16-Emulator mit Beispieldaten).
 
 | Tippen | Diktat | Werkzeuge |
 | :---: | :---: | :---: |
@@ -35,33 +35,33 @@ Echte Aufnahmen von Tapwing 2.2.0 auf einem Android-16-Emulator mit Beispieldate
 | Bereich | Was du damit tun kannst |
 | --- | --- |
 | **Tippen** | Zwischen Sprache und Layout wechseln, per Wischgeste tippen, Folgewörter übernehmen und Autokorrekturen zurücknehmen. Tapwing lernt Wortpaare auf dem Gerät und kann Vorschläge pro App anpassen. |
-| **Diktat** | Per Android-Sprachdienst oder lokal mit Whisper diktieren. Mit einem unterstützten Android-Offline-Sprachpaket erscheint der Text beim Sprechen. Whisper kann fertige Abschnitte in deutlichen Sprechpausen verarbeiten. |
+| **Diktat** | Blitzschnell lokal auf dem Gerät mit **Sherpa-ONNX** (FastConformer Deutsch, Kroko Live-Streaming mit Wort-für-Wort-Vorschau, Parakeet TDT v3 Ultra für 25 EU-Sprachen, Canary 180M Flash) oder **Whisper** diktieren – inklusive automatischer Verstärkung leiser Aufnahmen, Vorwärmung beim Tastaturstart und intelligenter Bereinigung von Füllwörtern, Stottern und Selbstkorrekturen. Alternativ über den Android-Sprachdienst oder optionale Cloud-APIs. |
 | **Schreibhilfe** | Text korrigieren, kürzen und umformulieren. Die Optionen umfassen eingebaute Regeln, herunterladbare lokale Sprachmodelle und Cloud-Dienste mit eigenem Schlüssel. |
 | **Zwischenablage** | Kopierte Texte direkt einfügen, häufig genutzte Einträge anheften und die Aufbewahrung einstellen. Kopierte Bestätigungscodes können kurz zum Einfügen angeboten werden. |
 | **Text scannen** | Text mit der Kamera oder aus einem einzeln ausgewählten Foto erkennen und ins Schreibfeld übernehmen. |
 | **Wörterbuch und Textbausteine** | Offline-Wörterbücher herunterladen, eigene Wörter importieren und exportieren sowie Kürzel wie `/datum` oder eigene Textbausteine einsetzen. |
-| **Layout und Schnellleiste** | Höhe, Design und Schnellaktionen anpassen. Einhand- und geteiltes Layout stehen zur Auswahl. Das Steuerkreuz hilft beim Navigieren, Markieren und Kopieren. |
+| **Oberfläche & Schnellleiste** | Minimalistische Material-3-Expressive-Einstellungen im vertrauten Gboard-Aufbau mit federnden, flüssigen Übergängen. Höhe, Design und Schnellaktionen anpassen; Einhand- und geteiltes Layout sowie das Steuerkreuz stehen zur Auswahl. |
 | **Weitere Werkzeuge** | Rechnungen wie `24*7=` im Eingabefeld lösen, Tippstatistiken ansehen und Android-Autofill (automatisches Ausfüllen durch den gewählten Dienst) ab Android 11 nutzen. |
 
-### Neu in 2.2.0
+### Neu in 2.6.0
 
-- **Live-Diktat:** Android-Offline-Diktat zeigt Text beim Sprechen. Whisper kann in Sprechpausen bereits abgeschlossene Abschnitte verarbeiten. Für optionales Cloud-Streaming steht Gemini Live zur Verfügung.
-- **Wortvorschläge:** Ein Tipp auf einen Vorschlag setzt das Wort mit Leerzeichen ein und zeigt passende Folgewörter an.
-- **Einfügevorschläge:** Kopierter Text kann direkt in der Vorschlagsleiste erscheinen. Private Felder und von Android als sensibel markierte Clips werden ausgefiltert.
+- **Sherpa-ONNX-Engine auf dem Gerät (v2.0.3):** Deutlich schnellere lokale Spracherkennung mit kuratierter Modellauswahl und Empfehlungen direkt in den Einstellungen (inklusive Echtzeit-Live-Streaming über Kroko Zipformer, FastConformer Deutsch mit eingebauter Zeichensetzung, Parakeet 0.6B Ultra und Canary 180M).
+- **Bereinigung auf Rambler-Niveau:** Verbesserte Erkennung von Stottern (`g- gehe`), Satz-Neustarts (`vergiss das`), deutschen/englischen Präpositions-Selbstkorrekturen, diktierten nummerierten Listen (`erstens / zweitens`), Nebensatz-Kommas und Sprachbefehlen (`Senden`).
+- **Gboard-nahe, butterweiche Oberfläche:** Schlanke, übersichtliche Einstellungen mit Suchleiste, federnden Druck- und Panel-Animationen sowie live scrollender Diktat-Leiste.
 
 ## Erste Schritte
 
 1. Tapwing über den [geschlossenen Google-Play-Test](https://play.google.com/apps/testing/com.tapwing.keyboard) installieren oder [lokal bauen](#lokal-bauen).
 2. Tapwing öffnen und über **Aktivieren** in den Android-Tastatureinstellungen einschalten.
 3. Über **Auswählen** zu Tapwing wechseln und im Testfeld tippen.
-4. Für Diktat unter **Spracheingabe** eine Methode wählen. Android offline braucht ein passendes System-Sprachpaket. Für Whisper das gewünschte Modell in Tapwing herunterladen.
+4. Für schnelles lokales Diktat unter **Diktat** das empfohlene Sherpa-ONNX-Modell (z. B. FastConformer Deutsch oder Kroko Live) herunterladen – danach diktiert Tapwing komplett offline.
 
 ## Verarbeitung und Datenschutz
 
 | Auswahl | Was mit den Daten passiert |
 | --- | --- |
 | **Tippen, Wörterbuch, Zwischenablage und Texterkennung** | Die Verarbeitung findet auf dem Gerät statt. Der Inkognito-Modus setzt Lernen und Zwischenablage-Verlauf aus. |
-| **Android offline und Whisper** | Audio wird auf dem Gerät verarbeitet. Sprachpakete und herunterladbare Modelle müssen vorher verfügbar sein. |
+| **Sherpa-ONNX, Whisper und Android offline** | Audio wird vollständig auf dem Gerät verarbeitet. Herunterladbare Modelle und Android-Sprachpakete liegen lokal vor. |
 | **Android-Sprachdienst** | Abhängig von Gerät und Sprachdienst kann die Erkennung eine Internetverbindung nutzen. |
 | **Gemini Live** | Wenn du den Modus mit eigenem Schlüssel einrichtest, sendet Tapwing Audio während des Diktats an Google. |
 | **Cloud-Diktat und Cloud-Schreibhilfe** | Beim separaten Cloud-Diktat geht die Aufnahme nach dem Stopp an den gewählten Anbieter. Bei optionaler Cloud-Textbearbeitung wird der zu bearbeitende Text übertragen. |
