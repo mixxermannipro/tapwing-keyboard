@@ -49,12 +49,12 @@ DATENSCHUTZ IM FOKUS
 Tippen, Lernen, Wörterbücher, Zwischenablage und Kamera-OCR arbeiten direkt auf deinem Gerät. Keine Werbung, keine Analyse-Tracker, volle Kontrolle.
 ```
 
-## Versionshinweise (`v2.6.1` — max. 500 Zeichen)
+## Versionshinweise (`v2.7.0` — max. 500 Zeichen)
 ```text
-Neu in Tapwing 2.6.1:
-• Lokales Turbo-Diktat über Sherpa-ONNX (NVIDIA FastConformer, Parakeet TDT 0.6B v3/v2/Ultra, Canary 180M & Kroko Live-Streaming)
-• Automatische Verstärkung leiser Aufnahmen, Vorwärmung beim Tastaturstart & Bereinigung von Stottern, Füllwörtern, Listen und Selbstkorrekturen
-• Schlankes, modernes Material-3-Design im vertrauten Gboard-Aufbau mit weichen Feder-Animationen
+Neu in Tapwing 2.7.0:
+• Lokale GGUF-Sprachmodelle (KI-Schreibhilfe offline) & erweitertes mehrsprachiges Diktat mit automatischen Aufzählungen
+• Aufgeräumte Dropdown-Einstellungen, verbesserte Barrierefreiheit (WCAG-AAA) & spürbar schnellere Tasten-Reaktion
+• Sicherheits- und Stabilitäts-Updates für Netzwerk, Zwischenablage, Archive & Berechtigungen
 ```
 
 ## Store-Kategorie & Tags

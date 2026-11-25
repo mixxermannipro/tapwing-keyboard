@@ -49,12 +49,12 @@ PRIVACY BY DESIGN
 Typing, dictionary learning, clipboard history, and camera OCR stay locally on your device. No ads, no analytics SDKs, no hidden uploads.
 ```
 
-## Release Notes (`v2.6.1` — max 500 chars)
+## Release Notes (`v2.7.0` — max 500 chars)
 ```text
-What's new in Tapwing 2.6.1:
-• Ultra-fast offline dictation via Sherpa-ONNX (NVIDIA FastConformer, Parakeet TDT 0.6B v3/v2/Ultra, Canary 180M & Kroko real-time streaming)
-• Quiet-mic gain normalization, model pre-warming & cleanup for stutters, filler words, self-corrections and spoken lists
-• Minimalist Gboard-familiar Material 3 Expressive settings and fluid spring animations
+What's new in Tapwing 2.7.0:
+• On-device GGUF LLMs for offline writing assistance & supercharged multilingual dictation with auto bullet lists
+• Streamlined dropdown settings UI, WCAG-AAA accessibility improvements & faster hot-path typing performance
+• Security, concurrency & stability hardening across network, archives, clipboard and permissions
 ```
 
 ## Category & Tags
