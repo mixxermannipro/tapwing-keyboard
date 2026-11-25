@@ -259,6 +259,7 @@ object AiModelCatalog {
         AiProviderType.OPENROUTER_API -> "meta-llama/llama-3.3-70b-instruct:free"
         AiProviderType.XAI_API -> "grok-3-mini"
         AiProviderType.OPENAI_COMPATIBLE -> "gpt-4.1-mini"
+        AiProviderType.LOCAL_LLM -> LocalModelCatalog.recommendedLlm().id
         AiProviderType.GEMINI_NANO, AiProviderType.LOCAL_RULES -> ""
     }
 
@@ -271,6 +272,7 @@ object AiModelCatalog {
 
     fun displayName(provider: AiProviderType, de: Boolean): String = when (provider) {
         AiProviderType.LOCAL_RULES -> if (de) "On-Device Regeln (Offline)" else "On-Device Rules (Offline)"
+        AiProviderType.LOCAL_LLM -> if (de) "Lokales KI-Modell (Offline)" else "Local AI Model (Offline)"
         AiProviderType.GEMINI_NANO -> "Gemini Nano (AICore)"
         AiProviderType.GEMINI_API -> "Google Gemini"
         AiProviderType.GROQ_API -> "Groq (LPU)"
@@ -286,7 +288,7 @@ object AiModelCatalog {
         AiProviderType.XAI_API -> "https://docs.x.ai/developers/models"
         AiProviderType.OPENAI_COMPATIBLE -> "https://developers.openai.com/api/docs/models"
         AiProviderType.GEMINI_NANO -> "https://developer.android.com/ai/gemini-nano"
-        AiProviderType.LOCAL_RULES -> null
+        AiProviderType.LOCAL_LLM, AiProviderType.LOCAL_RULES -> null
     }
 
     fun signupUrl(provider: AiProviderType): String = when (provider) {

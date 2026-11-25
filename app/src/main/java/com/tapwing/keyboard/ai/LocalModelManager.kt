@@ -27,8 +27,8 @@ sealed interface ModelInstallState {
 }
 
 /**
- * Downloads, extracts, imports, validates, and deletes on-device speech models
- * (both Sherpa-ONNX directory packages and Whisper .bin files) inside app-private noBackupFilesDir.
+ * Downloads, extracts, imports, validates, and deletes on-device speech and LLM models
+ * (Sherpa-ONNX directory packages, Whisper .bin files, and GGUF language models) inside app-private noBackupFilesDir.
  */
 class LocalModelManager(context: Context) {
 
@@ -41,10 +41,6 @@ class LocalModelManager(context: Context) {
     val states: StateFlow<Map<String, ModelInstallState>> = _states.asStateFlow()
 
     init {
-        runCatching {
-            val legacyLlmDir = File(modelsRoot, "llm")
-            if (legacyLlmDir.exists()) legacyLlmDir.deleteRecursively()
-        }
         refreshStates()
     }
 
@@ -78,12 +74,18 @@ class LocalModelManager(context: Context) {
     }
 
     fun modelFileFor(spec: LocalModelSpec): File {
-        return if (spec.kind.isSherpa) {
-            sherpaModelDirFor(spec)
-        } else {
-            val dir = File(modelsRoot, "whisper")
-            if (!dir.exists()) dir.mkdirs()
-            File(dir, spec.fileName)
+        return when {
+            spec.kind.isSherpa -> sherpaModelDirFor(spec)
+            spec.kind.isLlm -> {
+                val dir = File(modelsRoot, "llm")
+                if (!dir.exists()) dir.mkdirs()
+                File(dir, spec.fileName)
+            }
+            else -> {
+                val dir = File(modelsRoot, "whisper")
+                if (!dir.exists()) dir.mkdirs()
+                File(dir, spec.fileName)
+            }
         }
     }
 
@@ -106,13 +108,30 @@ class LocalModelManager(context: Context) {
 
     /**
      * Picks the best installed on-device speech model for the active locale:
-     * 1) Preferred model if installed AND supports the active locale
-     * 2) Next-gen Sherpa-ONNX model supporting the active locale
-     * 3) Any installed Whisper model (supports all locales)
-     * 4) Preferred model regardless of locale, or any installed model as last resort
+     * 1) Preferred model if installed AND supports the active locale (and multilingual if requested)
+     * 2) When preferMultilingual=true, installed speech models with native multilingual code-switching
+     * 3) Next-gen Sherpa-ONNX model supporting the active locale
+     * 4) Any installed Whisper model (supports all locales)
+     * 5) Preferred model regardless of locale, or any installed speech model as last resort
      */
-    fun bestInstalledSpeechModel(preferredId: String, locale: String): Pair<LocalModelSpec, File>? {
-        val preferred = LocalModelCatalog.findById(preferredId)
+    fun bestInstalledSpeechModel(
+        preferredId: String,
+        locale: String,
+        preferMultilingual: Boolean = false
+    ): Pair<LocalModelSpec, File>? {
+        val preferred = LocalModelCatalog.findById(preferredId)?.takeIf { it.kind.isSpeechModel }
+        if (preferred != null && preferred.supportsLocale(locale) &&
+            (!preferMultilingual || preferred.supportsMultilingualCodeSwitching)
+        ) {
+            installedModelFile(preferred.id)?.let { return preferred to it }
+        }
+        if (preferMultilingual) {
+            for (spec in LocalModelCatalog.speechModels) {
+                if (spec.supportsMultilingualCodeSwitching && spec.supportsLocale(locale)) {
+                    installedModelFile(spec.id)?.let { return spec to it }
+                }
+            }
+        }
         if (preferred != null && preferred.supportsLocale(locale)) {
             installedModelFile(preferred.id)?.let { return preferred to it }
         }
@@ -127,7 +146,21 @@ class LocalModelManager(context: Context) {
         if (preferred != null) {
             installedModelFile(preferred.id)?.let { return preferred to it }
         }
-        for (spec in LocalModelCatalog.allModels) {
+        for (spec in LocalModelCatalog.speechModels) {
+            installedModelFile(spec.id)?.let { return spec to it }
+        }
+        return null
+    }
+
+    /**
+     * Picks the best installed on-device GGUF LLM for local writing aid & dictation cleanup.
+     */
+    fun bestInstalledLlmModel(preferredId: String): Pair<LocalModelSpec, File>? {
+        val preferred = LocalModelCatalog.findById(preferredId)?.takeIf { it.kind.isLlm }
+        if (preferred != null) {
+            installedModelFile(preferred.id)?.let { return preferred to it }
+        }
+        for (spec in LocalModelCatalog.llmModels) {
             installedModelFile(spec.id)?.let { return spec to it }
         }
         return null
@@ -154,13 +187,13 @@ class LocalModelManager(context: Context) {
             if (spec.kind.isSherpa) {
                 downloadAndInstallSherpa(spec)
             } else {
-                downloadAndInstallWhisper(spec)
+                downloadAndInstallSingleFile(spec)
             }
         }
         activeJobs[spec.id] = job
     }
 
-    private suspend fun downloadAndInstallWhisper(spec: LocalModelSpec) {
+    private suspend fun downloadAndInstallSingleFile(spec: LocalModelSpec) {
         val target = modelFileFor(spec)
         val part = File(target.parentFile, "${spec.fileName}.part")
         updateState(spec.id, ModelInstallState.Downloading(0f, 0L, spec.approxSizeMb * 1_000_000L))
@@ -174,6 +207,11 @@ class LocalModelManager(context: Context) {
                 part.delete()
                 updateState(spec.id, ModelInstallState.Error("Downloaded file was incomplete or invalid"))
                 return
+            }
+            if (spec.kind.isLlm) {
+                LocalLlmEngine.unloadIfModel(target.absolutePath)
+            } else {
+                LocalInferenceEngine.unloadIfModel(target.absolutePath)
             }
             if (target.exists()) target.delete()
             if (!part.renameTo(target)) {
@@ -270,9 +308,13 @@ class LocalModelManager(context: Context) {
             File(dir.parentFile, "${spec.id}.tmp").deleteRecursively()
         } else {
             val target = modelFileFor(spec)
+            if (spec.kind.isLlm) {
+                LocalLlmEngine.unloadIfModel(target.absolutePath)
+            } else {
+                LocalInferenceEngine.unloadIfModel(target.absolutePath)
+            }
             if (target.exists()) target.delete()
             File(target.parentFile, "${spec.fileName}.part").delete()
-            LocalInferenceEngine.unloadIfModel(target.absolutePath)
         }
         refreshStates()
     }
@@ -342,8 +384,18 @@ class LocalModelManager(context: Context) {
 
             if (!part.isFile || part.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(part, spec.kind)) {
                 part.delete()
-                updateState(spec.id, ModelInstallState.Error("Selected file is not a valid Whisper speech model"))
+                val errMsg = if (spec.kind.isLlm) {
+                    "Selected file is not a valid GGUF language model"
+                } else {
+                    "Selected file is not a valid Whisper speech model"
+                }
+                updateState(spec.id, ModelInstallState.Error(errMsg))
                 return@withContext false
+            }
+            if (spec.kind.isLlm) {
+                LocalLlmEngine.unloadIfModel(target.absolutePath)
+            } else {
+                LocalInferenceEngine.unloadIfModel(target.absolutePath)
             }
             if (target.exists()) target.delete()
             if (!part.renameTo(target)) {
@@ -436,6 +488,7 @@ class LocalModelManager(context: Context) {
                 val s = String(hdr, Charsets.US_ASCII)
                 when (kind) {
                     LocalModelKind.WHISPER_STT -> s in setOf("lmgg", "ggml", "fmgg", "ggmf", "tjgg", "ggjt", "GGUF")
+                    LocalModelKind.LOCAL_LLM -> s == "GGUF"
                     LocalModelKind.SHERPA_STREAMING,
                     LocalModelKind.SHERPA_TRANSDUCER,
                     LocalModelKind.SHERPA_CANARY -> false

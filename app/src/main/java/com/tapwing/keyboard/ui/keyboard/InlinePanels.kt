@@ -663,6 +663,7 @@ fun WritingToolsPanel(
 
     val actions = listOf(
         WritingAction.PROOFREAD to stringResource(R.string.action_proofread),
+        WritingAction.BULLET_LIST to stringResource(R.string.action_bullet_list),
         WritingAction.PROFESSIONAL to stringResource(R.string.action_professional),
         WritingAction.CASUAL to stringResource(R.string.action_casual),
         WritingAction.CONCISE to stringResource(R.string.action_concise),

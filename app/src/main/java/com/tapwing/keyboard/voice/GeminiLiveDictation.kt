@@ -16,15 +16,20 @@ import java.util.concurrent.TimeUnit
 internal data class GeminiLiveConfig(
     val apiKey: String,
     val smartFormatting: Boolean,
-    val languageCode: String?
+    val languageCode: String?,
+    val languageCodes: List<String> = emptyList()
 ) {
     // Avoid accidentally exposing the user's key in a debug string.
-    override fun toString(): String = "GeminiLiveConfig(smartFormatting=$smartFormatting, languageCode=$languageCode)"
+    override fun toString(): String =
+        "GeminiLiveConfig(smartFormatting=$smartFormatting, languageCode=$languageCode, languageCodes=$languageCodes)"
 
     fun setup(): String {
+        val resolvedCodes = (if (languageCodes.isNotEmpty()) languageCodes else listOfNotNull(languageCode))
+            .mapNotNull { normalizeLiveLanguage(it) }
+            .distinct()
         val transcription = JSONObject()
             .put("mode", if (smartFormatting) "SMART" else "VERBATIM")
-            .put("languageCodes", JSONArray(listOfNotNull(normalizeLiveLanguage(languageCode))))
+            .put("languageCodes", JSONArray(resolvedCodes))
         return JSONObject().put("setup", JSONObject()
             .put("model", "models/${GeminiLiveDictation.MODEL}")
             .put("generationConfig", JSONObject().put("responseModalities", JSONArray(listOf("TEXT"))))
@@ -38,7 +43,7 @@ internal data class GeminiLiveConfig(
 private fun normalizeLiveLanguage(tag: String?): String? = when (tag) {
     "de-CH" -> "de-DE"
     "es-ES" -> null // The Live model handles it through automatic detection.
-    else -> tag
+    else -> tag?.takeIf { it.isNotBlank() }
 }
 
 /** Holds only speech from the current recording. SMART finals replace earlier text. */
@@ -185,7 +190,7 @@ internal class GeminiLiveDictation(
             "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
         private const val ACTIVITY_START = """{"realtimeInput":{"activityStart":{}}}"""
         private const val ACTIVITY_END = """{"realtimeInput":{"activityEnd":{}}}"""
-        private const val MAX_BUFFERED_FRAMES = 72 // Six seconds at the recorder's 83 ms cadence.
+        private const val MAX_BUFFERED_FRAMES = 120 // Six seconds at the recorder's 50 ms cadence.
         private const val MAX_OUTBOUND_BYTES = 384 * 1024L
         private val client = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)

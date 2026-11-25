@@ -95,7 +95,7 @@ object GeminiNanoClient {
             WritingAction.PROFESSIONAL, WritingAction.CASUAL, WritingAction.CONCISE,
             WritingAction.EMOTIVE, WritingAction.REPHRASE ->
                 runRewrite(context.applicationContext, text, action, locale)
-            WritingAction.SUMMARIZE, WritingAction.TRANSLATE ->
+            WritingAction.SUMMARIZE, WritingAction.BULLET_LIST, WritingAction.TRANSLATE ->
                 Result.failure(UnsupportedOperationException("Action handled by fallback"))
         }
     }

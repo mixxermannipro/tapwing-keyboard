@@ -23,6 +23,8 @@
     <string name="cd_voice_mic">Start or stop voice typing</string>
     <string name="cd_voice_done">Finish and apply voice text</string>
     <string name="cd_voice_cancel">Cancel voice typing</string>
+    <string name="cd_voice_pause">Pause voice typing</string>
+    <string name="cd_voice_resume">Resume voice typing</string>
     <string name="cd_voice_minimize">Minimize or expand keyboard</string>
     <string name="cd_backspace">Backspace</string>
     <string name="cd_shift">Shift</string>
@@ -34,6 +36,7 @@
     <!-- Voice & Writing Tools UI -->
     <string name="voice_hint_finish">Speak freely — tap ✓ or Mic to stop</string>
     <string name="voice_listening">Listening… tap again to stop</string>
+    <string name="voice_paused">Paused — tap ▶ to continue</string>
     <string name="voice_processing_local">Transcribing &amp; cleaning locally…</string>
     <string name="voice_tidying_up">Tidying up…</string>
     <string name="voice_onboarding_title">Just speak naturally</string>
@@ -58,6 +61,7 @@
     <string name="btn_rewriting">Rewriting…</string>
 
     <string name="action_proofread">Proofread</string>
+    <string name="action_bullet_list">Bullet list</string>
     <string name="action_professional">Professional</string>
     <string name="action_casual">Casual</string>
     <string name="action_concise">Concise</string>

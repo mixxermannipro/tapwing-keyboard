@@ -41,6 +41,8 @@ import java.util.concurrent.ConcurrentLinkedQueue
 data class VoiceUiState(
     val isListening: Boolean = false,
     val isProcessing: Boolean = false,
+    val isPaused: Boolean = false,
+    val canPause: Boolean = false,
     val isMinimized: Boolean = false,
     val rmsDb: Float = 0f,
     val elapsedSeconds: Int = 0,
@@ -51,7 +53,9 @@ data class VoiceUiState(
     val processingLabel: String? = null,
     val errorMessage: String? = null,
     val activeLocaleTag: String = "de-DE",
-    val engineLabel: String? = null
+    val engineLabel: String? = null,
+    val isMultilingual: Boolean = false,
+    val multilingualLabel: String? = null
 )
 
 internal class TapwingVoiceController(
@@ -90,7 +94,9 @@ internal class TapwingVoiceController(
     private var stopStartedAt = 0L
     private var lastPartialChangedAt = 0L
     private var segmentSpeechEnded = false
-    private var activeStrictLanguage = true
+    private var activeStrictLanguage = false
+    private var activeMultilingual = true
+    private var activeMultilingualLabel: String? = null
     private var activeOfflineOnly = false
     private var activeFormatting = true
     private var transcriptionJob: Job? = null
@@ -124,15 +130,23 @@ internal class TapwingVoiceController(
         }
     }
 
-    fun warmInstalledLocalModel(locale: String, preferredModelId: String) {
+    fun warmInstalledLocalModel(
+        locale: String,
+        preferredModelId: String,
+        preferMultilingual: Boolean = false
+    ) {
         if (sessionActive || _state.value.isProcessing) return
-        val best = modelManager.bestInstalledSpeechModel(preferredModelId, locale) ?: return
+        val best = modelManager.bestInstalledSpeechModel(
+            preferredId = preferredModelId,
+            locale = locale,
+            preferMultilingual = preferMultilingual
+        ) ?: return
         warmJob?.cancel()
         warmJob = controllerScope.launch {
             LocalInferenceEngine.warmSpeechModel(
                 spec = best.first,
                 modelPath = best.second,
-                languageCode = KeyboardLocales.baseLang(locale)
+                languageCode = if (preferMultilingual) null else KeyboardLocales.baseLang(locale)
             )
         }
     }
@@ -195,13 +209,26 @@ internal class TapwingVoiceController(
                 offlineOnly = activeOfflineOnly,
                 whisperModelId = activeWhisperModelId,
                 formatText = activeFormatting,
-                vocabularyHint = activeVocabularyHint
+                vocabularyHint = activeVocabularyHint,
+                multilingual = activeMultilingual,
+                multilingualLabel = activeMultilingualLabel
             )
         }
     }
 
     fun toggleMinimized() {
         _state.value = _state.value.copy(isMinimized = !_state.value.isMinimized)
+    }
+
+    fun togglePause() {
+        if (!sessionActive || !usingLocalAudioCapture || stopRequested) return
+        val nextPaused = !wavRecorder.isPaused()
+        if (wavRecorder.setPaused(nextPaused)) {
+            _state.value = _state.value.copy(
+                isPaused = nextPaused,
+                rmsDb = if (nextPaused) 0f else _state.value.rmsDb
+            )
+        }
     }
 
     fun clearError() {
@@ -213,6 +240,7 @@ internal class TapwingVoiceController(
     fun beginExternalProcessing(label: String) {
         _state.value = _state.value.copy(
             isListening = false,
+            isPaused = false,
             isProcessing = true,
             processingLabel = label,
             errorMessage = null
@@ -233,13 +261,17 @@ internal class TapwingVoiceController(
         cloud: CloudDictation? = null,
         live: GeminiLiveConfig? = null,
         fallbackCloud: CloudDictation? = null,
-        vocabularyHint: String? = null
+        vocabularyHint: String? = null,
+        multilingual: Boolean = false,
+        multilingualLabel: String? = null
     ) {
         if (sessionActive || _state.value.isProcessing) return
         activeLocale = locale
         activeEngineMode = engineMode
         activeWhisperModelId = whisperModelId
-        activeStrictLanguage = strictLanguageLock
+        activeMultilingual = multilingual
+        activeMultilingualLabel = multilingualLabel
+        activeStrictLanguage = strictLanguageLock && !multilingual
         activeFormatting = formatText
         activeOfflineOnly = offlineOnly
         activeVocabularyHint = vocabularyHint?.trim()?.takeIf { it.isNotEmpty() }
@@ -251,7 +283,11 @@ internal class TapwingVoiceController(
             return
         }
         val de = KeyboardLocales.baseLang(locale) == "de"
-        val bestLocal = modelManager.bestInstalledSpeechModel(whisperModelId, locale)
+        val bestLocal = modelManager.bestInstalledSpeechModel(
+            preferredId = whisperModelId,
+            locale = locale,
+            preferMultilingual = multilingual
+        )
 
         if (engineMode == VoiceEngineMode.GEMINI_LIVE) {
             if (offlineOnly || live == null) {
@@ -409,7 +445,7 @@ internal class TapwingVoiceController(
             )
         }
 
-        val langHint = KeyboardLocales.baseLang(locale).takeIf { activeStrictLanguage }
+        val langHint = KeyboardLocales.baseLang(locale).takeIf { activeStrictLanguage && !activeMultilingual }
         val streamingPair = localModel?.takeIf {
             it.first.kind == LocalModelKind.SHERPA_STREAMING && live == null && cloud == null
         }
@@ -422,6 +458,7 @@ internal class TapwingVoiceController(
                     scope = controllerScope,
                     spec = streamingPair.first,
                     modelDir = streamingPair.second,
+                    languageCode = if (activeMultilingual) "auto" else KeyboardLocales.baseLang(locale),
                     onPreview = { text -> mainHandler.post { preview(text) } }
                 )
                 val session = res.getOrNull()
@@ -460,7 +497,7 @@ internal class TapwingVoiceController(
                 val session = activeSherpaStream
                 if (session != null) {
                     session.offerPcm(pcmBytes, count)
-                } else if (preStreamBuffer != null && preStreamBuffer.size < 120) {
+                } else if (preStreamBuffer != null && preStreamBuffer.size < 160) {
                     preStreamBuffer.offer(pcmBytes.copyOf(count))
                 }
             }
@@ -522,11 +559,14 @@ internal class TapwingVoiceController(
         }
         _state.value = VoiceUiState(
             isListening = true,
+            canPause = true,
             isLocalWhisper = localModel != null,
             isCloud = cloud != null || live != null,
             processingLabel = if (de) "Mikrofon startet …" else "Starting microphone…",
             activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag,
-            engineLabel = engineLabel
+            engineLabel = engineLabel,
+            isMultilingual = activeMultilingual,
+            multilingualLabel = activeMultilingualLabel
         )
         if (localModel != null && incremental == null && streamingDeferred == null) {
             controllerScope.launch {
@@ -553,13 +593,16 @@ internal class TapwingVoiceController(
         mainHandler.removeCallbacksAndMessages(null)
         _state.value = VoiceUiState(
             isListening = true,
+            canPause = false,
             isAndroidOffline = onDevice,
             elapsedSeconds = 0,
             activeLocaleTag = KeyboardLocales.specFor(locale).bcp47Tag,
-            engineLabel = if (onDevice) "Android Offline" else "Android"
+            engineLabel = if (onDevice) "Android Offline" else "Android",
+            isMultilingual = activeMultilingual,
+            multilingualLabel = activeMultilingualLabel
         )
         scheduleSystemSpeechTimer(sessionGeneration)
-        startSegment(locale, strictLanguageLock)
+        startSegment(locale, strictLanguageLock && !activeMultilingual)
     }
 
     private fun scheduleSystemSpeechTimer(generation: Int) {
@@ -782,7 +825,7 @@ internal class TapwingVoiceController(
         stopRequested = true
         stopStartedAt = SystemClock.elapsedRealtime()
         val generation = sessionGeneration
-        _state.value = _state.value.copy(isListening = false, isProcessing = true)
+        _state.value = _state.value.copy(isListening = false, isPaused = false, isProcessing = true)
         if (usingLocalAudioCapture) {
             transcribeCapture(generation)
             return
@@ -819,7 +862,7 @@ internal class TapwingVoiceController(
         val streamDeferred = activeSherpaStreamJob
         val vocabHint = activeVocabularyHint
         val lang = KeyboardLocales.baseLang(activeLocale)
-        val languageHint = lang.takeIf { activeStrictLanguage }
+        val languageHint = lang.takeIf { activeStrictLanguage && !activeMultilingual }
         val de = lang == "de"
         _state.value = _state.value.copy(
             processingLabel = when {

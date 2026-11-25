@@ -150,6 +150,9 @@ fun TapwingKeyboardRoot(
     onFinishVoice: () -> Unit,
     onCancelVoice: () -> Unit,
     onToggleVoiceMinimize: () -> Unit,
+    onToggleVoicePause: () -> Unit = {},
+    onToggleVoiceMultilingual: () -> Unit = {},
+    onQuickVoicePolish: (WritingAction) -> Unit = {},
     onDismissVoiceError: () -> Unit = {},
     onHideKeyboard: () -> Unit
 ) {
@@ -381,6 +384,9 @@ fun TapwingKeyboardRoot(
                                         onFinishVoice = onFinishVoice,
                                         onCancelVoice = onCancelVoice,
                                         onToggleVoiceMinimize = onToggleVoiceMinimize,
+                                        onToggleVoicePause = onToggleVoicePause,
+                                        onToggleVoiceMultilingual = onToggleVoiceMultilingual,
+                                        onQuickVoicePolish = onQuickVoicePolish,
                                         onDismissVoiceError = onDismissVoiceError
                                     )
 

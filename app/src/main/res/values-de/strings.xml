@@ -23,6 +23,8 @@
     <string name="cd_voice_mic">Spracheingabe starten oder stoppen</string>
     <string name="cd_voice_done">Spracheingabe beenden und übernehmen</string>
     <string name="cd_voice_cancel">Spracheingabe abbrechen</string>
+    <string name="cd_voice_pause">Spracheingabe pausieren</string>
+    <string name="cd_voice_resume">Spracheingabe fortsetzen</string>
     <string name="cd_voice_minimize">Tastatur minimieren oder erweitern</string>
     <string name="cd_backspace">Löschen</string>
     <string name="cd_shift">Umschalttaste</string>
@@ -34,6 +36,7 @@
     <!-- Spracheingabe & Schreibhilfe -->
     <string name="voice_hint_finish">Sprich frei — tippe ✓ oder Mikrofon zum Stoppen</string>
     <string name="voice_listening">Ich höre zu… nochmal tippen zum Stoppen</string>
+    <string name="voice_paused">Pausiert — tippe ▶ zum Fortsetzen</string>
     <string name="voice_processing_local">Transkribiere &amp; bereinige lokal…</string>
     <string name="voice_tidying_up">Wird bereinigt…</string>
     <string name="voice_onboarding_title">Sprich einfach natürlich</string>
@@ -58,6 +61,7 @@
     <string name="btn_rewriting">Wird überarbeitet…</string>
 
     <string name="action_proofread">Korrigieren</string>
+    <string name="action_bullet_list">Stichpunkte</string>
     <string name="action_professional">Professionell</string>
     <string name="action_casual">Locker</string>
     <string name="action_concise">Kürzer</string>

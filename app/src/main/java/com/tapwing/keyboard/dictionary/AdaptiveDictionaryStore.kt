@@ -63,6 +63,7 @@ class AdaptiveDictionaryStore(
     private val perAppBigrams = linkedMapOf<String, LinkedHashMap<String, LinkedHashMap<String, Int>>>()
     private val perAppTones = linkedMapOf<String, String>()
     private val learnedCorrections = linkedMapOf<String, String>()
+    private val voiceCorrections = linkedMapOf<String, String>()
     private val recentEmojis = mutableListOf<String>()
     private val snippets = mutableListOf<TextSnippet>()
     private val rejectedCorrections = linkedSetOf<String>()
@@ -423,6 +424,166 @@ class AdaptiveDictionaryStore(
         return learnedCorrections[lower]
     }
 
+    /**
+     * Records a user correction made after voice dictation (e.g. ASR heard "Maier" -> user corrected to "Meyer").
+     * Future voice transcripts automatically apply this mapping and also boost the target word in the custom vocabulary.
+     */
+    @Synchronized
+    fun recordVoiceCorrection(
+        heardWord: String,
+        correctedWord: String,
+        learningEnabled: Boolean,
+        incognito: Boolean
+    ) {
+        if (!learningEnabled || incognito) return
+        val heardLower = heardWord.trim().lowercase()
+        val target = correctedWord.trim()
+        if (heardLower.length < 2 || target.length < 2) return
+        if (heardLower == target.lowercase() && heardWord.trim() == target) return
+        voiceCorrections[heardLower] = target
+        if (voiceCorrections.size > MAX_VOICE_CORRECTIONS) {
+            val oldest = voiceCorrections.keys.firstOrNull()
+            if (oldest != null) voiceCorrections.remove(oldest)
+        }
+        // Also reinforce the corrected spelling as a learned word so STT/LLM prompts prioritize it.
+        learnedUnigrams[target] = maxOf((learnedUnigrams[target] ?: 0) + 2, 3)
+        learnedUnigramsLower[target.lowercase()] = target
+        recencyClock++
+        wordRecency[target.lowercase()] = recencyClock
+        saveToDisk()
+    }
+
+    @Synchronized
+    fun preferredVoiceCorrectionFor(word: String): String? {
+        val lower = word.trim().lowercase()
+        if (lower.length < 2) return null
+        return voiceCorrections[lower]
+    }
+
+    /**
+     * Returns the highest-signal personal vocabulary for STT biasing and LLM cleanup/writing prompts:
+     * custom dictionary entries, voice-corrected spellings, per-app frequent terms, and top learned words.
+     */
+    @Synchronized
+    fun topVocabularyForVoice(appPackage: String? = null, limit: Int = 30): Set<String> {
+        val out = linkedSetOf<String>()
+        val seenLower = hashSetOf<String>()
+        fun add(raw: String) {
+            val clean = raw.trim()
+            if (clean.length !in 2..36 || clean.none { it.isLetter() }) return
+            val lower = clean.lowercase()
+            if (seenLower.add(lower)) out += clean
+        }
+
+        // 1) Explicit custom dictionary entries (highest priority: names, brands, jargon)
+        customWords.entries
+            .sortedByDescending { it.value }
+            .forEach { (w, _) ->
+                if (out.size < limit) add(w)
+            }
+        // 2) Targets of learned voice corrections
+        voiceCorrections.values.reversed().forEach { target ->
+            if (out.size < limit) add(target)
+        }
+        // 3) Per-app vocabulary for the active app (e.g. work acronyms in Slack/Outlook, names in WhatsApp)
+        val cleanPkg = appPackage?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanPkg != null && out.size < limit) {
+            perAppUnigrams[cleanPkg]?.entries
+                ?.sortedByDescending { it.value }
+                ?.forEach { (w, count) ->
+                    if (out.size < limit && count >= 2) add(w)
+                }
+        }
+        // 4) Frequently typed / recently reinforced learned words (skip trivial short function words)
+        learnedUnigrams.entries
+            .asSequence()
+            .filter { (w, count) -> count >= 2 && w.length >= 4 }
+            .sortedByDescending { (w, count) ->
+                count * 10L + ((wordRecency[w.lowercase()] ?: 0L) * 5L / maxOf(1L, recencyClock))
+            }
+            .forEach { (w, _) ->
+                if (out.size < limit) add(w)
+            }
+        return out
+    }
+
+    /**
+     * Conservative fuzzy match against explicit custom dictionary words for STT post-processing.
+     * Fixes near-miss ASR spellings of personal names/brands (e.g. "Tapwig" -> "Tapwing", "Kubernetis" -> "Kubernetes")
+     * while NEVER touching words that are already standard vocabulary words.
+     */
+    @Synchronized
+    fun bestFuzzyCustomMatch(word: String, locale: String): String? {
+        val clean = word.trim()
+        if (clean.length < 5 || customWords.isEmpty()) return null
+        val lower = clean.lowercase()
+        // Exact match is handled elsewhere; never rewrite already-known standard words.
+        if (customWordsLower.containsKey(lower)) return null
+        if (LanguageVocabularies.isNeverAutoCapitalizeMidSentence(clean, locale)) return null
+        if (LanguageVocabularies.containsStandardWord(clean, locale)) return null
+
+        val maxDist = if (clean.length >= 8) 2 else 1
+        var bestCandidate: String? = null
+        var bestDist = Int.MAX_VALUE
+        var bestWeight = -1
+
+        for ((customWord, weight) in customWords) {
+            if (customWord.length < 5) continue
+            val customLower = customWord.lowercase()
+            if (kotlin.math.abs(customLower.length - lower.length) > maxDist) continue
+            // Require matching first letter (or German phonetic pair c/k, f/v, p/b, t/d, s/z) to avoid false hits
+            if (!compatibleInitial(lower[0], customLower[0])) continue
+            val dist = levenshteinBounded(lower, customLower, maxDist)
+            if (dist in 1..maxDist && (dist < bestDist || (dist == bestDist && weight > bestWeight))) {
+                bestDist = dist
+                bestWeight = weight
+                bestCandidate = customWord
+            }
+        }
+        return bestCandidate
+    }
+
+    private fun compatibleInitial(a: Char, b: Char): Boolean {
+        if (a == b) return true
+        return when (a) {
+            'c' -> b == 'k' || b == 'z'
+            'k' -> b == 'c'
+            'f' -> b == 'v' || b == 'p'
+            'v' -> b == 'f' || b == 'w'
+            'w' -> b == 'v'
+            's' -> b == 'z'
+            'z' -> b == 's' || b == 'c'
+            else -> false
+        }
+    }
+
+    private fun levenshteinBounded(a: String, b: String, maxDist: Int): Int {
+        val n = a.length
+        val m = b.length
+        if (kotlin.math.abs(n - m) > maxDist) return maxDist + 1
+        var prev = IntArray(m + 1) { it }
+        var curr = IntArray(m + 1)
+        for (i in 1..n) {
+            curr[0] = i
+            var rowMin = curr[0]
+            for (j in 1..m) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                val v = minOf(
+                    prev[j] + 1,
+                    curr[j - 1] + 1,
+                    prev[j - 1] + cost
+                )
+                curr[j] = v
+                if (v < rowMin) rowMin = v
+            }
+            if (rowMin > maxDist) return maxDist + 1
+            val tmp = prev
+            prev = curr
+            curr = tmp
+        }
+        return prev[m]
+    }
+
     @Synchronized
     fun recordTextBatch(
         text: String,
@@ -725,6 +886,7 @@ class AdaptiveDictionaryStore(
         perAppBigrams.clear()
         perAppTones.clear()
         learnedCorrections.clear()
+        voiceCorrections.clear()
         recentEmojis.clear()
         rejectedCorrections.clear()
         saveToDisk()
@@ -929,6 +1091,14 @@ class AdaptiveDictionaryStore(
                 }
             }
 
+            voiceCorrections.clear()
+            root.optJSONObject("voiceCorrections")?.let { obj ->
+                obj.keys().forEach { k ->
+                    val v = obj.optString(k, "").trim()
+                    if (v.isNotEmpty()) voiceCorrections[k] = v
+                }
+            }
+
             recentEmojis.clear()
             root.optJSONArray("recentEmojis")?.let { arr ->
                 for (i in 0 until arr.length()) {
@@ -1083,6 +1253,9 @@ class AdaptiveDictionaryStore(
         root.put("learnedCorrections", JSONObject().apply {
             learnedCorrections.forEach { (k, v) -> put(k, v) }
         })
+        root.put("voiceCorrections", JSONObject().apply {
+            voiceCorrections.forEach { (k, v) -> put(k, v) }
+        })
         root.put("recentEmojis", JSONArray().apply {
             recentEmojis.forEach { put(it) }
         })
@@ -1116,6 +1289,7 @@ class AdaptiveDictionaryStore(
         private const val MAX_PER_APP_WORDS = 200
         private const val MAX_PER_APP_BIGRAMS = 250
         private const val MAX_LEARNED_CORRECTIONS = 300
+        private const val MAX_VOICE_CORRECTIONS = 300
         private const val MAX_RECENT_EMOJIS = 28
 
         private val ioExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->

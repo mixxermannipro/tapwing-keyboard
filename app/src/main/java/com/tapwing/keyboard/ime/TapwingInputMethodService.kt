@@ -197,6 +197,7 @@ class TapwingInputMethodService :
     private var voicePrefs: TapwingPrefs? = null
     private var voiceEditJob: Job? = null
     private var voiceEditGeneration = 0
+    private var lastVoiceInsertedWords: Set<String> = emptySet()
 
     private data class CopiedText(val text: String, val timestamp: Long, val verificationCode: Boolean)
 
@@ -611,6 +612,9 @@ class TapwingInputMethodService :
                     onFinishVoice = { voiceController.finishAndCommit() },
                     onCancelVoice = { cancelVoice() },
                     onToggleVoiceMinimize = { voiceController.toggleMinimized() },
+                    onToggleVoicePause = { voiceController.togglePause() },
+                    onToggleVoiceMultilingual = { toggleVoiceMultilingual() },
+                    onQuickVoicePolish = ::runQuickVoicePolish,
                     onDismissVoiceError = { voiceController.clearError() },
                     onHideKeyboard = ::hideKeyboard
                 )
@@ -633,6 +637,7 @@ class TapwingInputMethodService :
             undoManager.clear()
             proactiveUndoState = null
             lastSuggestionKey = ""
+            lastVoiceInsertedWords = emptySet()
             clearAutofillSuggestions()
         }
         if (currentEditorInfo != null && privateEditor && !nextPrivate) {
@@ -674,7 +679,11 @@ class TapwingInputMethodService :
         if (currentPrefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST ||
             currentPrefs.voiceEngine == VoiceEngineMode.LOCAL_WHISPER
         ) {
-            voiceController.warmInstalledLocalModel(currentPrefs.activeLocale, currentPrefs.selectedWhisperModelId)
+            voiceController.warmInstalledLocalModel(
+                locale = currentPrefs.activeLocale,
+                preferredModelId = currentPrefs.selectedWhisperModelId,
+                preferMultilingual = currentPrefs.voiceMultilingualCodeSwitching
+            )
         }
 
         currentEditorInfo = info
@@ -1398,6 +1407,14 @@ class TapwingInputMethodService :
                 learningEnabled = currentPrefs.learningEnabled,
                 incognito = currentPrefs.incognitoMode
             )
+            if (before.lowercase() in lastVoiceInsertedWords) {
+                dictionaryStore.recordVoiceCorrection(
+                    heardWord = before,
+                    correctedWord = chip.text,
+                    learningEnabled = currentPrefs.learningEnabled,
+                    incognito = currentPrefs.incognitoMode
+                )
+            }
         }
 
         val de = KeyboardLocales.baseLang(currentPrefs.activeLocale) == "de"
@@ -1518,6 +1535,95 @@ class TapwingInputMethodService :
         startVoice()
     }
 
+    private fun resolveMultilingualLanguages(prefs: TapwingPrefs): Pair<List<String>, String?> {
+        if (!prefs.voiceMultilingualCodeSwitching) return emptyList<String>() to null
+        val primarySpec = KeyboardLocales.specFor(prefs.activeLocale)
+        val primaryBase = primarySpec.baseLanguage
+        val tags = mutableListOf(primarySpec.bcp47Tag)
+        val shortCodes = mutableListOf(primaryBase.uppercase())
+        val enabled = prefs.enabledLocales
+            .map { KeyboardLocales.specFor(it) }
+            .filter { it.baseLanguage != primaryBase }
+        enabled.firstOrNull()?.let { sec ->
+            tags += sec.bcp47Tag
+            shortCodes += sec.baseLanguage.uppercase()
+        }
+        // Always ensure at least a bilingual pair (add English when primary != en, else German)
+        if (tags.size < 2) {
+            val fallbackLocale = if (primaryBase == "en") "de" else "en"
+            val sec = KeyboardLocales.specFor(fallbackLocale)
+            tags += sec.bcp47Tag
+            shortCodes += sec.baseLanguage.uppercase()
+        }
+        return tags to shortCodes.distinct().take(2).joinToString("+")
+    }
+
+    private fun toggleVoiceMultilingual() {
+        val next = !currentPrefs.voiceMultilingualCodeSwitching
+        updatePref {
+            it.copy(
+                voiceMultilingualCodeSwitching = next,
+                voiceStrictLanguageLock = if (next) false else it.voiceStrictLanguageLock
+            )
+        }
+        // If actively listening, restart seamlessly with the updated language mode
+        if (voiceController.state.value.isListening) {
+            cancelVoice()
+            serviceScope.launch {
+                kotlinx.coroutines.delay(90L)
+                if (inputViewActive) startVoice()
+            }
+        }
+    }
+
+    private fun runQuickVoicePolish(action: WritingAction) {
+        if (!languageToolsAllowed || !currentPrefs.aiWritingToolsEnabled) return
+        val target = currentInputConnection?.readWritingTarget() ?: return
+        val fieldText = target.text
+        if (fieldText.isBlank()) return
+        val prefs = currentPrefs
+        val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+        val cloudSet = WritingToolsEngine.CLOUD_PROVIDERS
+        val processingPrefs = if (prefs.incognitoMode) {
+            prefs.copy(
+                aiProvider = prefs.aiProvider.takeUnless { it in cloudSet } ?: AiProviderType.LOCAL_RULES,
+                aiFallbackProvider = prefs.aiFallbackProvider.takeUnless { it in cloudSet } ?: AiProviderType.LOCAL_RULES
+            )
+        } else prefs
+        voiceEditGeneration++
+        val generation = voiceEditGeneration
+        voiceEditJob?.cancel()
+        voiceController.beginExternalProcessing(
+            when (action) {
+                WritingAction.BULLET_LIST -> if (de) "Erstelle Stichpunkte …" else "Formatting bullets…"
+                WritingAction.CONCISE -> if (de) "Kürze Text …" else "Shortening…"
+                WritingAction.PROFESSIONAL -> if (de) "Formuliere formell …" else "Polishing tone…"
+                else -> if (de) "Überarbeite Text …" else "Rewriting…"
+            }
+        )
+        voiceEditJob = serviceScope.launch {
+            try {
+                val appPkg = if (prefs.perAppLearningEnabled) currentTargetPackage else null
+                val out = writingToolsEngine.runAction(fieldText, action, processingPrefs, appPackage = appPkg)
+                val connection = currentInputConnection
+                if (generation == voiceEditGeneration && inputViewActive && connection != null &&
+                    out.rewrittenText.isNotBlank() && target.replace(connection, out.rewrittenText)
+                ) {
+                    recordEditorUndo(
+                        beforeText = fieldText,
+                        afterText = out.rewrittenText,
+                        reason = UndoReason.AI_REWRITE,
+                        label = if (de) "KI rückgängig" else "Undo AI edit"
+                    )
+                    proactiveUndoState = undoManager.activeBanner()
+                    refreshContextAndSuggestions()
+                }
+            } finally {
+                if (generation == voiceEditGeneration) voiceController.finishExternalProcessing()
+            }
+        }
+    }
+
     private fun startVoice() {
         if (!languageToolsAllowed) return
         val prefs = currentPrefs
@@ -1530,14 +1636,18 @@ class TapwingInputMethodService :
             return
         }
         val natural = prefs.voiceMode == VoiceDictationMode.NATURAL_CLEANUP
-        val customVocab = if (prefs.incognitoMode) emptySet() else dictionaryStore.allKnownVocabularyWords()
+        val appPkg = if (prefs.perAppLearningEnabled) currentTargetPackage else null
+        val customVocab = if (prefs.incognitoMode) emptySet()
+        else dictionaryStore.topVocabularyForVoice(appPackage = appPkg, limit = 30)
         val vocabHint = customVocab
             .asSequence()
             .map { it.trim() }
-            .filter { it.length in 2..32 && it.any(Char::isLetter) }
-            .take(12)
+            .filter { it.length in 2..36 && it.any(Char::isLetter) }
+            .take(20)
             .joinToString(", ")
             .takeIf { it.isNotEmpty() }
+        val (multilingualTags, multilingualBadge) = resolveMultilingualLanguages(prefs)
+        val isMultilingual = prefs.voiceMultilingualCodeSwitching && multilingualTags.size >= 2
 
         fun buildCloudDictation(providerType: AiProviderType, modelId: String): CloudDictation? {
             val speechProv = CloudSpeechProvider.from(providerType, prefs.aiCustomEndpoint) ?: return null
@@ -1553,7 +1663,9 @@ class TapwingInputMethodService :
                 removeFillers = prefs.voiceRemoveFillers,
                 autoPunctuate = prefs.voiceAutoPunctuate,
                 customVocabulary = customVocab,
-                model = effectiveModel
+                model = effectiveModel,
+                multilingualLanguages = if (isMultilingual) multilingualTags else emptyList(),
+                autoBulletLists = prefs.voiceAutoBulletLists
             )
         }
 
@@ -1569,7 +1681,10 @@ class TapwingInputMethodService :
             GeminiLiveConfig(
                 apiKey = geminiKey,
                 smartFormatting = natural && prefs.voiceRemoveFillers && prefs.voiceAutoPunctuate,
-                languageCode = KeyboardLocales.specFor(prefs.activeLocale).bcp47Tag.takeIf { prefs.voiceStrictLanguageLock }
+                languageCode = KeyboardLocales.specFor(prefs.activeLocale).bcp47Tag.takeIf {
+                    prefs.voiceStrictLanguageLock && !isMultilingual
+                },
+                languageCodes = if (isMultilingual) multilingualTags else emptyList()
             )
         } else null
         val explicitFallbackCloud = buildCloudDictation(
@@ -1586,12 +1701,14 @@ class TapwingInputMethodService :
                 customVocabulary = customVocab,
                 model = prefs.dictationModel.trim().takeIf {
                     prefs.dictationProvider == AiProviderType.GEMINI_API && it.isNotEmpty()
-                } ?: CloudDictation.GEMINI_MODEL
+                } ?: CloudDictation.GEMINI_MODEL,
+                multilingualLanguages = if (isMultilingual) multilingualTags else emptyList(),
+                autoBulletLists = prefs.voiceAutoBulletLists
             )
         } else null
         voiceController.startListening(
             locale = prefs.activeLocale,
-            strictLanguageLock = prefs.voiceStrictLanguageLock,
+            strictLanguageLock = prefs.voiceStrictLanguageLock && !isMultilingual,
             engineMode = prefs.voiceEngine,
             offlineOnly = prefs.incognitoMode,
             whisperModelId = prefs.selectedWhisperModelId,
@@ -1599,7 +1716,9 @@ class TapwingInputMethodService :
             cloud = cloud,
             live = live,
             fallbackCloud = fallbackCloud,
-            vocabularyHint = vocabHint
+            vocabularyHint = vocabHint,
+            multilingual = isMultilingual,
+            multilingualLabel = multilingualBadge
         )
     }
 
@@ -1624,9 +1743,12 @@ class TapwingInputMethodService :
             locale = prefs.activeLocale,
             removeFillers = prefs.voiceRemoveFillers,
             autoPunctuate = prefs.voiceAutoPunctuate,
-            dictionaryStore = dictionaryStore.takeUnless { prefs.incognitoMode }
+            dictionaryStore = dictionaryStore.takeUnless { prefs.incognitoMode },
+            multilingual = prefs.voiceMultilingualCodeSwitching,
+            autoBulletLists = prefs.voiceAutoBulletLists
         )
         val generation = voiceEditGeneration
+        val appPkg = if (prefs.perAppLearningEnabled) currentTargetPackage else null
         val cloudSet = com.tapwing.keyboard.ai.WritingToolsEngine.CLOUD_PROVIDERS
         val processingPrefs = if (prefs.incognitoMode) {
             prefs.copy(
@@ -1642,6 +1764,19 @@ class TapwingInputMethodService :
             VoiceCommandResult.DeleteLastSentence -> deletePreviousSentence(de)
             VoiceCommandResult.ClearAll -> clearWholeFieldWithUndo(de)
             VoiceCommandResult.UndoLast -> { performUndo() }
+            VoiceCommandResult.SelectAll -> {
+                currentInputConnection?.performContextMenuAction(android.R.id.selectAll)
+            }
+            VoiceCommandResult.CopyAll -> {
+                currentInputConnection?.let { ic ->
+                    ic.performContextMenuAction(android.R.id.selectAll)
+                    ic.performContextMenuAction(android.R.id.copy)
+                }
+            }
+            VoiceCommandResult.PasteClipboard -> {
+                currentInputConnection?.performContextMenuAction(android.R.id.paste)
+                refreshContextAndSuggestions()
+            }
             VoiceCommandResult.SendAction -> {
                 val ic = currentInputConnection ?: return
                 performEditorEnterAction(ic)
@@ -1654,7 +1789,7 @@ class TapwingInputMethodService :
                 voiceController.beginExternalProcessing(if (de) "Überarbeite Text …" else "Rewriting text…")
                 voiceEditJob = serviceScope.launch {
                     try {
-                        val out = writingToolsEngine.runAction(fieldText, parsed.action, processingPrefs)
+                        val out = writingToolsEngine.runAction(fieldText, parsed.action, processingPrefs, appPackage = appPkg)
                         val connection = currentInputConnection
                         if (generation == voiceEditGeneration && inputViewActive && connection != null &&
                             out.rewrittenText.isNotBlank() && target.replace(connection, out.rewrittenText)
@@ -1684,10 +1819,23 @@ class TapwingInputMethodService :
                     insertVoiceText(fallback, prefs)
                     return
                 }
-                voiceController.beginExternalProcessing(if (de) "Glätte Text …" else "Polishing text…")
+                val isLocalLlm = processingPrefs.cleanupProvider == AiProviderType.LOCAL_LLM
+                voiceController.beginExternalProcessing(
+                    when {
+                        isLocalLlm && de -> "Lokale KI bereinigt …"
+                        isLocalLlm -> "Local AI polishing…"
+                        de -> "Glätte Text …"
+                        else -> "Polishing text…"
+                    }
+                )
                 voiceEditJob = serviceScope.launch {
                     try {
-                        val text = writingToolsEngine.cleanupVoiceTranscript(raw, processingPrefs, fallback)
+                        val text = writingToolsEngine.cleanupVoiceTranscript(
+                            rawTranscript = raw,
+                            prefs = processingPrefs,
+                            ruleCleaned = fallback,
+                            appPackage = appPkg
+                        )
                         if (generation == voiceEditGeneration && inputViewActive) {
                             insertVoiceText(text.rewrittenText, prefs)
                         }
@@ -1705,6 +1853,10 @@ class TapwingInputMethodService :
         if (!commitTextWithUndo(text, UndoReason.VOICE_INSERT, if (de) "Diktat rückgängig" else "Undo dictation")) return
         voiceController.recordInsertionTiming()
         statsStore.recordVoiceDictation(text.length, prefs.incognitoMode)
+        lastVoiceInsertedWords = Regex("""[\p{L}]{2,}""")
+            .findAll(text)
+            .map { it.value.lowercase() }
+            .toSet()
         dictionaryStore.recordTextBatch(
             text = text,
             learningEnabled = prefs.learningEnabled,
@@ -1789,6 +1941,7 @@ class TapwingInputMethodService :
         writingLoading = true
         val generation = editorGeneration
         val prefs = currentPrefs
+        val appPkg = if (prefs.perAppLearningEnabled) currentTargetPackage else null
         val cloud = WritingToolsEngine.CLOUD_PROVIDERS
         val processingPrefs = if (prefs.incognitoMode) prefs.copy(
             aiProvider = prefs.aiProvider.takeUnless { it in cloud } ?: AiProviderType.LOCAL_RULES,
@@ -1800,7 +1953,7 @@ class TapwingInputMethodService :
         }
         writingJob = serviceScope.launch {
             try {
-                val out = writingToolsEngine.runAction(target.text, action, processingPrefs)
+                val out = writingToolsEngine.runAction(target.text, action, processingPrefs, appPackage = appPkg)
                 if (generation == editorGeneration && writingTarget === target &&
                     currentInputConnection?.readWritingTarget() == target
                 ) writingOutput = out

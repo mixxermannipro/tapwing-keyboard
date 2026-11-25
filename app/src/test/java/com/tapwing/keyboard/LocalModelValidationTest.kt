@@ -35,4 +35,24 @@ class LocalModelValidationTest {
             ggml.delete()
         }
     }
+
+    @Test
+    fun validatesLocalLlmGgufHeaderStrictly() {
+        val gguf = File.createTempFile("llm_", ".gguf")
+        val ggml = File.createTempFile("whisper_", ".bin")
+        val html = File.createTempFile("bad_", ".gguf")
+        try {
+            gguf.writeBytes("GGUF\u0003\u0000\u0000\u0000".toByteArray(Charsets.US_ASCII))
+            ggml.writeBytes("lmgg\u0001\u0000\u0000\u0000".toByteArray(Charsets.US_ASCII))
+            html.writeBytes("<html".toByteArray(Charsets.US_ASCII))
+
+            assertTrue(LocalModelManager.hasValidModelHeader(gguf, LocalModelKind.LOCAL_LLM))
+            assertFalse(LocalModelManager.hasValidModelHeader(ggml, LocalModelKind.LOCAL_LLM))
+            assertFalse(LocalModelManager.hasValidModelHeader(html, LocalModelKind.LOCAL_LLM))
+        } finally {
+            gguf.delete()
+            ggml.delete()
+            html.delete()
+        }
+    }
 }

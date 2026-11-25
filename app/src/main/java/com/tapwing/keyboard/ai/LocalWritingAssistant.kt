@@ -13,6 +13,7 @@ enum class WritingAction {
     EMOTIVE,
     REPHRASE,
     SUMMARIZE,
+    BULLET_LIST,
     TRANSLATE,
     VOICE_CLEANUP
 }
@@ -42,6 +43,7 @@ object LocalWritingAssistant {
             WritingAction.EMOTIVE -> makeEmotive(proofread(trimmed, locale, dictionaryStore), de)
             WritingAction.REPHRASE -> rephrase(proofread(trimmed, locale, dictionaryStore), de)
             WritingAction.SUMMARIZE -> summarize(proofread(trimmed, locale, dictionaryStore))
+            WritingAction.BULLET_LIST -> bulletize(trimmed, de)
             WritingAction.TRANSLATE -> proofread(trimmed, locale, dictionaryStore)
             WritingAction.VOICE_CLEANUP -> NaturalVoiceCleaner.clean(
                 rawTranscript = trimmed,
@@ -89,7 +91,35 @@ object LocalWritingAssistant {
     private fun summarize(text: String): String {
         val sentences = text.split(Regex("""(?<=[.!?])\s+""")).map { it.trim() }.filter { it.isNotEmpty() }
         if (sentences.size <= 2) return text
-        return sentences.take(2).joinToString(" ") { "• $it" }
+        return sentences.take(2).joinToString("\n") { "• $it" }
+    }
+
+    internal fun bulletize(text: String, de: Boolean): String {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return ""
+        val colonIdx = trimmed.indexOf(':')
+        val header = if (colonIdx in 2..48) trimmed.substring(0, colonIdx + 1).trim() else null
+        val body = if (header != null) trimmed.substring(colonIdx + 1).trim() else trimmed
+
+        // Split on existing newlines, semicolons, sentence boundaries, or comma/conjunction lists
+        val rawItems = when {
+            body.contains('\n') -> body.lines()
+            body.contains(';') -> body.split(';')
+            Regex("""[.!?]\s+""").containsMatchIn(body) -> body.split(Regex("""(?<=[.!?])\s+"""))
+            else -> {
+                val conj = if (de) Regex("""\s*,\s*|\s+\b(?:und|sowie)\b\s+""", RegexOption.IGNORE_CASE)
+                else Regex("""\s*,\s*|\s+\band\b\s+""", RegexOption.IGNORE_CASE)
+                body.split(conj)
+            }
+        }
+        val items = rawItems
+            .map { it.trim().removePrefix("•").removePrefix("-").removePrefix("*").trim().trimEnd('.', ',', ';') }
+            .filter { it.isNotEmpty() }
+            .map { item -> item.replaceFirstChar { ch -> if (ch.isLowerCase()) ch.uppercaseChar() else ch } }
+
+        if (items.isEmpty()) return trimmed
+        val bullets = items.joinToString("\n") { "• $it" }
+        return if (header != null) "$header\n$bullets" else bullets
     }
 
     private fun makeProfessional(text: String, de: Boolean): String {

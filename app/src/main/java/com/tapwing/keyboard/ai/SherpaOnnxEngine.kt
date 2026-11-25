@@ -69,7 +69,8 @@ object SherpaOnnxEngine {
                         ensureOfflineLocked(spec, modelDir, languageCode)
                         Unit
                     }
-                    LocalModelKind.WHISPER_STT -> Unit
+                    LocalModelKind.WHISPER_STT,
+                    LocalModelKind.LOCAL_LLM -> Unit
                 }
             }
         }
@@ -94,6 +95,7 @@ object SherpaOnnxEngine {
                         val rec = ensureOnlineLocked(spec, modelDir)
                         val stream = rec.createStream("")
                         try {
+                            configureStreamingLanguage(spec, stream, languageCode)
                             stream.acceptWaveform(parsed.samples, parsed.sampleRate)
                             stream.acceptWaveform(FloatArray(SAMPLE_RATE / 3), parsed.sampleRate)
                             stream.inputFinished()
@@ -117,7 +119,8 @@ object SherpaOnnxEngine {
                             runCatching { stream.release() }
                         }
                     }
-                    LocalModelKind.WHISPER_STT -> ""
+                    LocalModelKind.WHISPER_STT,
+                    LocalModelKind.LOCAL_LLM -> ""
                 }
                 val cleaned = cleanTranscript(text)
                 Log.i(
@@ -133,6 +136,7 @@ object SherpaOnnxEngine {
         scope: CoroutineScope,
         spec: LocalModelSpec,
         modelDir: File,
+        languageCode: String? = null,
         onPreview: (String) -> Unit
     ): Result<SherpaStreamingSession> = withContext(Dispatchers.Default) {
         engineMutex.withLock {
@@ -142,6 +146,7 @@ object SherpaOnnxEngine {
                 }
                 val rec = ensureOnlineLocked(spec, modelDir)
                 val stream = rec.createStream("")
+                configureStreamingLanguage(spec, stream, languageCode)
                 SherpaStreamingSession(
                     scope = scope,
                     recognizer = rec,
@@ -149,6 +154,18 @@ object SherpaOnnxEngine {
                     onPreview = onPreview
                 )
             }
+        }
+    }
+
+    private fun configureStreamingLanguage(
+        spec: LocalModelSpec,
+        stream: OnlineStream,
+        languageCode: String?
+    ) {
+        if (spec.streamingModelType.isEmpty()) {
+            // Auto-detected streaming architectures such as NVIDIA Nemotron 3.5 accept a stream-level language option.
+            val lang = languageCode?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: "auto"
+            runCatching { stream.setOption("language", lang) }
         }
     }
 
@@ -248,17 +265,20 @@ object SherpaOnnxEngine {
         releaseOnlineLocked()
 
         val threads = optimalThreads()
+        val encoderName = spec.requiredFiles.firstOrNull { it.startsWith("encoder") && it.endsWith(".onnx") } ?: "encoder.onnx"
+        val decoderName = spec.requiredFiles.firstOrNull { it.startsWith("decoder") && it.endsWith(".onnx") } ?: "decoder.onnx"
+        val joinerName = spec.requiredFiles.firstOrNull { it.startsWith("joiner") && it.endsWith(".onnx") } ?: "joiner.onnx"
         val modelConfig = OnlineModelConfig().apply {
             transducer = OnlineTransducerModelConfig().apply {
-                encoder = File(modelDir, "encoder.onnx").absolutePath
-                decoder = File(modelDir, "decoder.onnx").absolutePath
-                joiner = File(modelDir, "joiner.onnx").absolutePath
+                encoder = File(modelDir, encoderName).absolutePath
+                decoder = File(modelDir, decoderName).absolutePath
+                joiner = File(modelDir, joinerName).absolutePath
             }
             tokens = File(modelDir, "tokens.txt").absolutePath
             numThreads = threads
             debug = false
             provider = "cpu"
-            modelType = "zipformer2"
+            modelType = spec.streamingModelType
         }
 
         val config = OnlineRecognizerConfig().apply {

@@ -30,15 +30,15 @@ object LocalInferenceEngine {
         initialPrompt: String? = null,
         translateToEnglish: Boolean = false
     ): Result<String> {
-        return if (spec.kind.isSherpa) {
-            SherpaOnnxEngine.transcribeWav(
+        return when {
+            spec.kind.isLlm -> Result.failure(IllegalArgumentException("Model ${spec.id} is an LLM, not a speech model"))
+            spec.kind.isSherpa -> SherpaOnnxEngine.transcribeWav(
                 wavPath = wavPath,
                 spec = spec,
                 modelDir = modelPath,
                 languageCode = languageCode
             )
-        } else {
-            transcribeWav(
+            else -> transcribeWav(
                 wavPath = wavPath,
                 modelFile = modelPath,
                 languageCode = languageCode,
@@ -53,10 +53,10 @@ object LocalInferenceEngine {
         modelPath: File,
         languageCode: String? = null
     ): Result<Unit> {
-        return if (spec.kind.isSherpa) {
-            SherpaOnnxEngine.warmModel(spec, modelPath, languageCode)
-        } else {
-            warmWhisper(modelPath)
+        return when {
+            spec.kind.isLlm -> LocalLlmEngine.warmModel(modelPath)
+            spec.kind.isSherpa -> SherpaOnnxEngine.warmModel(spec, modelPath, languageCode)
+            else -> warmWhisper(modelPath)
         }
     }
 
@@ -146,6 +146,7 @@ object LocalInferenceEngine {
     fun unloadAll() {
         unloadWhisper()
         SherpaOnnxEngine.unloadAll()
+        LocalLlmEngine.unloadAll()
     }
 
     private fun extractSegmentsText(jsonRaw: String): String {

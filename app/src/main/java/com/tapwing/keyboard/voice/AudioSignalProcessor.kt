@@ -12,6 +12,7 @@ import kotlin.math.abs
 object AudioSignalProcessor {
 
     private const val SILENCE_PEAK_GATE = 0.002f
+    private const val DC_OFFSET_GATE = 0.003f
     private const val QUIET_PEAK_THRESHOLD = 0.55f
     private const val TARGET_PEAK = 0.75f
     private const val MAX_GAIN = 6.0f
@@ -70,7 +71,7 @@ object AudioSignalProcessor {
             raf.readFully(rawBytes)
 
             val floats = FloatArray(totalFrames)
-            var maxAbs = 0f
+            var sumMean = 0.0
             for (i in 0 until totalFrames) {
                 var sum = 0
                 val base = i * bytesPerFrame
@@ -81,8 +82,22 @@ object AudioSignalProcessor {
                 }
                 val v = (sum / channels) / 32768f
                 floats[i] = v
-                val a = abs(v)
-                if (a > maxAbs) maxAbs = a
+                sumMean += v
+            }
+            val dcOffset = if (totalFrames > 0) (sumMean / totalFrames).toFloat() else 0f
+            var maxAbs = 0f
+            if (abs(dcOffset) > DC_OFFSET_GATE) {
+                for (i in 0 until totalFrames) {
+                    val centered = (floats[i] - dcOffset).coerceIn(-CLIP_LIMIT, CLIP_LIMIT)
+                    floats[i] = centered
+                    val a = abs(centered)
+                    if (a > maxAbs) maxAbs = a
+                }
+            } else {
+                for (i in 0 until totalFrames) {
+                    val a = abs(floats[i])
+                    if (a > maxAbs) maxAbs = a
+                }
             }
             normalizeInPlace(floats, maxAbs)
             return ParsedWav(sampleRate, floats)
