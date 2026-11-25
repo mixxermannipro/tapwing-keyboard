@@ -100,12 +100,15 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SpaceBar
 import androidx.compose.material.icons.rounded.Spellcheck
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -167,6 +170,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.AiModelCatalog
 import com.tapwing.keyboard.ai.CleanupPromptBuilder
@@ -883,31 +889,39 @@ private fun QuickSearchSettingsScreen(
             Column {
                 AppleSectionHeader(stringResource(R.string.search_engine))
                 AppleGroupedSurface {
-                    QuickSearchEngine.entries.forEachIndexed { index, engine ->
-                        if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
-                        MinimalCheckRow(engine.label, prefs.quickSearchEngine == engine) {
+                    MinimalDropdownRow(
+                        title = stringResource(R.string.search_engine),
+                        selectedValue = prefs.quickSearchEngine,
+                        options = QuickSearchEngine.entries.map { engine ->
+                            DropdownOption(engine, engine.label)
+                        },
+                        onSelect = { engine ->
                             onUpdatePrefs {
                                 if (it.quickSearchEngine == engine) it
                                 else it.copy(quickSearchEngine = engine, quickSearchAppPackage = "")
                             }
                         }
-                    }
-                }
-            }
-        }
-        item {
-            Column {
-                AppleSectionHeader(stringResource(R.string.search_open_in))
-                AppleGroupedSurface {
-                    MinimalCheckRow(stringResource(R.string.search_browser), !appSelected) {
-                        onUpdatePrefs { it.copy(quickSearchAppPackage = "") }
-                    }
-                    if (installedApp != null) {
-                        AppleHairlineDivider(startIndent = 16.dp)
-                        MinimalCheckRow(stringResource(R.string.search_app, installedApp.label), appSelected) {
-                            onUpdatePrefs { it.copy(quickSearchAppPackage = installedApp.packageName) }
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    val openTargets = buildList {
+                        add(DropdownOption("", stringResource(R.string.search_browser)))
+                        if (installedApp != null) {
+                            add(
+                                DropdownOption(
+                                    installedApp.packageName,
+                                    stringResource(R.string.search_app, installedApp.label)
+                                )
+                            )
                         }
                     }
+                    MinimalDropdownRow(
+                        title = stringResource(R.string.search_open_in),
+                        selectedValue = if (appSelected) installedApp.packageName else "",
+                        options = openTargets,
+                        onSelect = { pkg ->
+                            onUpdatePrefs { it.copy(quickSearchAppPackage = pkg) }
+                        }
+                    )
                 }
                 AppleSectionFooter(stringResource(
                     if (installedApp == null) R.string.search_app_unavailable else R.string.search_browser_fallback
@@ -1087,46 +1101,67 @@ private fun PreferencesScreen(
             }
         }
 
-        // One-handed mode
+        // Ergonomics: One-handed & Split keyboard dropdowns
         item {
             Column {
-                AppleSectionHeader(if (de) "Einhandmodus" else "One-handed mode")
+                AppleSectionHeader(if (de) "Ergonomie & Modus" else "Ergonomics & layout modes")
                 AppleGroupedSurface {
-                    OneHandedMode.entries.forEachIndexed { idx, mode ->
+                    val oneHandedOptions = OneHandedMode.entries.map { mode ->
                         val label = when (mode) {
                             OneHandedMode.OFF -> if (de) "Aus" else "Off"
                             OneHandedMode.RIGHT -> if (de) "Rechtshändig" else "Right-handed"
                             OneHandedMode.LEFT -> if (de) "Linkshändig" else "Left-handed"
                         }
-                        MinimalCheckRow(label, selected = prefs.oneHandedMode == mode) {
-                            onUpdatePrefs { it.copy(oneHandedMode = mode) }
-                        }
-                        if (idx < OneHandedMode.entries.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                        DropdownOption(mode, label)
                     }
-                }
-            }
-        }
-
-        // Split keyboard (Tablet & Foldable)
-        item {
-            Column {
-                AppleSectionHeader(if (de) "Geteilte Tastatur (Tablet & Foldable)" else "Split keyboard (Tablet & Foldable)")
-                AppleGroupedSurface {
-                    SplitKeyboardMode.entries.forEachIndexed { idx, mode ->
-                        val label = when (mode) {
-                            SplitKeyboardMode.OFF -> if (de) "Aus" else "Off"
-                            SplitKeyboardMode.AUTO -> if (de) "Automatisch (ab 600dp / Falt-Displays)" else "Auto (tablets & foldables ≥ 600dp)"
-                            SplitKeyboardMode.ALWAYS -> if (de) "Immer geteilt anzeigen" else "Always split"
+                    MinimalDropdownRow(
+                        title = if (de) "Einhandmodus" else "One-handed mode",
+                        selectedValue = prefs.oneHandedMode,
+                        options = oneHandedOptions,
+                        onSelect = { mode -> onUpdatePrefs { it.copy(oneHandedMode = mode) } }
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    val splitOptions = SplitKeyboardMode.entries.map { mode ->
+                        val (label, sub) = when (mode) {
+                            SplitKeyboardMode.OFF -> (if (de) "Aus" else "Off") to null
+                            SplitKeyboardMode.AUTO -> (if (de) "Automatisch" else "Auto") to
+                                (if (de) "Tablets & Foldables ab 600dp" else "Tablets & foldables ≥ 600dp")
+                            SplitKeyboardMode.ALWAYS -> (if (de) "Immer geteilt" else "Always split") to null
                         }
-                        MinimalCheckRow(label, selected = prefs.splitKeyboardMode == mode) {
-                            onUpdatePrefs { it.copy(splitKeyboardMode = mode) }
-                        }
-                        if (idx < SplitKeyboardMode.entries.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                        DropdownOption(mode, label, sub)
                     }
+                    MinimalDropdownRow(
+                        title = if (de) "Geteilte Tastatur" else "Split keyboard",
+                        selectedValue = prefs.splitKeyboardMode,
+                        options = splitOptions,
+                        onSelect = { mode -> onUpdatePrefs { it.copy(splitKeyboardMode = mode) } }
+                    )
                 }
                 AppleSectionFooter(
                     if (de) "Teilt die Tastenreihen ergonomisch für Daumen auf Tablets, Foldables oder im Querformat."
                     else "Splits key rows ergonomically for thumbs on tablets, foldables, or landscape screens."
+                )
+            }
+        }
+
+        // Accessibility (Barrierefreiheit)
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Barrierefreiheit" else "Accessibility")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        title = if (de) "Große Tastenbeschriftung" else "Large key labels",
+                        checked = prefs.largeKeyLabels
+                    ) { v -> onUpdatePrefs { it.copy(largeKeyLabels = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Hoher Kontrast (WCAG AAA)" else "High-contrast keys (WCAG AAA)",
+                        checked = prefs.highContrastKeys
+                    ) { v -> onUpdatePrefs { it.copy(highContrastKeys = v) } }
+                }
+                AppleSectionFooter(
+                    if (de) "Verstärkt Tastenkontraste, Umrandungen und Schriftgrößen. TalkBack erkennt alle Tasten, Menüs und KI-Chips."
+                    else "Boosts key contrast, borders, and label size. Full TalkBack semantics are enabled across keys, menus, and AI chips."
                 )
             }
         }
@@ -1209,24 +1244,24 @@ private fun AppearanceScreen(
                 AppleSectionHeader(if (de) "Erscheinungsbild" else "Appearance")
                 AppleGroupedSurface {
                     val darkOptions = listOf(
-                        DarkModePreference.SYSTEM to (if (de) "Systemstandard" else "System auto"),
-                        DarkModePreference.LIGHT to (if (de) "Hell" else "Light"),
-                        DarkModePreference.DARK to (if (de) "Dunkel" else "Dark")
+                        DropdownOption(DarkModePreference.SYSTEM, if (de) "Systemstandard" else "System auto"),
+                        DropdownOption(DarkModePreference.LIGHT, if (de) "Hell" else "Light"),
+                        DropdownOption(DarkModePreference.DARK, if (de) "Dunkel" else "Dark")
                     )
-                    darkOptions.forEachIndexed { idx, (mode, label) ->
-                        MinimalCheckRow(label, selected = prefs.darkMode == mode) {
-                            onUpdatePrefs { it.copy(darkMode = mode) }
-                        }
-                        if (idx < darkOptions.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
-                    }
+                    MinimalDropdownRow(
+                        title = if (de) "Modus" else "Mode",
+                        selectedValue = prefs.darkMode,
+                        options = darkOptions,
+                        onSelect = { mode -> onUpdatePrefs { it.copy(darkMode = mode) } }
+                    )
                 }
             }
         }
 
-        // Key borders, Pill keys, and Tapwing's signature Liquid Glass mode
+        // Key borders, Pill keys, Accessibility contrast, and Tapwing's signature Liquid Glass mode
         item {
             Column {
-                AppleSectionHeader(if (de) "Tasten & Stil" else "Key style")
+                AppleSectionHeader(if (de) "Tasten, Stil & Kontrast" else "Key style & contrast")
                 AppleGroupedSurface {
                     MinimalToggleRow(
                         title = if (de) "Tastenumrandung" else "Key borders",
@@ -1242,10 +1277,20 @@ private fun AppearanceScreen(
                         title = if (de) "Liquid Glass Modus (Apple-Stil)" else "Liquid Glass mode (Apple style)",
                         checked = prefs.appleModeEnabled
                     ) { v -> onUpdatePrefs { it.copy(appleModeEnabled = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Hoher Kontrast (WCAG AAA)" else "High-contrast keys (WCAG AAA)",
+                        checked = prefs.highContrastKeys
+                    ) { v -> onUpdatePrefs { it.copy(highContrastKeys = v) } }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Große Tastenbeschriftung" else "Large key labels",
+                        checked = prefs.largeKeyLabels
+                    ) { v -> onUpdatePrefs { it.copy(largeKeyLabels = v) } }
                 }
                 AppleSectionFooter(
-                    if (de) "Liquid Glass aktiviert durchscheinende Glastasten und sanfte Feder-Animationen."
-                    else "Liquid Glass enables translucent glass keycaps and spring animations."
+                    if (de) "Liquid Glass aktiviert durchscheinende Glastasten. Hoher Kontrast & große Beschriftung verbessern die Lesbarkeit bei Sonne und Sehschwäche."
+                    else "Liquid Glass enables translucent glass keycaps. High contrast & large labels improve outdoor and low-vision readability."
                 )
             }
         }
@@ -1665,19 +1710,38 @@ private fun LanguagesScreen(
     ) {
         item {
             Column {
-                AppleSectionHeader(if (de) "Aktive Tastatur-Sprache" else "Active keyboard language")
+                AppleSectionHeader(if (de) "Aktive Sprache & Menü" else "Active language & UI")
                 AppleGroupedSurface {
                     val activeCandidates = KeyboardLocales.allTypingLocales.filter { it.code in prefs.enabledLocales }
                         .ifEmpty { listOf(KeyboardLocales.allTypingLocales.first()) }
-                    activeCandidates.forEachIndexed { idx, spec ->
-                        MinimalCheckRow(
-                            title = "${spec.nativeLabel} (${spec.layoutLabel})",
-                            selected = prefs.activeLocale == spec.code
-                        ) {
-                            onUpdatePrefs { it.copy(activeLocale = spec.code) }
+                    MinimalDropdownRow(
+                        title = if (de) "Aktive Tastatur-Sprache" else "Active keyboard language",
+                        selectedValue = prefs.activeLocale,
+                        options = activeCandidates.map { spec ->
+                            DropdownOption(
+                                value = spec.code,
+                                label = spec.nativeLabel,
+                                subtitle = spec.layoutLabel
+                            )
+                        },
+                        onSelect = { code -> onUpdatePrefs { it.copy(activeLocale = code) } }
+                    )
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    val appUiOptions = KeyboardLocales.appUiLanguages.map { lang ->
+                        val label = if (lang.code == "system") {
+                            if (de) "System (${KeyboardLocales.systemLanguageDisplayName()})"
+                            else "System (${KeyboardLocales.systemLanguageDisplayName()})"
+                        } else {
+                            lang.nativeLabel
                         }
-                        if (idx < activeCandidates.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
+                        DropdownOption(lang.code, label)
                     }
+                    MinimalDropdownRow(
+                        title = if (de) "App-Sprache (Menü)" else "App UI language",
+                        selectedValue = prefs.appUiLocale,
+                        options = appUiOptions,
+                        onSelect = { code -> onUpdatePrefs { it.copy(appUiLocale = code) } }
+                    )
                 }
             }
         }
@@ -1710,29 +1774,6 @@ private fun LanguagesScreen(
                     if (de) "Die Globus-Taste und Leertaste (gedrückt halten) wechseln zwischen deinen aktivierten Sprachen."
                     else "The globe key and spacebar long-press cycle through your enabled languages."
                 )
-            }
-        }
-
-        item {
-            Column {
-                AppleSectionHeader(if (de) "App-Sprache (Menü)" else "App UI language")
-                AppleGroupedSurface {
-                    KeyboardLocales.appUiLanguages.forEachIndexed { idx, lang ->
-                        val label = if (lang.code == "system") {
-                            if (de) "Systemsprache (${KeyboardLocales.systemLanguageDisplayName()})"
-                            else "System (${KeyboardLocales.systemLanguageDisplayName()})"
-                        } else {
-                            lang.nativeLabel
-                        }
-                        MinimalCheckRow(
-                            title = label,
-                            selected = prefs.appUiLocale == lang.code
-                        ) {
-                            onUpdatePrefs { it.copy(appUiLocale = lang.code) }
-                        }
-                        if (idx < KeyboardLocales.appUiLanguages.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
-                    }
-                }
             }
         }
 
@@ -2027,7 +2068,11 @@ private fun DictionaryLearningScreen(
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                             modifier = Modifier.height(42.dp)
                         ) {
-                            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.Rounded.Add,
+                                contentDescription = if (de) "Wort hinzufügen" else "Add word",
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                     customWords.forEach { (word, weight) ->
@@ -2046,9 +2091,13 @@ private fun DictionaryLearningScreen(
                                     revision++
                                     onDictionaryChanged()
                                 },
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Rounded.DeleteOutline,
+                                    contentDescription = if (de) "$word löschen" else "Delete $word",
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
@@ -2128,9 +2177,13 @@ private fun DictionaryLearningScreen(
                                     revision++
                                     onDictionaryChanged()
                                 },
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Rounded.DeleteOutline,
+                                    contentDescription = if (de) "Kürzel $trigger löschen" else "Delete shortcut $trigger",
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
@@ -2184,9 +2237,13 @@ private fun DictionaryLearningScreen(
                                     is PackInstallState.Installed -> {
                                         IconButton(
                                             onClick = { packManager.deletePack(spec.langCode) },
-                                            modifier = Modifier.size(30.dp)
+                                            modifier = Modifier.size(32.dp)
                                         ) {
-                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Icon(
+                                                Icons.Rounded.DeleteOutline,
+                                                contentDescription = if (de) "${spec.displayName} löschen" else "Delete ${spec.displayName}",
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                         }
                                     }
                                     else -> {
@@ -2318,9 +2375,13 @@ private fun DictionaryLearningScreen(
                                     revision++
                                     onDictionaryChanged()
                                 },
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Rounded.DeleteOutline,
+                                    contentDescription = if (de) "Textbaustein ${snippet.title} löschen" else "Delete snippet ${snippet.title}",
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
@@ -2352,9 +2413,13 @@ private fun DictionaryLearningScreen(
                                         revision++
                                         onDictionaryChanged()
                                     },
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
-                                    Icon(Icons.Rounded.DeleteOutline, contentDescription = null, modifier = Modifier.size(17.dp))
+                                    Icon(
+                                        Icons.Rounded.DeleteOutline,
+                                        contentDescription = if (de) "$word entfernen" else "Remove $word",
+                                        modifier = Modifier.size(17.dp)
+                                    )
                                 }
                             }
                             if (idx < learnedWords.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
@@ -2697,27 +2762,21 @@ private fun VoiceSettingsScreen(
             Column {
                 AppleSectionHeader(if (de) "Verarbeitung" else "Processing")
                 AppleGroupedSurface {
-                    val primaryOptions = listOf(
-                        VoiceEngineMode.LOCAL_WHISPER,
-                        VoiceEngineMode.AUTO_LOCAL_FIRST,
-                        VoiceEngineMode.GEMINI_LIVE
-                    )
-                    val options = buildList {
-                        addAll(primaryOptions)
-                        if (prefs.voiceEngine !in primaryOptions || advanced) {
-                            if (localAndroidAvailable || prefs.voiceEngine == VoiceEngineMode.ON_DEVICE_SPEECH) {
-                                add(VoiceEngineMode.ON_DEVICE_SPEECH)
-                            }
-                            if (advanced || prefs.voiceEngine == VoiceEngineMode.CLOUD) add(VoiceEngineMode.CLOUD)
-                            if (advanced || prefs.voiceEngine == VoiceEngineMode.SYSTEM_SPEECH) add(VoiceEngineMode.SYSTEM_SPEECH)
+                    val engineList = buildList {
+                        add(VoiceEngineMode.LOCAL_WHISPER)
+                        add(VoiceEngineMode.AUTO_LOCAL_FIRST)
+                        add(VoiceEngineMode.GEMINI_LIVE)
+                        if (localAndroidAvailable || prefs.voiceEngine == VoiceEngineMode.ON_DEVICE_SPEECH) {
+                            add(VoiceEngineMode.ON_DEVICE_SPEECH)
                         }
+                        add(VoiceEngineMode.CLOUD)
+                        add(VoiceEngineMode.SYSTEM_SPEECH)
                     }
-                    options.forEachIndexed { index, mode ->
-                        if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
+                    val engineOptions = engineList.map { mode ->
                         val (title, description) = when (mode) {
                             VoiceEngineMode.LOCAL_WHISPER -> if (de) {
-                                "Lokal & Ultraschnell (Empfohlen)" to "100 % auf deinem Gerät mit Sherpa-ONNX oder Whisper — blitzschnell & ohne Zeitlimit."
-                            } else "On-device & ultra-fast (Recommended)" to "100% private via Sherpa-ONNX or Whisper — instant results & unlimited length."
+                                "Lokal & Ultraschnell" to "100 % auf deinem Gerät mit Sherpa-ONNX oder Whisper — blitzschnell & ohne Zeitlimit."
+                            } else "On-device & ultra-fast" to "100% private via Sherpa-ONNX or Whisper — instant results & unlimited length."
                             VoiceEngineMode.AUTO_LOCAL_FIRST -> if (de) {
                                 "Automatisch" to "Bevorzugt dein schnelles Lokal-Modell und fällt bei Bedarf auf Android-Sprache zurück."
                             } else "Automatic" to "Uses your fast local model first and falls back to Android speech when needed."
@@ -2725,18 +2784,41 @@ private fun VoiceSettingsScreen(
                                 "Cloud-KI (Live)" to "Gemini Live-Streaming mit automatischem Offline-Schutz."
                             } else "Cloud AI (Live)" to "Gemini Live streaming with automatic offline fallback."
                             VoiceEngineMode.ON_DEVICE_SPEECH -> if (de) {
-                                "Android offline · Live-Text" to "System-Sprachpaket auf dem Gerät mit Sofort-Vorschau."
-                            } else "Android offline · Live text" to "Built-in device language pack with instant preview."
+                                "Android offline · Live" to "System-Sprachpaket auf dem Gerät mit Sofort-Vorschau."
+                            } else "Android offline · Live" to "Built-in device language pack with instant preview."
                             VoiceEngineMode.CLOUD -> if (de) {
-                                "Cloud nach dem Stopp" to "Sendet Audio nach dem Stopp an Groq, Gemini oder OpenAI."
+                                "Cloud nach Stopp" to "Sendet Audio nach dem Stopp an Groq, Gemini oder OpenAI."
                             } else "Cloud after stop" to "Sends audio to Groq, Gemini, or OpenAI after stopping."
                             VoiceEngineMode.SYSTEM_SPEECH -> if (de) {
                                 "Android-Sprachdienst" to "Standard-Spracherkennung von Android."
                             } else "Android speech service" to "Standard Android speech recognition."
                         }
-                        VoiceChoice(title, description, selected = prefs.voiceEngine == mode) {
-                            onUpdatePrefs { it.copy(voiceEngine = mode) }
-                        }
+                        DropdownOption(mode, title, description)
+                    }
+                    MinimalDropdownRow(
+                        title = if (de) "Sprach-Engine" else "Speech engine",
+                        selectedValue = prefs.voiceEngine,
+                        options = engineOptions,
+                        onSelect = { mode -> onUpdatePrefs { it.copy(voiceEngine = mode) } }
+                    )
+                    val installedSpeechModels = LocalModelCatalog.speechModels.filter {
+                        modelStates[it.id] is ModelInstallState.Installed
+                    }
+                    if (!prefs.voiceEngine.usesCloudAudio && installedSpeechModels.size >= 2) {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        val activeSpeechId = bestInstalled?.first?.id ?: prefs.selectedWhisperModelId
+                        MinimalDropdownRow(
+                            title = if (de) "Aktives Sprachmodell" else "Active speech model",
+                            selectedValue = activeSpeechId,
+                            options = installedSpeechModels.map { spec ->
+                                DropdownOption(
+                                    value = spec.id,
+                                    label = spec.displayName.substringBefore(" ("),
+                                    subtitle = if (de) spec.speedBadgeDe else spec.speedBadgeEn
+                                )
+                            },
+                            onSelect = { id -> onUpdatePrefs { it.copy(selectedWhisperModelId = id) } }
+                        )
                     }
                 }
             }
@@ -3252,71 +3334,112 @@ private fun WritingToolsSettingsScreen(
             }
         }
 
-        // 2. Simple 3-way engine mode picker (updates both Writing Aid & Dictation Cleanup seamlessly)
+        // 2. Compact Dropdown mode picker (updates both Writing Aid & Dictation Cleanup seamlessly)
         item {
             Column {
-                AppleSectionHeader(if (de) "Modus" else "Mode")
+                AppleSectionHeader(if (de) "KI-Modus" else "AI Mode")
                 AppleGroupedSurface {
-                    VoiceChoice(
-                        title = if (de) "Lokal LLM · Offline (Empfohlen)" else "Local LLM · Offline (Recommended)",
-                        description = if (de) {
-                            "Blitzschnelle Smartphone-LLMs direkt auf dem Gerät — Cloud-Qualität für Schreibhilfe, Stichpunkte & Diktat-Bereinigung."
-                        } else {
-                            "Fast on-device smartphone LLMs — cloud-grade quality for writing aid, bullet lists & dictation cleanup."
-                        },
-                        selected = activeMode == WritingAidMode.LOCAL_LLM
-                    ) {
-                        val llmId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId
-                        onUpdatePrefs {
-                            it.copy(
-                                aiProvider = AiProviderType.LOCAL_LLM,
-                                aiModel = llmId,
-                                cleanupProvider = AiProviderType.LOCAL_LLM,
-                                cleanupModel = llmId,
-                                selectedLlmModelId = llmId
-                            )
+                    val modeOptions = listOf(
+                        DropdownOption(
+                            value = WritingAidMode.LOCAL_LLM,
+                            label = if (de) "Lokal LLM (Offline)" else "Local LLM (Offline)",
+                            subtitle = if (de) {
+                                "Blitzschnelle Smartphone-LLMs direkt auf dem Gerät — Cloud-Qualität für Schreibhilfe & Diktat."
+                            } else {
+                                "Fast on-device smartphone LLMs — cloud-grade quality for writing aid & dictation."
+                            }
+                        ),
+                        DropdownOption(
+                            value = WritingAidMode.CLOUD,
+                            label = if (de) "Cloud-KI (API-Key)" else "Cloud AI (API key)",
+                            subtitle = if (de) {
+                                "Gemini, Groq, OpenRouter, Grok oder OpenAI mit eigenem Schlüssel."
+                            } else {
+                                "Gemini, Groq, OpenRouter, Grok, or OpenAI with your own key."
+                            }
+                        ),
+                        DropdownOption(
+                            value = WritingAidMode.RULES,
+                            label = if (de) "Schnell-Regeln (0 ms)" else "Fast rules (0 ms)",
+                            subtitle = if (de) {
+                                "Kein Download, null Speicherbedarf — sofortige lokale Regeln & optional Gemini Nano."
+                            } else {
+                                "Zero download, instant offline rules — plus optional Google Gemini Nano."
+                            }
+                        )
+                    )
+                    MinimalDropdownRow(
+                        title = if (de) "Verarbeitung" else "Processing",
+                        selectedValue = activeMode,
+                        options = modeOptions,
+                        onSelect = { selected ->
+                            when (selected) {
+                                WritingAidMode.LOCAL_LLM -> {
+                                    val llmId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId
+                                    onUpdatePrefs {
+                                        it.copy(
+                                            aiProvider = AiProviderType.LOCAL_LLM,
+                                            aiModel = llmId,
+                                            cleanupProvider = AiProviderType.LOCAL_LLM,
+                                            cleanupModel = llmId,
+                                            selectedLlmModelId = llmId
+                                        )
+                                    }
+                                }
+                                WritingAidMode.CLOUD -> {
+                                    val targetCloud = secureKeyStorage.configuredCloudProviders().firstOrNull()
+                                        ?: AiProviderType.GEMINI_API
+                                    val defaultModel = AiModelCatalog.defaultTextModelFor(targetCloud)
+                                    onUpdatePrefs {
+                                        it.copy(
+                                            aiProvider = targetCloud,
+                                            aiModel = defaultModel,
+                                            cleanupProvider = targetCloud,
+                                            cleanupModel = defaultModel
+                                        )
+                                    }
+                                }
+                                WritingAidMode.RULES -> {
+                                    onUpdatePrefs {
+                                        it.copy(
+                                            aiProvider = AiProviderType.LOCAL_RULES,
+                                            aiModel = "",
+                                            cleanupProvider = AiProviderType.LOCAL_RULES,
+                                            cleanupModel = ""
+                                        )
+                                    }
+                                }
+                            }
                         }
+                    )
+                    val installedLlmSpecs = LocalModelCatalog.llmModels.filter {
+                        modelStates[it.id] is ModelInstallState.Installed
                     }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    VoiceChoice(
-                        title = if (de) "Cloud-KI (Eigener API-Key)" else "Cloud AI (Own API key)",
-                        description = if (de) {
-                            "Gemini, Groq, OpenRouter, Grok oder OpenAI mit eigenem Schlüssel."
-                        } else {
-                            "Gemini, Groq, OpenRouter, Grok, or OpenAI with your own key."
-                        },
-                        selected = activeMode == WritingAidMode.CLOUD
-                    ) {
-                        val targetCloud = secureKeyStorage.configuredCloudProviders().firstOrNull()
-                            ?: AiProviderType.GEMINI_API
-                        val defaultModel = AiModelCatalog.defaultTextModelFor(targetCloud)
-                        onUpdatePrefs {
-                            it.copy(
-                                aiProvider = targetCloud,
-                                aiModel = defaultModel,
-                                cleanupProvider = targetCloud,
-                                cleanupModel = defaultModel
-                            )
-                        }
-                    }
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    VoiceChoice(
-                        title = if (de) "Schnell-Regeln (0 ms)" else "Fast rules (0 ms)",
-                        description = if (de) {
-                            "Kein Download, null Speicherbedarf — sofortige lokale Textbereinigung & optional Gemini Nano."
-                        } else {
-                            "Zero download, instant offline rules — plus optional Google Gemini Nano."
-                        },
-                        selected = activeMode == WritingAidMode.RULES
-                    ) {
-                        onUpdatePrefs {
-                            it.copy(
-                                aiProvider = AiProviderType.LOCAL_RULES,
-                                aiModel = "",
-                                cleanupProvider = AiProviderType.LOCAL_RULES,
-                                cleanupModel = ""
-                            )
-                        }
+                    if (activeMode == WritingAidMode.LOCAL_LLM && installedLlmSpecs.size >= 2) {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        val activeLlmId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId
+                        MinimalDropdownRow(
+                            title = if (de) "Aktives Lokal-LLM" else "Active local LLM",
+                            selectedValue = activeLlmId,
+                            options = installedLlmSpecs.map { spec ->
+                                DropdownOption(
+                                    value = spec.id,
+                                    label = spec.shortEngineLabel,
+                                    subtitle = if (de) spec.speedBadgeDe else spec.speedBadgeEn
+                                )
+                            },
+                            onSelect = { id ->
+                                onUpdatePrefs {
+                                    it.copy(
+                                        selectedLlmModelId = id,
+                                        aiProvider = AiProviderType.LOCAL_LLM,
+                                        aiModel = id,
+                                        cleanupProvider = AiProviderType.LOCAL_LLM,
+                                        cleanupModel = id
+                                    )
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -3494,61 +3617,59 @@ private fun WritingToolsSettingsScreen(
             WritingAidMode.CLOUD -> {
                 item {
                     Column {
-                        AppleSectionHeader(if (de) "Cloud-Anbieter" else "Cloud provider")
+                        AppleSectionHeader(if (de) "Cloud-Anbieter & Modell" else "Cloud provider & model")
                         AppleGroupedSurface {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    cloudProviders.forEach { prov ->
-                                        val hasKey = secureKeyStorage.hasKey(prov)
-                                        FilterChip(
-                                            selected = prefs.aiProvider == prov,
-                                            onClick = {
-                                                val defModel = AiModelCatalog.defaultTextModelFor(prov)
-                                                onUpdatePrefs {
-                                                    it.copy(
-                                                        aiProvider = prov,
-                                                        aiModel = defModel,
-                                                        cleanupProvider = prov,
-                                                        cleanupModel = defModel
-                                                    )
-                                                }
-                                            },
-                                            label = {
-                                                Text(
-                                                    text = if (hasKey) AiModelCatalog.displayName(prov, de)
-                                                    else "${AiModelCatalog.displayName(prov, de)} · 🔑",
-                                                    fontSize = 12.sp
-                                                )
-                                            }
+                            val providerOptions = cloudProviders.map { prov ->
+                                val hasKey = secureKeyStorage.hasKey(prov)
+                                DropdownOption(
+                                    value = prov,
+                                    label = if (hasKey) AiModelCatalog.displayName(prov, de)
+                                    else "${AiModelCatalog.displayName(prov, de)} · 🔑"
+                                )
+                            }
+                            MinimalDropdownRow(
+                                title = if (de) "Cloud-Anbieter" else "Cloud provider",
+                                selectedValue = prefs.aiProvider,
+                                options = providerOptions,
+                                onSelect = { prov ->
+                                    val defModel = AiModelCatalog.defaultTextModelFor(prov)
+                                    onUpdatePrefs {
+                                        it.copy(
+                                            aiProvider = prov,
+                                            aiModel = defModel,
+                                            cleanupProvider = prov,
+                                            cleanupModel = defModel
                                         )
                                     }
                                 }
-                                val presets = AiModelCatalog.textModelsFor(prefs.aiProvider)
-                                if (presets.isNotEmpty()) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        presets.forEach { spec ->
-                                            val tag = if (spec.isFreeTier) "FREE · " else ""
-                                            FilterChip(
-                                                selected = prefs.aiModel.trim() == spec.id,
-                                                onClick = {
-                                                    onUpdatePrefs {
-                                                        it.copy(aiModel = spec.id, cleanupModel = spec.id)
-                                                    }
-                                                },
-                                                label = { Text("$tag${spec.label}", fontSize = 12.sp) }
-                                            )
+                            )
+                            val presets = AiModelCatalog.textModelsFor(prefs.aiProvider)
+                            if (presets.isNotEmpty()) {
+                                AppleHairlineDivider(startIndent = 16.dp)
+                                val modelOptions = presets.map { spec ->
+                                    val tag = if (spec.isFreeTier) "FREE · " else ""
+                                    DropdownOption(
+                                        value = spec.id,
+                                        label = "$tag${spec.label}",
+                                        subtitle = if (de) spec.noteDe else spec.noteEn
+                                    )
+                                }
+                                val currentModel = prefs.aiModel.trim().ifBlank { presets.first().id }
+                                val optionsWithCustom = if (modelOptions.any { it.value == currentModel }) {
+                                    modelOptions
+                                } else {
+                                    modelOptions + DropdownOption(currentModel, currentModel)
+                                }
+                                MinimalDropdownRow(
+                                    title = if (de) "Modell" else "Model",
+                                    selectedValue = currentModel,
+                                    options = optionsWithCustom,
+                                    onSelect = { id ->
+                                        onUpdatePrefs {
+                                            it.copy(aiModel = id, cleanupModel = id)
                                         }
                                     }
-                                }
+                                )
                             }
                             AppleHairlineDivider(startIndent = 16.dp)
                             MinimalNavRow(
@@ -3748,39 +3869,52 @@ private fun TaskRoutingSection(
     Column {
         AppleSectionHeader(title)
         AppleGroupedSurface {
+            val primaryProviderOptions = primaryOptions.map { prov ->
+                val hasKey = prov == AiProviderType.LOCAL_RULES ||
+                    prov == AiProviderType.LOCAL_LLM ||
+                    prov == AiProviderType.GEMINI_NANO ||
+                    secureKeyStorage.hasKey(prov)
+                DropdownOption(
+                    value = prov,
+                    label = if (hasKey) AiModelCatalog.displayName(prov, de)
+                    else "${AiModelCatalog.displayName(prov, de)} · 🔑"
+                )
+            }
+            MinimalDropdownRow(
+                title = if (de) "Primärer Anbieter" else "Primary provider",
+                selectedValue = primaryProvider,
+                options = primaryProviderOptions,
+                onSelect = onSelectPrimaryProvider
+            )
+
+            if (primaryPresets.isNotEmpty()) {
+                AppleHairlineDivider(startIndent = 16.dp)
+                val presetOptions = primaryPresets.map { spec ->
+                    val tag = if (spec.isFreeTier) "FREE · " else ""
+                    DropdownOption(
+                        value = spec.id,
+                        label = "$tag${spec.label}",
+                        subtitle = if (de) spec.noteDe else spec.noteEn
+                    )
+                }
+                val currentTrimmed = primaryModel.trim()
+                val optionsWithCustom = if (presetOptions.any { it.value == currentTrimmed } || currentTrimmed.isBlank()) {
+                    presetOptions
+                } else {
+                    presetOptions + DropdownOption(currentTrimmed, currentTrimmed)
+                }
+                MinimalDropdownRow(
+                    title = if (de) "Modell" else "Model",
+                    selectedValue = currentTrimmed.ifBlank { primaryPresets.first().id },
+                    options = optionsWithCustom,
+                    onSelect = onPrimaryModelChange
+                )
+            }
+
             Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = if (de) "Primärer Anbieter" else "Primary provider",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    primaryOptions.forEach { prov ->
-                        val hasKey = prov == AiProviderType.LOCAL_RULES ||
-                            prov == AiProviderType.LOCAL_LLM ||
-                            prov == AiProviderType.GEMINI_NANO ||
-                            secureKeyStorage.hasKey(prov)
-                        FilterChip(
-                            selected = primaryProvider == prov,
-                            onClick = { onSelectPrimaryProvider(prov) },
-                            label = {
-                                Text(
-                                    text = if (hasKey) AiModelCatalog.displayName(prov, de)
-                                    else "${AiModelCatalog.displayName(prov, de)} · 🔑",
-                                    fontSize = 12.sp
-                                )
-                            }
-                        )
-                    }
-                }
-
                 if (primaryProvider in SecureKeyStorage.CLOUD_PROVIDERS && !secureKeyStorage.hasKey(primaryProvider)) {
                     Row(
                         modifier = Modifier
@@ -3809,34 +3943,11 @@ private fun TaskRoutingSection(
                 }
 
                 if (primaryPresets.isNotEmpty() || primaryProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
-                    if (primaryPresets.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            primaryPresets.forEach { spec ->
-                                val tag = if (spec.isFreeTier) "FREE · " else ""
-                                FilterChip(
-                                    selected = primaryModel.trim() == spec.id,
-                                    onClick = { onPrimaryModelChange(spec.id) },
-                                    label = { Text("$tag${spec.label}", fontSize = 12.sp) }
-                                )
-                            }
-                        }
-                        val activeSpec = primaryPresets.firstOrNull { it.id == primaryModel.trim() }
-                        if (activeSpec != null) {
-                            Text(
-                                text = if (de) activeSpec.noteDe else activeSpec.noteEn,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
                     AiModelReference(provider = primaryProvider, model = primaryModel)
                     AppleInlineField(
                         value = primaryModel,
                         onValueChange = onPrimaryModelChange,
-                        placeholder = if (de) "Modell-ID eingeben" else "Enter model ID"
+                        placeholder = if (de) "Eigene Modell-ID eingeben" else "Enter custom model ID"
                     )
                 }
 
@@ -3868,31 +3979,31 @@ private fun TaskRoutingSection(
 
                 AnimatedVisibility(visible = showFallback) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            fallbackOptions.forEach { prov ->
-                                FilterChip(
-                                    selected = fallbackProvider == prov,
-                                    onClick = { onSelectFallbackProvider(prov) },
-                                    label = { Text(AiModelCatalog.displayName(prov, de), fontSize = 12.sp) }
-                                )
-                            }
+                        val fallbackProviderOptions = fallbackOptions.map { prov ->
+                            DropdownOption(prov, AiModelCatalog.displayName(prov, de))
                         }
+                        MinimalDropdownRow(
+                            title = if (de) "Fallback-Anbieter" else "Fallback provider",
+                            selectedValue = fallbackProvider,
+                            options = fallbackProviderOptions,
+                            onSelect = onSelectFallbackProvider
+                        )
                         if (fallbackPresets.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                fallbackPresets.forEach { spec ->
-                                    FilterChip(
-                                        selected = fallbackModel.trim() == spec.id,
-                                        onClick = { onFallbackModelChange(spec.id) },
-                                        label = { Text(spec.label, fontSize = 12.sp) }
-                                    )
-                                }
+                            val fbOptions = fallbackPresets.map { spec ->
+                                DropdownOption(spec.id, spec.label, if (de) spec.noteDe else spec.noteEn)
                             }
+                            val fbTrimmed = fallbackModel.trim()
+                            val fbOptionsWithCustom = if (fbOptions.any { it.value == fbTrimmed } || fbTrimmed.isBlank()) {
+                                fbOptions
+                            } else {
+                                fbOptions + DropdownOption(fbTrimmed, fbTrimmed)
+                            }
+                            MinimalDropdownRow(
+                                title = if (de) "Fallback-Modell" else "Fallback model",
+                                selectedValue = fbTrimmed.ifBlank { fallbackPresets.first().id },
+                                options = fbOptionsWithCustom,
+                                onSelect = onFallbackModelChange
+                            )
                         }
                         if (fallbackProvider == AiProviderType.GEMINI_NANO) AiModelReference(fallbackProvider)
                         if (fallbackProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
@@ -4566,19 +4677,19 @@ private fun ClipboardSettingsScreen(
             Column {
                 AppleSectionHeader(if (de) "Aufbewahrung" else "Retention")
                 AppleGroupedSurface {
-                    val options = listOf(
-                        ClipboardRetention.HOUR_1 to (if (de) "1 Stunde" else "1 hour"),
-                        ClipboardRetention.HOURS_24 to (if (de) "24 Stunden" else "24 hours"),
-                        ClipboardRetention.DAYS_7 to (if (de) "7 Tage" else "7 days"),
-                        ClipboardRetention.DAYS_30 to (if (de) "30 Tage" else "30 days"),
-                        ClipboardRetention.NEVER to (if (de) "Nie löschen" else "Never delete")
+                    val retentionOptions = listOf(
+                        DropdownOption(ClipboardRetention.HOUR_1, if (de) "1 Stunde" else "1 hour"),
+                        DropdownOption(ClipboardRetention.HOURS_24, if (de) "24 Stunden" else "24 hours"),
+                        DropdownOption(ClipboardRetention.DAYS_7, if (de) "7 Tage" else "7 days"),
+                        DropdownOption(ClipboardRetention.DAYS_30, if (de) "30 Tage" else "30 days"),
+                        DropdownOption(ClipboardRetention.NEVER, if (de) "Nie löschen" else "Never delete")
                     )
-                    options.forEachIndexed { idx, (ret, label) ->
-                        MinimalCheckRow(label, selected = prefs.clipboardRetention == ret) {
-                            onUpdatePrefs { it.copy(clipboardRetention = ret) }
-                        }
-                        if (idx < options.lastIndex) AppleHairlineDivider(startIndent = 16.dp)
-                    }
+                    MinimalDropdownRow(
+                        title = if (de) "Automatisch löschen nach" else "Auto-delete after",
+                        selectedValue = prefs.clipboardRetention,
+                        options = retentionOptions,
+                        onSelect = { ret -> onUpdatePrefs { it.copy(clipboardRetention = ret) } }
+                    )
                 }
             }
         }
@@ -4892,71 +5003,140 @@ private fun SettingsDisclosure(title: String, expanded: Boolean, onToggle: () ->
     }
 }
 
-@Composable
-private fun VoiceChoice(title: String, description: String, selected: Boolean, onSelect: () -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .springPressScale(interaction, pressedScale = 0.986f)
-            .selectable(
-                selected = selected,
-                interactionSource = interaction,
-                indication = androidx.compose.material3.ripple(),
-                role = Role.RadioButton,
-                onClick = onSelect
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, fontSize = 15.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (selected) {
-            Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        }
-    }
-}
+private data class DropdownOption<T>(
+    val value: T,
+    val label: String,
+    val subtitle: String? = null
+)
 
 @Composable
-private fun MinimalCheckRow(
+private fun <T> MinimalDropdownRow(
     title: String,
-    selected: Boolean,
-    onClick: () -> Unit
+    selectedValue: T,
+    options: List<DropdownOption<T>>,
+    subtitle: String? = null,
+    onSelect: (T) -> Unit
 ) {
+    var expanded by remember { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .springPressScale(interaction, pressedScale = 0.988f)
-            .selectable(
-                selected = selected,
-                interactionSource = interaction,
-                indication = androidx.compose.material3.ripple(),
-                role = Role.RadioButton,
-                onClick = onClick
-            )
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = title,
-            fontSize = 15.sp,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-        if (selected) {
-            Icon(
-                imageVector = Icons.Rounded.Check,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(19.dp)
-            )
+    val selectedOption = options.firstOrNull { it.value == selectedValue }
+    val selectedLabel = selectedOption?.label ?: ""
+    val displaySubtitle = subtitle ?: selectedOption?.subtitle
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+                .springPressScale(interaction, pressedScale = 0.988f)
+                .semantics(mergeDescendants = true) {
+                    role = Role.DropdownList
+                    stateDescription = selectedLabel
+                }
+                .clickable(
+                    interactionSource = interaction,
+                    indication = androidx.compose.material3.ripple(),
+                    onClick = { expanded = true }
+                )
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!displaySubtitle.isNullOrBlank()) {
+                    Text(
+                        text = displaySubtitle,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.11f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = selectedLabel,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 155.dp)
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.UnfoldMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.widthIn(min = 220.dp, max = 330.dp)
+        ) {
+            options.forEach { option ->
+                val isSelected = option.value == selectedValue
+                DropdownMenuItem(
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = option.label,
+                                fontSize = 14.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface
+                            )
+                            if (!option.subtitle.isNullOrBlank()) {
+                                Text(
+                                    text = option.subtitle,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    },
+                    trailingIcon = if (isSelected) {
+                        {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    } else null,
+                    onClick = {
+                        expanded = false
+                        if (option.value != selectedValue) {
+                            onSelect(option.value)
+                        }
+                    }
+                )
+            }
         }
     }
 }

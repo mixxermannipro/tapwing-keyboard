@@ -165,4 +165,8 @@
     <string name="settings_section_content">Content &amp; toolbar</string>
     <string name="settings_section_ai">AI &amp; smart services</string>
     <string name="settings_section_system">Insights &amp; system</string>
+    <string name="cd_close">Close</string>
+    <string name="cd_pin">Pin</string>
+    <string name="cd_unpin">Unpin</string>
+    <string name="cd_delete">Delete</string>
 </resources>

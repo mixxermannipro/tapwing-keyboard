@@ -206,6 +206,7 @@ fun TapwingTheme(
     themeMode: ThemeMode = ThemeMode.PIXEL_SLATE,
     darkModePreference: DarkModePreference = DarkModePreference.SYSTEM,
     appleModeEnabled: Boolean = false,
+    highContrast: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -234,12 +235,53 @@ fun TapwingTheme(
         }
     }
 
-    val keyboardColors = buildKeyboardColors(themeMode, useDark, appleModeEnabled, colorScheme)
+    val baseKeyboardColors = buildKeyboardColors(themeMode, useDark, appleModeEnabled, colorScheme)
+    val keyboardColors = if (highContrast) applyHighContrast(baseKeyboardColors) else baseKeyboardColors
 
     CompositionLocalProvider(LocalTapwingKeyboardColors provides keyboardColors) {
         MaterialTheme(
             colorScheme = colorScheme,
             content = content
+        )
+    }
+}
+
+private fun applyHighContrast(base: TapwingKeyboardColors): TapwingKeyboardColors {
+    return if (base.isDark) {
+        base.copy(
+            appleLiquidGlass = false,
+            boardBackground = Color(0xFF000000),
+            boardGradientBottom = Color(0xFF000000),
+            keySurface = Color(0xFF171717),
+            keyPressed = Color(0xFF3A3A3A),
+            keyText = Color(0xFFFFFFFF),
+            keyHintText = Color(0xFFE0E0E0),
+            keyBorder = Color(0xCCFFFFFF),
+            modifierSurface = Color(0xFF262626),
+            modifierText = Color(0xFFFFFFFF),
+            spacebarSurface = Color(0xFF171717),
+            actionSurface = Color(0xFF4DA3FF),
+            actionText = Color(0xFF000000),
+            stripChipSurface = Color(0xFF202020),
+            stripChipText = Color(0xFFFFFFFF)
+        )
+    } else {
+        base.copy(
+            appleLiquidGlass = false,
+            boardBackground = Color(0xFFE6E6E6),
+            boardGradientBottom = Color(0xFFE6E6E6),
+            keySurface = Color(0xFFFFFFFF),
+            keyPressed = Color(0xFFC8D6F0),
+            keyText = Color(0xFF000000),
+            keyHintText = Color(0xFF262626),
+            keyBorder = Color(0xCC000000),
+            modifierSurface = Color(0xFFD0D0D0),
+            modifierText = Color(0xFF000000),
+            spacebarSurface = Color(0xFFFFFFFF),
+            actionSurface = Color(0xFF004BB5),
+            actionText = Color(0xFFFFFFFF),
+            stripChipSurface = Color(0xFFFFFFFF),
+            stripChipText = Color(0xFF000000)
         )
     }
 }

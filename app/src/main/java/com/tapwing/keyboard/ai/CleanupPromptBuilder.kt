@@ -154,20 +154,22 @@ Rules: Output ONLY the final rewritten text. No preamble, no quotes, no markdown
             .joinToString(", ")
     }
 
+    private val THINK_BLOCK_REGEX = Regex("""<think>[\s\S]*?</think>""", RegexOption.IGNORE_CASE)
+    private val THINK_UNCLOSED_REGEX = Regex("""<think>[\s\S]*$""", RegexOption.IGNORE_CASE)
+    private val EOS_TOKEN_REGEX = Regex("""<\|im_end\|>|<\|eot_id\|>|<end_of_turn>|</s>""", RegexOption.IGNORE_CASE)
+    private val PREAMBLE_REGEX = Regex(
+        """^(?:(?:Sure|Certainly|Of course|Gerne|Klar)[,!]?\s+)?(?:Here(?:'s| is) the (?:cleaned|rewritten|corrected|polished) text:|Hier ist der (?:bereinigte|korrigierte|überarbeitete) Text:|Output:|Ergebnis:)\s*""",
+        RegexOption.IGNORE_CASE
+    )
+
     fun sanitizeModelOutput(rawOutput: String): String {
         var cleaned = rawOutput
-            .replace(Regex("""<think>[\s\S]*?</think>""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""<think>[\s\S]*$""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""<\|im_end\|>|<\|eot_id\|>|<end_of_turn>|</s>""", RegexOption.IGNORE_CASE), "")
+            .replace(THINK_BLOCK_REGEX, "")
+            .replace(THINK_UNCLOSED_REGEX, "")
+            .replace(EOS_TOKEN_REGEX, "")
             .trim()
         // Strip common assistant prefixes a small LLM might accidentally emit
-        cleaned = cleaned.replace(
-            Regex(
-                """^(?:(?:Sure|Certainly|Of course|Gerne|Klar)[,!]?\s+)?(?:Here(?:'s| is) the (?:cleaned|rewritten|corrected|polished) text:|Hier ist der (?:bereinigte|korrigierte|überarbeitete) Text:|Output:|Ergebnis:)\s*""",
-                RegexOption.IGNORE_CASE
-            ),
-            ""
-        ).trim()
+        cleaned = cleaned.replace(PREAMBLE_REGEX, "").trim()
         // Strip accidental markdown code fences if a small model wrapped output
         if (cleaned.startsWith("```") && cleaned.endsWith("```") && cleaned.length >= 6) {
             cleaned = cleaned.removePrefix("```").substringAfter('\n').removeSuffix("```").trim()

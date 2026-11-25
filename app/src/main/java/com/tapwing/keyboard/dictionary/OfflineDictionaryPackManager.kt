@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -173,6 +174,8 @@ class OfflineDictionaryPackManager(context: Context) {
             } catch (ex: Exception) {
                 part.delete()
                 updateState(spec.langCode, PackInstallState.Error(ex.localizedMessage ?: "Download failed"))
+            } finally {
+                activeJobs.remove(spec.langCode)
             }
         }
         activeJobs[spec.langCode] = job
@@ -194,11 +197,11 @@ class OfflineDictionaryPackManager(context: Context) {
         refreshStates()
     }
 
-    private fun downloadToFile(urlStr: String, dest: File, onProgress: (Float) -> Unit) {
+    private suspend fun downloadToFile(urlStr: String, dest: File, onProgress: (Float) -> Unit) {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 20_000
-            setRequestProperty("User-Agent", "TapwingKeyboard/2.0 (Android)")
+            setRequestProperty("User-Agent", "TapwingKeyboard/2.6 (Android)")
         }
         try {
             val code = conn.responseCode
@@ -208,13 +211,14 @@ class OfflineDictionaryPackManager(context: Context) {
                 FileOutputStream(dest).use { output ->
                     val buf = ByteArray(16 * 1024)
                     var readTotal = 0L
-                    while (scope.isActive) {
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                         val n = input.read(buf)
                         if (n <= 0) break
                         output.write(buf, 0, n)
                         readTotal += n
                         onProgress((readTotal.toFloat() / total.toFloat()).coerceIn(0.05f, 0.99f))
                     }
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     output.flush()
                 }
             }

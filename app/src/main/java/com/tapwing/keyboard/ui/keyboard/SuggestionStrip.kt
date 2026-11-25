@@ -341,7 +341,7 @@ fun SuggestionStrip(
                                         )
                                         Icon(
                                             imageVector = Icons.Rounded.Close,
-                                            contentDescription = null,
+                                            contentDescription = if (de) "Meldung schließen" else "Dismiss message",
                                             tint = MaterialTheme.colorScheme.onErrorContainer,
                                             modifier = Modifier.size(14.dp)
                                         )
@@ -352,7 +352,7 @@ fun SuggestionStrip(
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
                                     color = kbColors.actionSurface.copy(alpha = 0.22f),
-                                    modifier = Modifier.clickable {
+                                    modifier = Modifier.clickable(role = Role.Button) {
                                         view.tapHaptic(prefs.hapticFeedback)
                                         onTriggerUndo()
                                     }
@@ -378,11 +378,11 @@ fun SuggestionStrip(
                                         )
                                         Icon(
                                             imageVector = Icons.Rounded.Close,
-                                            contentDescription = null,
+                                            contentDescription = if (de) "Rückgängig ausblenden" else "Dismiss undo",
                                             tint = kbColors.keyHintText,
                                             modifier = Modifier
                                                 .size(15.dp)
-                                                .clickable {
+                                                .clickable(role = Role.Button) {
                                                     view.tapHaptic(prefs.hapticFeedback)
                                                     onDismissUndo()
                                                 }
@@ -399,7 +399,7 @@ fun SuggestionStrip(
                                         Surface(
                                             shape = RoundedCornerShape(18.dp),
                                             color = kbColors.stripChipSurface,
-                                            modifier = Modifier.clickable {
+                                            modifier = Modifier.clickable(role = Role.Button) {
                                                 view.tapHaptic(prefs.hapticFeedback)
                                                 onQuickVoicePolish(action)
                                             }
@@ -892,6 +892,13 @@ private fun VoiceToolbarRow(
         } else {
             KeyboardLocales.baseLang(prefs.activeLocale).uppercase()
         }
+        val langPillLabel = if (de) {
+            if (prefs.voiceMultilingualCodeSwitching) "Mehrsprachiges Diktat aktiv: $langPillText"
+            else "Einsprachiges Diktat: $langPillText"
+        } else {
+            if (prefs.voiceMultilingualCodeSwitching) "Multilingual dictation on: $langPillText"
+            else "Single-language dictation: $langPillText"
+        }
         Surface(
             shape = RoundedCornerShape(10.dp),
             color = if (prefs.voiceMultilingualCodeSwitching) {
@@ -901,7 +908,7 @@ private fun VoiceToolbarRow(
             },
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
-                .clickable {
+                .clickable(role = Role.Button, onClickLabel = langPillLabel) {
                     view.tapHaptic(prefs.hapticFeedback)
                     onToggleMultilingual()
                 }

@@ -24,6 +24,76 @@ enum class WritingAction {
  */
 object LocalWritingAssistant {
 
+    private val MULTI_SPACE_REGEX = Regex("""[ \t]+""")
+    private val MULTI_SPACE_2_REGEX = Regex("""[ \t]{2,}""")
+    private val SPACE_BEFORE_PUNCT_REGEX = Regex(""" *([,.!?;:])""")
+    private val SPACE_BEFORE_PUNCT_SHORT_REGEX = Regex("""\s+([,.!?])""")
+    private val SPACE_AFTER_PUNCT_REGEX = Regex("""([,.!?;:])([^\s\n.,!?;:])""")
+    private val DUP_WORD_REGEX = Regex("""\b(\p{L}{2,})\s+\1\b""", RegexOption.IGNORE_CASE)
+    private val WORD_REGEX = Regex("""\p{L}+(['-]\p{L}+)?""")
+    private val SENTENCE_SPLIT_REGEX = Regex("""(?<=[.!?])\s+""")
+    private val SENTENCE_BOUNDARY_REGEX = Regex("""[.!?]\s+""")
+    private val BULLET_CONJ_DE_REGEX = Regex("""\s*,\s*|\s+\b(?:und|sowie)\b\s+""", RegexOption.IGNORE_CASE)
+    private val BULLET_CONJ_EN_REGEX = Regex("""\s*,\s*|\s+\band\b\s+""", RegexOption.IGNORE_CASE)
+
+    private val PRO_DE = listOf(
+        Regex("""^(hi|hey|hallo)\b[,!\s]*""", RegexOption.IGNORE_CASE) to "Guten Tag, ",
+        Regex("""\b(thx|danke dir|vielen dank dir)\b""", RegexOption.IGNORE_CASE) to "vielen Dank",
+        Regex("""\b(sorry|entschuldigung)\b""", RegexOption.IGNORE_CASE) to "bitte entschuldigen Sie",
+        Regex("""\b(schick mir|send mir)\b""", RegexOption.IGNORE_CASE) to "bitte senden Sie mir",
+        Regex("""\b(kannst du)\b""", RegexOption.IGNORE_CASE) to "könnten Sie",
+        Regex("""\b(hast du)\b""", RegexOption.IGNORE_CASE) to "haben Sie",
+        Regex("""\b(bitte melde dich|sag bescheid)\b""", RegexOption.IGNORE_CASE) to "ich freue mich auf Ihre Rückmeldung",
+        Regex("""\b(lg|viele grüße|liebe grüße)\b""", RegexOption.IGNORE_CASE) to "Mit freundlichen Grüßen"
+    )
+    private val PRO_EN = listOf(
+        Regex("""^(hey|hi)\b[,!\s]*""", RegexOption.IGNORE_CASE) to "Hello, ",
+        Regex("""\b(thx|thanx|ty)\b""", RegexOption.IGNORE_CASE) to "thank you",
+        Regex("""\b(plz|pls)\b""", RegexOption.IGNORE_CASE) to "please",
+        Regex("""\b(sorry)\b""", RegexOption.IGNORE_CASE) to "I apologize for the inconvenience",
+        Regex("""\b(gonna)\b""", RegexOption.IGNORE_CASE) to "going to",
+        Regex("""\b(wanna)\b""", RegexOption.IGNORE_CASE) to "want to",
+        Regex("""\b(can you)\b""", RegexOption.IGNORE_CASE) to "could you please",
+        Regex("""\b(let me know)\b""", RegexOption.IGNORE_CASE) to "please let me know at your earliest convenience"
+    )
+    private val CASUAL_DE = listOf(
+        Regex("""^(sehr geehrte[r]?|guten tag)\b[,!\s]*""", RegexOption.IGNORE_CASE) to "Hey, ",
+        Regex("""\b(mit freundlichen grüßen)\b""", RegexOption.IGNORE_CASE) to "Viele Grüße",
+        Regex("""\b(könnten sie)\b""", RegexOption.IGNORE_CASE) to "kannst du",
+        Regex("""\b(haben sie)\b""", RegexOption.IGNORE_CASE) to "hast du",
+        Regex("""\b(vielen dank im voraus)\b""", RegexOption.IGNORE_CASE) to "danke dir schon mal"
+    )
+    private val CASUAL_EN = listOf(
+        Regex("""^(dear sir or madam|hello)\b[,!\s]*""", RegexOption.IGNORE_CASE) to "Hey, ",
+        Regex("""\b(sincerely|best regards|kind regards)\b""", RegexOption.IGNORE_CASE) to "Cheers",
+        Regex("""\b(could you please)\b""", RegexOption.IGNORE_CASE) to "can you",
+        Regex("""\b(i apologize)\b""", RegexOption.IGNORE_CASE) to "sorry"
+    )
+    private val CONCISE_DE_REGEX = Regex(
+        """\b(?:eigentlich|sozusagen|irgendwie|halt|übrigens|einfach mal|im prinzip|grundsätzlich|vielleicht noch)\b""",
+        RegexOption.IGNORE_CASE
+    )
+    private val CONCISE_EN_REGEX = Regex(
+        """\b(?:actually|basically|really|just|kind of|sort of|in order to|very|literally)\b""",
+        RegexOption.IGNORE_CASE
+    )
+    private val REPHRASE_DE = listOf(
+        Regex("""\b(sehr gut)\b""", RegexOption.IGNORE_CASE) to "ausgezeichnet",
+        Regex("""\b(problem)\b""", RegexOption.IGNORE_CASE) to "Anliegen",
+        Regex("""\b(schnell)\b""", RegexOption.IGNORE_CASE) to "zeitnah",
+        Regex("""\b(schicken)\b""", RegexOption.IGNORE_CASE) to "zusenden",
+        Regex("""\b(wichtig)\b""", RegexOption.IGNORE_CASE) to "wesentlich",
+        Regex("""\b(machen)\b""", RegexOption.IGNORE_CASE) to "umsetzen"
+    )
+    private val REPHRASE_EN = listOf(
+        Regex("""\b(very good)\b""", RegexOption.IGNORE_CASE) to "excellent",
+        Regex("""\b(problem)\b""", RegexOption.IGNORE_CASE) to "issue",
+        Regex("""\b(fast|quick)\b""", RegexOption.IGNORE_CASE) to "prompt",
+        Regex("""\b(send)\b""", RegexOption.IGNORE_CASE) to "share",
+        Regex("""\b(important)\b""", RegexOption.IGNORE_CASE) to "essential",
+        Regex("""\b(make)\b""", RegexOption.IGNORE_CASE) to "create"
+    )
+
     fun transform(
         input: String,
         action: WritingAction,
@@ -61,20 +131,17 @@ object LocalWritingAssistant {
         dictionaryStore: AdaptiveDictionaryStore? = null
     ): String {
         var text = input.trim()
-            .replace(Regex("""[ \t]+"""), " ")
-            .replace(Regex(""" *([,.!?;:])"""), "$1")
-            .replace(Regex("""([,.!?;:])([^\s\n.,!?;:])"""), "$1 $2")
+            .replace(MULTI_SPACE_REGEX, " ")
+            .replace(SPACE_BEFORE_PUNCT_REGEX, "$1")
+            .replace(SPACE_AFTER_PUNCT_REGEX, "$1 $2")
 
         // Fix consecutive repeated words ("the the" -> "the")
-        text = text.replace(Regex("""\b(\p{L}{2,})\s+\1\b""", RegexOption.IGNORE_CASE), "$1")
+        text = text.replace(DUP_WORD_REGEX, "$1")
 
         // Fix known typos & apply custom/mid-sentence casing safely without forcing sentence-start caps
-        val wordRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
-        text = wordRegex.replace(text) { match ->
+        text = WORD_REGEX.replace(text) { match ->
             val word = match.value
-            val startIdx = match.range.first
-            val prefix = text.substring(0, startIdx)
-            val atStart = prefix.isBlank() || prefix.endsWith("\n") || Regex("""[.!?]\s+$""").containsMatchIn(prefix)
+            val atStart = isAtSentenceStart(text, match.range.first)
             val customCanonical = dictionaryStore?.canonicalMidSentenceCasingFor(word, locale)
             customCanonical
                 ?: SuggestionEngine.autoCorrectionFor(word, locale, dictionaryStore, atSentenceStart = atStart)
@@ -88,8 +155,16 @@ object LocalWritingAssistant {
         return text
     }
 
+    private fun isAtSentenceStart(text: String, startIdx: Int): Boolean {
+        var i = startIdx - 1
+        while (i >= 0 && (text[i] == ' ' || text[i] == '\t')) i--
+        if (i < 0) return true
+        val ch = text[i]
+        return ch == '\n' || ch == '.' || ch == '!' || ch == '?'
+    }
+
     private fun summarize(text: String): String {
-        val sentences = text.split(Regex("""(?<=[.!?])\s+""")).map { it.trim() }.filter { it.isNotEmpty() }
+        val sentences = text.split(SENTENCE_SPLIT_REGEX).map { it.trim() }.filter { it.isNotEmpty() }
         if (sentences.size <= 2) return text
         return sentences.take(2).joinToString("\n") { "• $it" }
     }
@@ -105,12 +180,8 @@ object LocalWritingAssistant {
         val rawItems = when {
             body.contains('\n') -> body.lines()
             body.contains(';') -> body.split(';')
-            Regex("""[.!?]\s+""").containsMatchIn(body) -> body.split(Regex("""(?<=[.!?])\s+"""))
-            else -> {
-                val conj = if (de) Regex("""\s*,\s*|\s+\b(?:und|sowie)\b\s+""", RegexOption.IGNORE_CASE)
-                else Regex("""\s*,\s*|\s+\band\b\s+""", RegexOption.IGNORE_CASE)
-                body.split(conj)
-            }
+            SENTENCE_BOUNDARY_REGEX.containsMatchIn(body) -> body.split(SENTENCE_SPLIT_REGEX)
+            else -> body.split(if (de) BULLET_CONJ_DE_REGEX else BULLET_CONJ_EN_REGEX)
         }
         val items = rawItems
             .map { it.trim().removePrefix("•").removePrefix("-").removePrefix("*").trim().trimEnd('.', ',', ';') }
@@ -124,30 +195,7 @@ object LocalWritingAssistant {
 
     private fun makeProfessional(text: String, de: Boolean): String {
         var out = text
-        val replacements = if (de) {
-            listOf(
-                Regex("""^(hi|hey|hallo)\b[,!\s]*""", RegexOption.IGNORE_CASE) to "Guten Tag, ",
-                Regex("""\b(thx|danke dir|vielen dank dir)\b""", RegexOption.IGNORE_CASE) to "vielen Dank",
-                Regex("""\b(sorry|entschuldigung)\b""", RegexOption.IGNORE_CASE) to "bitte entschuldigen Sie",
-                Regex("""\b(schick mir|send mir)\b""", RegexOption.IGNORE_CASE) to "bitte senden Sie mir",
-                Regex("""\b(kannst du)\b""", RegexOption.IGNORE_CASE) to "könnten Sie",
-                Regex("""\b(hast du)\b""", RegexOption.IGNORE_CASE) to "haben Sie",
-                Regex("""\b(bitte melde dich|sag bescheid)\b""", RegexOption.IGNORE_CASE) to "ich freue mich auf Ihre Rückmeldung",
-                Regex("""\b(lg|viele grüße|liebe grüße)\b""", RegexOption.IGNORE_CASE) to "Mit freundlichen Grüßen"
-            )
-        } else {
-            listOf(
-                Regex("""^(hey|hi)\b[,!\s]*""", RegexOption.IGNORE_CASE) to "Hello, ",
-                Regex("""\b(thx|thanx|ty)\b""", RegexOption.IGNORE_CASE) to "thank you",
-                Regex("""\b(plz|pls)\b""", RegexOption.IGNORE_CASE) to "please",
-                Regex("""\b(sorry)\b""", RegexOption.IGNORE_CASE) to "I apologize for the inconvenience",
-                Regex("""\b(gonna)\b""", RegexOption.IGNORE_CASE) to "going to",
-                Regex("""\b(wanna)\b""", RegexOption.IGNORE_CASE) to "want to",
-                Regex("""\b(can you)\b""", RegexOption.IGNORE_CASE) to "could you please",
-                Regex("""\b(let me know)\b""", RegexOption.IGNORE_CASE) to "please let me know at your earliest convenience"
-            )
-        }
-        for ((pattern, repl) in replacements) {
+        for ((pattern, repl) in if (de) PRO_DE else PRO_EN) {
             out = out.replace(pattern, repl)
         }
         out = out.replace("!", ".")
@@ -156,46 +204,17 @@ object LocalWritingAssistant {
 
     private fun makeCasual(text: String, de: Boolean): String {
         var out = text
-        val replacements = if (de) {
-            listOf(
-                Regex("""^(sehr geehrte[r]?|guten tag)\b[,!\s]*""", RegexOption.IGNORE_CASE) to "Hey, ",
-                Regex("""\b(mit freundlichen grüßen)\b""", RegexOption.IGNORE_CASE) to "Viele Grüße",
-                Regex("""\b(könnten sie)\b""", RegexOption.IGNORE_CASE) to "kannst du",
-                Regex("""\b(haben sie)\b""", RegexOption.IGNORE_CASE) to "hast du",
-                Regex("""\b(vielen dank im voraus)\b""", RegexOption.IGNORE_CASE) to "danke dir schon mal"
-            )
-        } else {
-            listOf(
-                Regex("""^(dear sir or madam|hello)\b[,!\s]*""", RegexOption.IGNORE_CASE) to "Hey, ",
-                Regex("""\b(sincerely|best regards|kind regards)\b""", RegexOption.IGNORE_CASE) to "Cheers",
-                Regex("""\b(could you please)\b""", RegexOption.IGNORE_CASE) to "can you",
-                Regex("""\b(i apologize)\b""", RegexOption.IGNORE_CASE) to "sorry"
-            )
-        }
-        for ((pattern, repl) in replacements) {
+        for ((pattern, repl) in if (de) CASUAL_DE else CASUAL_EN) {
             out = out.replace(pattern, repl)
         }
         return capitalizeSentences(out)
     }
 
     private fun makeConcise(text: String, de: Boolean): String {
-        val fillers = if (de) {
-            listOf(
-                "eigentlich", "sozusagen", "irgendwie", "halt", "übrigens",
-                "einfach mal", "im prinzip", "grundsätzlich", "vielleicht noch"
-            )
-        } else {
-            listOf(
-                "actually", "basically", "really", "just", "kind of",
-                "sort of", "in order to", "very", "literally"
-            )
-        }
-        var out = text
-        for (f in fillers) {
-            out = out.replace(Regex("""\b$f\b""", RegexOption.IGNORE_CASE), "")
-        }
-        out = out.replace(Regex("""[ \t]{2,}"""), " ")
-            .replace(Regex("""\s+([,.!?])"""), "$1")
+        val out = text
+            .replace(if (de) CONCISE_DE_REGEX else CONCISE_EN_REGEX, "")
+            .replace(MULTI_SPACE_2_REGEX, " ")
+            .replace(SPACE_BEFORE_PUNCT_SHORT_REGEX, "$1")
             .trim()
         return capitalizeSentences(out)
     }
@@ -214,26 +233,7 @@ object LocalWritingAssistant {
 
     private fun rephrase(text: String, de: Boolean): String {
         var out = text
-        val synonyms = if (de) {
-            listOf(
-                Regex("""\b(sehr gut)\b""", RegexOption.IGNORE_CASE) to "ausgezeichnet",
-                Regex("""\b(problem)\b""", RegexOption.IGNORE_CASE) to "Anliegen",
-                Regex("""\b(schnell)\b""", RegexOption.IGNORE_CASE) to "zeitnah",
-                Regex("""\b(schicken)\b""", RegexOption.IGNORE_CASE) to "zusenden",
-                Regex("""\b(wichtig)\b""", RegexOption.IGNORE_CASE) to "wesentlich",
-                Regex("""\b(machen)\b""", RegexOption.IGNORE_CASE) to "umsetzen"
-            )
-        } else {
-            listOf(
-                Regex("""\b(very good)\b""", RegexOption.IGNORE_CASE) to "excellent",
-                Regex("""\b(problem)\b""", RegexOption.IGNORE_CASE) to "issue",
-                Regex("""\b(fast|quick)\b""", RegexOption.IGNORE_CASE) to "prompt",
-                Regex("""\b(send)\b""", RegexOption.IGNORE_CASE) to "share",
-                Regex("""\b(important)\b""", RegexOption.IGNORE_CASE) to "essential",
-                Regex("""\b(make)\b""", RegexOption.IGNORE_CASE) to "create"
-            )
-        }
-        for ((pattern, repl) in synonyms) {
+        for ((pattern, repl) in if (de) REPHRASE_DE else REPHRASE_EN) {
             out = out.replace(pattern, repl)
         }
         if (out == text && out.isNotEmpty()) {

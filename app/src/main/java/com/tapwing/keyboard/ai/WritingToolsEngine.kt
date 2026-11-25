@@ -273,17 +273,19 @@ class WritingToolsEngine(
     }
 
     private fun looksOverTruncated(raw: String, cleaned: String): Boolean {
-        val rawWords = raw.trim().split(Regex("""\s+""")).count { it.isNotBlank() }
+        val rawWords = raw.trim().split(WHITESPACE_REGEX).count { it.isNotBlank() }
         if (rawWords < 6) return false
         val lower = raw.lowercase()
         val hasShortenCmd = lower.contains("kürzer") || lower.contains("shorter") ||
             lower.contains("zusammenfass") || lower.contains("summarize")
         if (hasShortenCmd) return false
-        val cleanWords = cleaned.trim().split(Regex("""\s+""")).count { it.isNotBlank() }
+        val cleanWords = cleaned.trim().split(WHITESPACE_REGEX).count { it.isNotBlank() }
         return cleanWords * 100 < rawWords * 45
     }
 
     companion object {
+        private val WHITESPACE_REGEX = Regex("""\s+""")
+
         val CLOUD_PROVIDERS = setOf(
             AiProviderType.GROQ_API,
             AiProviderType.GEMINI_API,
@@ -306,7 +308,7 @@ class WritingToolsEngine(
         fun shouldSkipCloudPolish(rawTranscript: String, ruleCleaned: String): Boolean {
             val trimmed = rawTranscript.trim()
             if (trimmed.isEmpty() || ruleCleaned.isBlank()) return true
-            val words = trimmed.split(Regex("""\s+""")).filter { it.isNotBlank() }
+            val words = trimmed.split(WHITESPACE_REGEX).filter { it.isNotBlank() }
             if (words.size > 4) return false
             return words.none { word ->
                 word.lowercase().trim(',', '.', '!', '?', ':') in BYPASS_BLOCKING_CUES

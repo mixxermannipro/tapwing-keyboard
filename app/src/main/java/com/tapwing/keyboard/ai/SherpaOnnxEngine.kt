@@ -319,8 +319,10 @@ object SherpaOnnxEngine {
         return if (base in CANARY_LANGS) base else "en"
     }
 
+    private val MULTI_SPACE_REGEX = Regex("""[ \t]{2,}""")
+
     internal fun cleanTranscript(raw: String): String =
-        raw.replace(Regex("""[ \t]{2,}"""), " ").trim()
+        raw.replace(MULTI_SPACE_REGEX, " ").trim()
 
     class SherpaStreamingSession internal constructor(
         scope: CoroutineScope,

@@ -104,8 +104,10 @@ object LocalLlmEngine {
         }
     }
 
+    private val WHITESPACE_REGEX = Regex("""\s+""")
+
     internal fun computeMaxTokens(input: String, action: WritingAction): Int {
-        val approxWords = input.trim().split(Regex("""\s+""")).count { it.isNotBlank() }.coerceAtLeast(1)
+        val approxWords = input.trim().split(WHITESPACE_REGEX).count { it.isNotBlank() }.coerceAtLeast(1)
         val multiplier = when (action) {
             WritingAction.CONCISE, WritingAction.SUMMARIZE -> 1.4
             WritingAction.VOICE_CLEANUP, WritingAction.PROOFREAD -> 1.8

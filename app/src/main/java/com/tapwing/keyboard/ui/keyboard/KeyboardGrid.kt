@@ -80,10 +80,16 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.SplitKeyboardMode
 import com.tapwing.keyboard.data.TapwingPrefs
@@ -568,22 +574,32 @@ private fun OneHandedSideRail(
             shape = CircleShape,
             color = kbColors.modifierSurface,
             modifier = Modifier
-                .size(38.dp)
-                .clickable(onClick = onExpand)
+                .size(40.dp)
+                .clickable(role = Role.Button, onClick = onExpand)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.OpenInFull, contentDescription = null, tint = kbColors.modifierText, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.Rounded.OpenInFull,
+                    contentDescription = "Vollbild-Tastatur / Full-width keyboard",
+                    tint = kbColors.modifierText,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
         Surface(
             shape = CircleShape,
             color = kbColors.modifierSurface,
             modifier = Modifier
-                .size(38.dp)
-                .clickable(onClick = onSwapSide)
+                .size(40.dp)
+                .clickable(role = Role.Button, onClick = onSwapSide)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.SwapHoriz, contentDescription = null, tint = kbColors.modifierText, modifier = Modifier.size(20.dp))
+                Icon(
+                    Icons.Rounded.SwapHoriz,
+                    contentDescription = "Einhandmodus Seite wechseln / Switch one-handed side",
+                    tint = kbColors.modifierText,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -757,6 +773,7 @@ private fun ExpressiveKeyCap(
     }
 
     val border: BorderStroke? = when {
+        prefs.highContrastKeys -> BorderStroke(1.25.dp, kbColors.keyBorder)
         kbColors.appleLiquidGlass -> BorderStroke(
             width = 0.75.dp,
             brush = Brush.verticalGradient(
@@ -772,6 +789,34 @@ private fun ExpressiveKeyCap(
     } else {
         key.label
     }
+
+    val isDeLocale = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
+    val a11yDescription = when (key.type) {
+        KeyActionType.SPACE -> if (isDeLocale) "Leertaste" else "Space"
+        KeyActionType.SHIFT -> if (isDeLocale) "Umschalttaste" else "Shift"
+        KeyActionType.BACKSPACE -> if (isDeLocale) "Löschen" else "Backspace"
+        KeyActionType.EMOJI_PANEL -> "Emoji"
+        KeyActionType.SYMBOLS_TOGGLE, KeyActionType.SYMBOLS_EXT_TOGGLE ->
+            if (isDeLocale) "Symbole $displayText" else "Symbols $displayText"
+        KeyActionType.ENTER -> when (imeActionLabel) {
+            KeyActionLabel.SEARCH -> if (isDeLocale) "Suchen" else "Search"
+            KeyActionLabel.SEND -> if (isDeLocale) "Senden" else "Send"
+            KeyActionLabel.DONE -> if (isDeLocale) "Fertig" else "Done"
+            KeyActionLabel.NEXT -> if (isDeLocale) "Weiter" else "Next"
+            KeyActionLabel.GO -> if (isDeLocale) "Los" else "Go"
+            KeyActionLabel.ENTER -> if (isDeLocale) "Eingabe" else "Enter"
+        }
+        KeyActionType.COMMA -> if (isDeLocale) "Komma" else "Comma"
+        KeyActionType.PERIOD -> if (isDeLocale) "Punkt" else "Period"
+        else -> displayText
+    }
+    val a11yStateDescription = if (key.type == KeyActionType.SHIFT) {
+        when (shiftState) {
+            ShiftState.CAPS_LOCK -> if (isDeLocale) "Feststelltaste aktiv" else "Caps Lock on"
+            ShiftState.ONCE -> if (isDeLocale) "Aktiv" else "On"
+            ShiftState.OFF -> null
+        }
+    } else null
 
     // Key pointerInput ONLY on keyIdentity (never on shiftState or prefs!), so taps never get dropped or stuck!
     val touchModifier = when (key.type) {
@@ -982,9 +1027,19 @@ private fun ExpressiveKeyCap(
         Modifier.shadow(if (kbColors.isDark) 0.6.dp else 1.dp, cornerShape)
     } else Modifier
 
+    val largeLabels = prefs.largeKeyLabels
+    val iconSize = if (largeLabels) 23.dp else 20.dp
+
     // Gapless hitbox wrapper: pointerInput covers the full cell including spacing so fast taps between keys never miss!
     Box(
         modifier = modifier
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = a11yDescription
+                if (a11yStateDescription != null) {
+                    stateDescription = a11yStateDescription
+                }
+            }
             .onGloballyPositioned {
                 val pos = it.positionInRoot()
                 bounds.leftRoot = pos.x
@@ -1029,8 +1084,8 @@ private fun ExpressiveKeyCap(
                     Text(
                         text = key.hint,
                         color = kbColors.keyHintText,
-                        fontSize = 9.sp,
-                        lineHeight = 10.sp,
+                        fontSize = if (largeLabels) 10.5.sp else 9.sp,
+                        lineHeight = if (largeLabels) 11.sp else 10.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
@@ -1045,9 +1100,9 @@ private fun ExpressiveKeyCap(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.ArrowUpward,
-                            contentDescription = key.label,
+                            contentDescription = null,
                             tint = fgColor,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(iconSize)
                         )
                         if (shiftState == ShiftState.CAPS_LOCK) {
                             Spacer(Modifier.height(1.5.dp))
@@ -1062,15 +1117,15 @@ private fun ExpressiveKeyCap(
                     }
                     KeyActionType.BACKSPACE -> Icon(
                         imageVector = Icons.AutoMirrored.Rounded.Backspace,
-                        contentDescription = key.label,
+                        contentDescription = null,
                         tint = fgColor,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(iconSize)
                     )
                     KeyActionType.EMOJI_PANEL -> Icon(
                         imageVector = Icons.Rounded.EmojiEmotions,
-                        contentDescription = key.label,
+                        contentDescription = null,
                         tint = fgColor,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(iconSize)
                     )
                     KeyActionType.ENTER -> {
                         val icon = when (imeActionLabel) {
@@ -1082,9 +1137,9 @@ private fun ExpressiveKeyCap(
                         }
                         Icon(
                             imageVector = icon,
-                            contentDescription = key.label,
+                            contentDescription = null,
                             tint = fgColor,
-                            modifier = Modifier.size(21.dp)
+                            modifier = Modifier.size(if (largeLabels) 24.dp else 21.dp)
                         )
                     }
                     KeyActionType.SPACE -> {
@@ -1092,7 +1147,7 @@ private fun ExpressiveKeyCap(
                             Text(
                                 text = displayText,
                                 color = kbColors.keyHintText,
-                                fontSize = 12.sp,
+                                fontSize = if (largeLabels) 13.5.sp else 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         } else {
@@ -1102,14 +1157,19 @@ private fun ExpressiveKeyCap(
                     KeyActionType.SYMBOLS_TOGGLE, KeyActionType.SYMBOLS_EXT_TOGGLE -> Text(
                         text = displayText,
                         color = fgColor,
-                        fontSize = 13.sp,
+                        fontSize = if (largeLabels) 14.5.sp else 13.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     else -> Text(
                         text = displayText,
                         color = fgColor,
-                        fontSize = if (isNumpadKey) 24.sp else 21.sp,
-                        fontWeight = if (isNumpadKey) FontWeight.Medium else FontWeight.Normal,
+                        fontSize = when {
+                            isNumpadKey && largeLabels -> 27.sp
+                            isNumpadKey -> 24.sp
+                            largeLabels -> 24.sp
+                            else -> 21.sp
+                        },
+                        fontWeight = if (isNumpadKey || largeLabels) FontWeight.Medium else FontWeight.Normal,
                         modifier = Modifier.padding(
                             top = if (key.hint != null && key.type == KeyActionType.CHAR) 7.dp else 0.dp
                         )

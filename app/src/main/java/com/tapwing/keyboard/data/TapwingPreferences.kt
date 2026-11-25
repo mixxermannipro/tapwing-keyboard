@@ -170,7 +170,10 @@ data class TapwingPrefs(
     val autoCopyScreenshots: Boolean = true,
 
     val emojiScale: Int = 26,
-    val candidateEmojiSuggestions: Boolean = true
+    val candidateEmojiSuggestions: Boolean = true,
+
+    val highContrastKeys: Boolean = false,
+    val largeKeyLabels: Boolean = false
 )
 
 private val Context.tapwingDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -207,6 +210,8 @@ class TapwingPreferencesRepository(context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val DARK_MODE = stringPreferencesKey("dark_mode")
         val APPLE_MODE_ENABLED = booleanPreferencesKey("apple_mode_enabled")
+        val HIGH_CONTRAST_KEYS = booleanPreferencesKey("high_contrast_keys")
+        val LARGE_KEY_LABELS = booleanPreferencesKey("large_key_labels")
 
         val AUTO_CORRECT = booleanPreferencesKey("auto_correct")
         val SPELL_GRAMMAR_CHIPS = booleanPreferencesKey("spell_grammar_chips")
@@ -399,7 +404,10 @@ class TapwingPreferencesRepository(context: Context) {
             autoCopyScreenshots = p[Keys.AUTO_COPY_SCREENSHOTS] ?: true,
 
             emojiScale = (p[Keys.EMOJI_SCALE] ?: 26).coerceIn(20, 34),
-            candidateEmojiSuggestions = p[Keys.CANDIDATE_EMOJI_SUGGESTIONS] ?: true
+            candidateEmojiSuggestions = p[Keys.CANDIDATE_EMOJI_SUGGESTIONS] ?: true,
+
+            highContrastKeys = p[Keys.HIGH_CONTRAST_KEYS] ?: false,
+            largeKeyLabels = p[Keys.LARGE_KEY_LABELS] ?: false
         )
     }
 
@@ -429,6 +437,8 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.THEME_MODE] = next.themeMode.name
         mutable[Keys.DARK_MODE] = next.darkMode.name
         mutable[Keys.APPLE_MODE_ENABLED] = next.appleModeEnabled
+        mutable[Keys.HIGH_CONTRAST_KEYS] = next.highContrastKeys
+        mutable[Keys.LARGE_KEY_LABELS] = next.largeKeyLabels
         mutable[Keys.AUTO_CORRECT] = next.autoCorrect
         mutable[Keys.SPELL_GRAMMAR_CHIPS] = next.spellGrammarChips
         mutable[Keys.PROACTIVE_UNDO] = next.proactiveUndo
