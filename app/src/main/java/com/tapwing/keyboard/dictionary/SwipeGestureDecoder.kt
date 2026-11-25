@@ -23,6 +23,31 @@ object SwipeGestureDecoder {
 
     private const val RESAMPLE_COUNT = 20
     private const val DTW_BAND = 4
+    private val rankMapCache = java.util.concurrent.ConcurrentHashMap<String, Map<String, Int>>()
+
+    private val ACCENT_FALLBACKS: Array<Pair<Char, Char>> = arrayOf(
+        'ä' to 'a', 'á' to 'a', 'à' to 'a', 'â' to 'a', 'ã' to 'a', 'ą' to 'a',
+        'ö' to 'o', 'ó' to 'o', 'ò' to 'o', 'ô' to 'o', 'õ' to 'o',
+        'ü' to 'u', 'ú' to 'u', 'ù' to 'u', 'û' to 'u',
+        'é' to 'e', 'è' to 'e', 'ê' to 'e', 'ë' to 'e', 'ę' to 'e',
+        'í' to 'i', 'ì' to 'i', 'î' to 'i', 'ï' to 'i', 'ı' to 'i',
+        'ß' to 's', 'ś' to 's', 'ş' to 's', 'š' to 's',
+        'ç' to 'c', 'ć' to 'c', 'ñ' to 'n', 'ń' to 'n', 'ğ' to 'g', 'ł' to 'l', 'ż' to 'z', 'ź' to 'z'
+    )
+
+    private fun rankMapFor(locale: String, primaryVocab: List<String>): Map<String, Int> =
+        rankMapCache.getOrPut(locale) {
+            val map = HashMap<String, Int>(primaryVocab.size * 2)
+            primaryVocab.forEachIndexed { idx, w -> map.putIfAbsent(w.lowercase(), idx) }
+            map
+        }
+
+    private fun candidateRank(candidates: List<Pair<Char, Float>>, target: Char): Int {
+        for (i in candidates.indices) {
+            if (candidates[i].first == target) return i
+        }
+        return -1
+    }
 
     fun decodeSwipe(
         points: List<SwipePoint>,
@@ -50,8 +75,7 @@ object SwipeGestureDecoder {
 
         val avgKeyGap = estimateKeyWidth(keyCenters).coerceAtLeast(40f)
         val primaryVocab = LanguageVocabularies.vocabularyFor(locale)
-        val primaryRankMap = HashMap<String, Int>(primaryVocab.size * 2)
-        primaryVocab.forEachIndexed { idx, w -> primaryRankMap.putIfAbsent(w.lowercase(), idx) }
+        val primaryRankMap = rankMapFor(locale, primaryVocab)
 
         val pool = linkedSetOf<String>()
         dictionaryStore?.allKnownVocabularyWords()?.let { pool.addAll(it) }
@@ -78,13 +102,26 @@ object SwipeGestureDecoder {
             val clean = word.trim()
             if (clean.length < 2) continue
             val lower = clean.lowercase()
-            if (!lower.all { centerByChar.containsKey(it) }) continue
 
-            val firstChar = baseSwipeChar(lower.first(), centerByChar)
-            val lastChar = baseSwipeChar(lower.last(), centerByChar)
-            val startRank = startCandidates.indexOfFirst { it.first == firstChar }
-            val endRank = endCandidates.indexOfFirst { it.first == lastChar }
-            if (startRank == -1 || endRank == -1) continue
+            // Fast O(1) boundary filter before scanning every character of the candidate word
+            val firstChar = baseSwipeChar(lower[0], centerByChar)
+            val startRank = candidateRank(startCandidates, firstChar)
+            if (startRank == -1) continue
+
+            val lastChar = baseSwipeChar(lower[lower.length - 1], centerByChar)
+            val endRank = candidateRank(endCandidates, lastChar)
+            if (endRank == -1) continue
+
+            var allOnBoard = true
+            for (ci in 1 until lower.length - 1) {
+                if (!centerByChar.containsKey(lower[ci])) {
+                    allOnBoard = false
+                    break
+                }
+            }
+            if (!allOnBoard || !centerByChar.containsKey(lower[0]) || !centerByChar.containsKey(lower[lower.length - 1])) {
+                continue
+            }
 
             val idealPoints = buildIdealWordPath(lower, centerByChar, resampled.size) ?: continue
             val dtwDist = bandedDtwDistance(resampled, idealPoints) / avgKeyGap
@@ -139,16 +176,7 @@ object SwipeGestureDecoder {
             map[kc.char.lowercaseChar()] = kc
         }
         // Fallback coordinates for umlauts/accents when the keyboard layout doesn't have dedicated keys
-        val fallbacks = arrayOf(
-            'ä' to 'a', 'á' to 'a', 'à' to 'a', 'â' to 'a', 'ã' to 'a', 'ą' to 'a',
-            'ö' to 'o', 'ó' to 'o', 'ò' to 'o', 'ô' to 'o', 'õ' to 'o',
-            'ü' to 'u', 'ú' to 'u', 'ù' to 'u', 'û' to 'u',
-            'é' to 'e', 'è' to 'e', 'ê' to 'e', 'ë' to 'e', 'ę' to 'e',
-            'í' to 'i', 'ì' to 'i', 'î' to 'i', 'ï' to 'i', 'ı' to 'i',
-            'ß' to 's', 'ś' to 's', 'ş' to 's', 'š' to 's',
-            'ç' to 'c', 'ć' to 'c', 'ñ' to 'n', 'ń' to 'n', 'ğ' to 'g', 'ł' to 'l', 'ż' to 'z', 'ź' to 'z'
-        )
-        for ((accented, base) in fallbacks) {
+        for ((accented, base) in ACCENT_FALLBACKS) {
             if (!map.containsKey(accented)) {
                 map[base]?.let { map[accented] = it }
             }

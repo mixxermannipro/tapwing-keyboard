@@ -233,10 +233,30 @@ internal class CloudDictation(
         try {
             write(connection)
             val status = connection.responseCode
-            if (status !in 200..299) throw TransientHttpException(status)
-            return connection.inputStream.bufferedReader().use { JSONObject(it.readText()) }
+            if (status !in 200..299) {
+                runCatching { connection.errorStream?.close() }
+                throw TransientHttpException(status)
+            }
+            val raw = readBoundedUtf8(connection.inputStream, MAX_RESPONSE_BYTES)
+            return JSONObject(raw)
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun readBoundedUtf8(stream: java.io.InputStream, maxBytes: Int): String {
+        stream.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(8_192)
+            var total = 0
+            while (true) {
+                val read = input.read(buf)
+                if (read <= 0) break
+                total += read
+                if (total > maxBytes) throw IOException("Response exceeds ${maxBytes / (1024 * 1024)} MB limit")
+                out.write(buf, 0, read)
+            }
+            return out.toString(Charsets.UTF_8.name())
         }
     }
 
@@ -247,6 +267,7 @@ internal class CloudDictation(
         private const val GROQ_AUDIO_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
         private const val OPENAI_AUDIO_URL = "https://api.openai.com/v1/audio/transcriptions"
         private const val MAX_CHUNK_SECONDS = 45
+        private const val MAX_RESPONSE_BYTES = 2 * 1024 * 1024
         private const val CONNECT_TIMEOUT_MS = 8_000
         private const val READ_TIMEOUT_MS = 30_000
         private const val RETRY_DELAY_MS = 350L

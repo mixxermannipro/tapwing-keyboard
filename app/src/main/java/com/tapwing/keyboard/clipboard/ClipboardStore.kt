@@ -44,6 +44,7 @@ class ClipboardStore(
         loadFromDisk()
     }
 
+    @Synchronized
     fun addClip(
         rawText: String,
         retention: ClipboardRetention = ClipboardRetention.DAYS_7,
@@ -60,6 +61,7 @@ class ClipboardStore(
         applyAndSave(listOf(clip) + _items.value.filterNot { it.id == clip.id }, retention, maxUnpinnedItems, now)
     }
 
+    @Synchronized
     fun addImageClip(
         imagePath: String,
         mimeType: String = "image/png",
@@ -92,6 +94,7 @@ class ClipboardStore(
         return clip
     }
 
+    @Synchronized
     fun updateClipOcrText(
         id: String,
         ocrText: String,
@@ -106,6 +109,7 @@ class ClipboardStore(
         applyAndSave(updated, retention, maxUnpinnedItems, clockMs())
     }
 
+    @Synchronized
     fun togglePin(id: String, retention: ClipboardRetention, maxUnpinnedItems: Int) {
         val now = clockMs()
         val updated = _items.value.map { clip ->
@@ -114,6 +118,7 @@ class ClipboardStore(
         applyAndSave(updated, retention, maxUnpinnedItems, now)
     }
 
+    @Synchronized
     fun deleteClip(id: String, retention: ClipboardRetention, maxUnpinnedItems: Int) {
         val now = clockMs()
         val target = _items.value.firstOrNull { it.id == id }
@@ -126,6 +131,7 @@ class ClipboardStore(
         }
     }
 
+    @Synchronized
     fun clearUnpinned(retention: ClipboardRetention, maxUnpinnedItems: Int) {
         val now = clockMs()
         val kept = _items.value.filter { it.pinned }
@@ -137,6 +143,7 @@ class ClipboardStore(
         }
     }
 
+    @Synchronized
     fun prune(retention: ClipboardRetention, maxUnpinnedItems: Int) {
         applyAndSave(_items.value, retention, maxUnpinnedItems, clockMs())
     }
@@ -246,6 +253,8 @@ class ClipboardStore(
     }
 
     companion object {
+        private const val CLIPBOARD_FILE_NAME = "tapwing_clipboard_history.json"
+
         internal fun fingerprint(file: File): String? = runCatching {
             val digest = MessageDigest.getInstance("SHA-256")
             file.inputStream().buffered().use { stream ->
@@ -260,10 +269,27 @@ class ClipboardStore(
         }.getOrNull()
 
         fun createForContext(context: Context): ClipboardStore {
-            val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
-                ?: context.applicationContext
-            val file = File(safeCtx.filesDir, "tapwing_clipboard_history.json")
-            return ClipboardStore(file)
+            val appCtx = context.applicationContext
+            // Clipboard history contains sensitive user text/images and MUST live in Credential-Encrypted
+            // storage (inaccessible before device unlock / Direct Boot).
+            if (!com.tapwing.keyboard.data.TapwingPreferencesRepository.isUserUnlocked(appCtx)) {
+                return ClipboardStore(storageFile = null)
+            }
+            val ceFile = File(appCtx.filesDir, CLIPBOARD_FILE_NAME)
+            // Seamless one-time migration from legacy Device-Protected storage -> Credential-Encrypted storage
+            runCatching {
+                val deCtx = ContextCompat.createDeviceProtectedStorageContext(appCtx)
+                if (deCtx != null && deCtx.filesDir != appCtx.filesDir) {
+                    val legacyDeFile = File(deCtx.filesDir, CLIPBOARD_FILE_NAME)
+                    if (legacyDeFile.isFile) {
+                        if (!ceFile.isFile) {
+                            legacyDeFile.copyTo(ceFile, overwrite = false)
+                        }
+                        legacyDeFile.delete()
+                    }
+                }
+            }
+            return ClipboardStore(ceFile)
         }
     }
 }

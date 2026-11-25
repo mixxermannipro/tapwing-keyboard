@@ -592,7 +592,8 @@ object NaturalVoiceCleaner {
         if (leadInMatch != null) {
             val header = leadInMatch.groupValues[1].trim()
             val rest = leadInMatch.groupValues[2].trim()
-            val hasColon = input.getOrNull(leadInMatch.groups[1]!!.range.last + 1) == ':'
+            val group1End = leadInMatch.groups[1]?.range?.last
+            val hasColon = group1End != null && input.getOrNull(group1End + 1) == ':'
             val items = splitConciseListItems(rest, minItems = if (hasColon) 2 else 3)
             if (items != null) {
                 return "$header:\n" + items.joinToString("\n") { "• $it" }
@@ -724,7 +725,7 @@ object NaturalVoiceCleaner {
         if (tagQuestion) return "$input?"
 
         val firstWord = input.trimStart().substringBefore(' ').lowercase().trim(',', '.')
-        val starters = questionStartersByLang[baseLang] ?: questionStartersByLang["en"]!!
+        val starters = questionStartersByLang[baseLang] ?: questionStartersByLang["en"].orEmpty()
         val isQuestion = firstWord in starters ||
             (multilingual && firstWord in questionStartersByLang["en"].orEmpty()) ||
             (multilingual && baseLang != "de" && firstWord in questionStartersByLang["de"].orEmpty())

@@ -26,6 +26,9 @@ data class ParsedDictionaryImport(
 object CustomDictionaryParser {
 
     private val allowedZipExtensions = setOf("txt", "tsv", "csv", "json", "dict")
+    private val ARROW_SHORTCUT_REGEX = Regex("""^(\S+)\s*(?:=>|->)\s*(.+)$""")
+    private val WHITESPACE_REGEX = Regex("""\s+""")
+    private const val MAX_ZIP_ENTRIES = 256
 
     fun isZipMagic(bytes: ByteArray): Boolean {
         if (bytes.size < 4) return false
@@ -65,23 +68,32 @@ object CustomDictionaryParser {
 
     private fun parseZipBytes(
         bytes: ByteArray,
-        maxUncompressedBytes: Int = 20 * 1024 * 1024
+        maxUncompressedBytes: Int = 20 * 1024 * 1024,
+        maxEntries: Int = MAX_ZIP_ENTRIES
     ): ParsedDictionaryImport {
         val mergedWords = linkedMapOf<String, Int>()
         val mergedShortcuts = linkedMapOf<String, String>()
         val mergedLocales = linkedMapOf<String, String>()
         var processedEntries = 0
+        var seenEntries = 0
         var totalUncompressed = 0
         val buf = ByteArray(8192)
 
         ZipInputStream(ByteArrayInputStream(bytes)).use { zis ->
             while (true) {
                 val entry = zis.nextEntry ?: break
+                seenEntries++
+                if (seenEntries > maxEntries) {
+                    throw IllegalArgumentException("ZIP archive exceeds $maxEntries entries limit")
+                }
                 if (entry.isDirectory) {
                     zis.closeEntry()
                     continue
                 }
                 val normalizedName = entry.name.replace('\\', '/')
+                if (normalizedName.split('/').any { it == ".." }) {
+                    throw SecurityException("Blocked unsafe ZIP entry path: ${entry.name}")
+                }
                 val baseName = normalizedName.substringAfterLast('/')
                 val isMacJunk = normalizedName.startsWith("__MACOSX/") ||
                     normalizedName.contains("/__MACOSX/") ||
@@ -159,7 +171,7 @@ object CustomDictionaryParser {
             }
 
             // Explicit arrow shortcut: "mfg => Mit freundlichen Grüßen" or "addr -> Musterstraße 1"
-            val arrowMatch = Regex("""^(\S+)\s*(?:=>|->)\s*(.+)$""").find(line)
+            val arrowMatch = ARROW_SHORTCUT_REGEX.find(line)
             if (arrowMatch != null) {
                 val trigger = arrowMatch.groupValues[1].trim()
                 val expansion = arrowMatch.groupValues[2].trim()
@@ -225,7 +237,7 @@ object CustomDictionaryParser {
             }
 
             // Single word or space-separated word tokens on a plain text line
-            line.split(Regex("""\s+"""))
+            line.split(WHITESPACE_REGEX)
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
                 .forEach { token ->

@@ -18,6 +18,7 @@ import javax.crypto.spec.GCMParameterSpec
 class SecureKeyStorage(context: Context) {
 
     private val appContext = context.applicationContext
+    private val keyCache = java.util.concurrent.ConcurrentHashMap<AiProviderType, String>()
 
     fun saveKey(provider: AiProviderType, rawKey: String) {
         if (!TapwingPreferencesRepository.isUserUnlocked(appContext)) return
@@ -31,6 +32,7 @@ class SecureKeyStorage(context: Context) {
                 editor.remove(KEY_CIPHER).remove(KEY_IV).remove(DICTATION_PROVIDER)
             }
             editor.apply()
+            keyCache.remove(provider)
             return
         }
         val (cipherB64, ivB64) = encryptValue(trimmed)
@@ -38,6 +40,7 @@ class SecureKeyStorage(context: Context) {
             .putString(cipherField, cipherB64)
             .putString(ivField, ivB64)
             .apply()
+        keyCache[provider] = trimmed
     }
 
     fun deleteKey(provider: AiProviderType) {
@@ -46,20 +49,23 @@ class SecureKeyStorage(context: Context) {
 
     fun readKey(provider: AiProviderType): String {
         if (!TapwingPreferencesRepository.isUserUnlocked(appContext)) return ""
+        keyCache[provider]?.let { return it }
         val entries = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).all
         val cipherB64 = entries["cipher_${provider.name}"] as? String
         val ivB64 = entries["iv_${provider.name}"] as? String
-        if (!cipherB64.isNullOrBlank() && !ivB64.isNullOrBlank()) {
-            return decryptValue(cipherB64, ivB64)
+        val resolved = if (!cipherB64.isNullOrBlank() && !ivB64.isNullOrBlank()) {
+            decryptValue(cipherB64, ivB64)
+        } else {
+            // Fallback to legacy single-key slot for smooth migration
+            val legacyProv = entries[DICTATION_PROVIDER] as? String
+            if (legacyProv.isNullOrBlank() || legacyMatchesProvider(legacyProv, provider)) {
+                val legCipher = entries[KEY_CIPHER] as? String
+                val legIv = entries[KEY_IV] as? String
+                if (!legCipher.isNullOrBlank() && !legIv.isNullOrBlank()) decryptValue(legCipher, legIv) else ""
+            } else ""
         }
-        // Fallback to legacy single-key slot for smooth migration
-        val legacyProv = entries[DICTATION_PROVIDER] as? String
-        if (legacyProv.isNullOrBlank() || legacyMatchesProvider(legacyProv, provider)) {
-            val legCipher = entries[KEY_CIPHER] as? String ?: return ""
-            val legIv = entries[KEY_IV] as? String ?: return ""
-            return decryptValue(legCipher, legIv)
-        }
-        return ""
+        keyCache[provider] = resolved
+        return resolved
     }
 
     fun hasKey(provider: AiProviderType): Boolean = readKey(provider).isNotBlank()
@@ -79,6 +85,7 @@ class SecureKeyStorage(context: Context) {
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (trimmed.isEmpty()) {
             prefs.edit().remove(KEY_CIPHER).remove(KEY_IV).remove(DICTATION_PROVIDER).apply()
+            keyCache.clear()
             return
         }
         val (cipherB64, ivB64) = encryptValue(trimmed)
@@ -87,6 +94,7 @@ class SecureKeyStorage(context: Context) {
             .putString(KEY_IV, ivB64)
             .putString(DICTATION_PROVIDER, dictationProvider)
             .apply()
+        keyCache.clear()
         providerFromLegacyName(dictationProvider)?.let { mapped ->
             saveKey(mapped, trimmed)
         }
@@ -136,8 +144,10 @@ class SecureKeyStorage(context: Context) {
 
     private fun decryptValue(cipherB64: String, ivB64: String): String {
         return runCatching {
-            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-            val secretKey = keyStore.getKey(KEY_ALIAS, null) as? SecretKey ?: return ""
+            val secretKey = synchronized(keyStoreLock) {
+                val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+                keyStore.getKey(KEY_ALIAS, null) as? SecretKey
+            } ?: return ""
             val cipher = Cipher.getInstance(TRANSFORMATION)
             val iv = Base64.decode(ivB64, Base64.NO_WRAP)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_BITS, iv))
@@ -146,10 +156,10 @@ class SecureKeyStorage(context: Context) {
         }.getOrDefault("")
     }
 
-    private fun getOrCreateKey(): SecretKey {
+    private fun getOrCreateKey(): SecretKey = synchronized(keyStoreLock) {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
-        if (existing != null) return existing
+        if (existing != null) return@synchronized existing
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         val spec = KeyGenParameterSpec.Builder(
@@ -161,7 +171,7 @@ class SecureKeyStorage(context: Context) {
             .setKeySize(256)
             .build()
         generator.init(spec)
-        return generator.generateKey()
+        generator.generateKey()
     }
 
     companion object {
@@ -188,6 +198,7 @@ class SecureKeyStorage(context: Context) {
             return value.isNotEmpty() && value.all { it in '!'..'~' }
         }
 
+        private val keyStoreLock = Any()
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "tapwing_ai_api_key_v1"
         private const val PREFS_NAME = "tapwing_secure_keys"

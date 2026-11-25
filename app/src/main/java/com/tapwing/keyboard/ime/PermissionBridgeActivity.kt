@@ -23,7 +23,7 @@ class PermissionBridgeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val permission = intent.getStringExtra(EXTRA_PERMISSION)
-        if (permission.isNullOrBlank()) {
+        if (permission.isNullOrBlank() || permission !in ALLOWED_PERMISSIONS) {
             finish()
             return
         }
@@ -32,6 +32,12 @@ class PermissionBridgeActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_PERMISSION = "permission"
+        internal val ALLOWED_PERMISSIONS: Set<String> = setOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.CAMERA,
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        )
 
         fun requestRecordAudio(context: Context) {
             launch(context, Manifest.permission.RECORD_AUDIO)
@@ -42,6 +48,7 @@ class PermissionBridgeActivity : ComponentActivity() {
         }
 
         fun launch(context: Context, permission: String) {
+            if (permission !in ALLOWED_PERMISSIONS) return
             val intent = Intent(context, PermissionBridgeActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra(EXTRA_PERMISSION, permission)
