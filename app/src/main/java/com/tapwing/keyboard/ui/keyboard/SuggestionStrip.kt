@@ -54,6 +54,8 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -86,6 +88,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tapwing.keyboard.R
+import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.clipboard.RecentScreenshot
 import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.QuickBarAction
@@ -93,6 +96,7 @@ import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.SuggestionChip
 import com.tapwing.keyboard.settings.springPressScale
 import com.tapwing.keyboard.ui.theme.LocalTapwingKeyboardColors
+import com.tapwing.keyboard.undo.UndoReason
 import com.tapwing.keyboard.undo.UndoSnapshot
 import com.tapwing.keyboard.voice.VoiceUiState
 import kotlinx.coroutines.Dispatchers
@@ -141,6 +145,9 @@ fun SuggestionStrip(
     onFinishVoice: () -> Unit,
     onCancelVoice: () -> Unit,
     onToggleVoiceMinimize: () -> Unit,
+    onToggleVoicePause: () -> Unit = {},
+    onToggleVoiceMultilingual: () -> Unit = {},
+    onQuickVoicePolish: (WritingAction) -> Unit = {},
     onDismissVoiceError: () -> Unit = {}
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
@@ -183,7 +190,9 @@ fun SuggestionStrip(
                 voiceState = voiceState,
                 onFinishVoice = onFinishVoice,
                 onCancelVoice = onCancelVoice,
-                onToggleMinimize = onToggleVoiceMinimize
+                onToggleMinimize = onToggleVoiceMinimize,
+                onTogglePause = onToggleVoicePause,
+                onToggleMultilingual = onToggleVoiceMultilingual
             )
         } else {
             Row(
@@ -378,6 +387,32 @@ fun SuggestionStrip(
                                                     onDismissUndo()
                                                 }
                                         )
+                                    }
+                                }
+                                if (proactiveUndo.reason == UndoReason.VOICE_INSERT && prefs.aiWritingToolsEnabled) {
+                                    val quickActions = listOf(
+                                        WritingAction.BULLET_LIST to (if (de) "• Liste" else "• Bullets"),
+                                        WritingAction.CONCISE to (if (de) "Kürzer" else "Shorter"),
+                                        WritingAction.PROFESSIONAL to (if (de) "Formell" else "Formal")
+                                    )
+                                    quickActions.forEach { (action, label) ->
+                                        Surface(
+                                            shape = RoundedCornerShape(18.dp),
+                                            color = kbColors.stripChipSurface,
+                                            modifier = Modifier.clickable {
+                                                view.tapHaptic(prefs.hapticFeedback)
+                                                onQuickVoicePolish(action)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = kbColors.stripChipText,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                                            )
+                                        }
                                     }
                                 }
                             } else if (recentScreenshot != null && showShot) {
@@ -746,17 +781,19 @@ private fun VoiceToolbarRow(
     voiceState: VoiceUiState,
     onFinishVoice: () -> Unit,
     onCancelVoice: () -> Unit,
-    onToggleMinimize: () -> Unit
+    onToggleMinimize: () -> Unit,
+    onTogglePause: () -> Unit = {},
+    onToggleMultilingual: () -> Unit = {}
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val view = LocalView.current
     val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
     val pulseBg by animateColorAsState(
-        targetValue = if (voiceState.isListening) kbColors.actionSurface else kbColors.modifierSurface,
+        targetValue = if (voiceState.isListening && !voiceState.isPaused) kbColors.actionSurface else kbColors.modifierSurface,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow),
         label = "voicePulseBg"
     )
-    val doneBreathScale = if (voiceState.isListening) {
+    val doneBreathScale = if (voiceState.isListening && !voiceState.isPaused) {
         val pulseTransition = rememberInfiniteTransition(label = "voiceDonePulse")
         val breath by pulseTransition.animateFloat(
             initialValue = 1.0f,
@@ -772,6 +809,7 @@ private fun VoiceToolbarRow(
         1.0f
     }
     val cancelInteraction = remember { MutableInteractionSource() }
+    val pauseInteraction = remember { MutableInteractionSource() }
     val minInteraction = remember { MutableInteractionSource() }
     val doneInteraction = remember { MutableInteractionSource() }
     val previewScroll = rememberScrollState()
@@ -786,6 +824,7 @@ private fun VoiceToolbarRow(
         ""
     }
     val statusText = when {
+        voiceState.isPaused -> stringResource(R.string.voice_paused)
         !voiceState.processingLabel.isNullOrBlank() -> voiceState.processingLabel
         voiceState.partialText.isNotBlank() -> voiceState.partialText
         voiceState.isProcessing && voiceState.isLocalWhisper -> stringResource(R.string.voice_processing_local)
@@ -803,9 +842,9 @@ private fun VoiceToolbarRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(44.dp)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = 6.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Box(
             modifier = Modifier
@@ -827,7 +866,10 @@ private fun VoiceToolbarRow(
             )
         }
 
-        RamblerWaveform(rmsDb = voiceState.rmsDb, isListening = voiceState.isListening)
+        RamblerWaveform(
+            rmsDb = if (voiceState.isPaused) 0f else voiceState.rmsDb,
+            isListening = voiceState.isListening && !voiceState.isPaused
+        )
 
         if (voiceState.isLocalWhisper || voiceState.isCloud || voiceState.isAndroidOffline || !voiceState.engineLabel.isNullOrBlank()) {
             Surface(
@@ -845,7 +887,36 @@ private fun VoiceToolbarRow(
             }
         }
 
-        if (voiceState.partialText.isNotBlank()) {
+        val langPillText = if (prefs.voiceMultilingualCodeSwitching) {
+            voiceState.multilingualLabel?.takeIf { it.isNotBlank() } ?: "DE+EN"
+        } else {
+            KeyboardLocales.baseLang(prefs.activeLocale).uppercase()
+        }
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = if (prefs.voiceMultilingualCodeSwitching) {
+                kbColors.actionSurface.copy(alpha = 0.30f)
+            } else {
+                kbColors.modifierSurface.copy(alpha = 0.65f)
+            },
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable {
+                    view.tapHaptic(prefs.hapticFeedback)
+                    onToggleMultilingual()
+                }
+        ) {
+            Text(
+                text = langPillText,
+                color = kbColors.keyText,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
+
+        if (voiceState.partialText.isNotBlank() && !voiceState.isPaused) {
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -871,6 +942,30 @@ private fun VoiceToolbarRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
+        }
+
+        if (voiceState.canPause && voiceState.isListening) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .springPressScale(pauseInteraction, pressedScale = 0.92f)
+                    .clip(CircleShape)
+                    .background(if (voiceState.isPaused) kbColors.actionSurface.copy(alpha = 0.32f) else kbColors.modifierSurface)
+                    .clickable(interactionSource = pauseInteraction, indication = ripple()) {
+                        view.tapHaptic(prefs.hapticFeedback)
+                        onTogglePause()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (voiceState.isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                    contentDescription = stringResource(
+                        if (voiceState.isPaused) R.string.cd_voice_resume else R.string.cd_voice_pause
+                    ),
+                    tint = kbColors.modifierText,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
 
         if (prefs.voiceMinimizeButton) {

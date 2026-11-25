@@ -174,12 +174,14 @@ import com.tapwing.keyboard.ai.CloudAiClient
 import com.tapwing.keyboard.ai.CloudAiResult
 import com.tapwing.keyboard.ai.GeminiNanoClient
 import com.tapwing.keyboard.ai.LocalInferenceEngine
+import com.tapwing.keyboard.ai.LocalLlmEngine
 import com.tapwing.keyboard.ai.LocalModelCatalog
 import com.tapwing.keyboard.ai.LocalModelKind
 import com.tapwing.keyboard.ai.LocalModelManager
 import com.tapwing.keyboard.ai.LocalModelSpec
 import com.tapwing.keyboard.ai.ModelInstallState
 import com.tapwing.keyboard.ai.NanoAvailability
+import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.voice.NaturalVoiceCleaner
 import com.tapwing.keyboard.voice.VoiceSelfTest
 import com.tapwing.keyboard.voice.CloudDictation
@@ -633,7 +635,16 @@ private fun SettingsRoute.liveSummary(
         if (de) "${prefs.quickBarActions.size} Aktionen in der Leiste" else "${prefs.quickBarActions.size} toolbar shortcuts"
     }
     SettingsRoute.WRITING_TOOLS -> {
-        if (de) "Korrigieren, Umformulieren & KI" else "Proofread, rewrite & AI"
+        when (prefs.aiProvider) {
+            AiProviderType.LOCAL_LLM -> {
+                val spec = LocalModelCatalog.findById(prefs.selectedLlmModelId)
+                val label = spec?.shortEngineLabel ?: "Lokal LLM"
+                if (de) "Lokal · $label (Offline)" else "Local · $label (Offline)"
+            }
+            AiProviderType.LOCAL_RULES -> if (de) "Schnell-Regeln (Offline)" else "Fast rules (Offline)"
+            AiProviderType.GEMINI_NANO -> "Gemini Nano (AICore)"
+            else -> "${AiModelCatalog.displayName(prefs.aiProvider, de)} · Cloud"
+        }
     }
     SettingsRoute.API_KEYS -> {
         if (de) "Verschlüsselter Schlüssel-Tresor" else "Encrypted provider vault"
@@ -2533,11 +2544,23 @@ private fun VoiceSettingsScreen(
             (dictationProvider != null && secureKeyStorage.readDictationKey(dictationProvider.name).isNotBlank())
     }
     val localAndroidAvailable = remember(context) { TapwingVoiceController.isOnDeviceSpeechAvailable(context) }
-    val bestInstalled = remember(modelStates, prefs.selectedWhisperModelId, prefs.activeLocale) {
-        modelManager.bestInstalledSpeechModel(prefs.selectedWhisperModelId, prefs.activeLocale)
+    val bestInstalled = remember(
+        modelStates,
+        prefs.selectedWhisperModelId,
+        prefs.activeLocale,
+        prefs.voiceMultilingualCodeSwitching
+    ) {
+        modelManager.bestInstalledSpeechModel(
+            preferredId = prefs.selectedWhisperModelId,
+            locale = prefs.activeLocale,
+            preferMultilingual = prefs.voiceMultilingualCodeSwitching
+        )
     }
-    val recommendedForLocale = remember(prefs.activeLocale) {
-        LocalModelCatalog.recommendedForLocale(prefs.activeLocale)
+    val recommendedForLocale = remember(prefs.activeLocale, prefs.voiceMultilingualCodeSwitching) {
+        LocalModelCatalog.recommendedForLocale(
+            locale = prefs.activeLocale,
+            multilingual = prefs.voiceMultilingualCodeSwitching
+        )
     }
     val cloudNeedsKey = prefs.voiceEngine.usesCloudAudio && (dictationProvider == null || !keySaved)
     val offlineReady = bestInstalled != null || localAndroidAvailable ||
@@ -2643,10 +2666,29 @@ private fun VoiceSettingsScreen(
                         val mode = if (enabled) VoiceDictationMode.NATURAL_CLEANUP else VoiceDictationMode.STANDARD
                         onUpdatePrefs { it.copy(voiceMode = mode) }
                     }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        if (de) "Mehrsprachiges Diktat (DE + EN mischen)" else "Multilingual dictation (mix DE + EN)",
+                        prefs.voiceMultilingualCodeSwitching
+                    ) { enabled ->
+                        onUpdatePrefs {
+                            it.copy(
+                                voiceMultilingualCodeSwitching = enabled,
+                                voiceStrictLanguageLock = if (enabled) false else it.voiceStrictLanguageLock
+                            )
+                        }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        if (de) "Stichpunkte automatisch erkennen" else "Auto-detect bullet lists",
+                        prefs.voiceAutoBulletLists
+                    ) { enabled ->
+                        onUpdatePrefs { it.copy(voiceAutoBulletLists = enabled) }
+                    }
                 }
                 AppleSectionFooter(
-                    if (de) "Entfernt „ähm“ & Stottern, korrigiert Versprecher mitten im Satz, setzt Kommas/Punkte und versteht Befehle."
-                    else "Strips ‘ums’ & stutters, handles mid-sentence self-corrections, adds punctuation, and runs voice commands."
+                    if (de) "Entfernt Füllwörter & Stottern, korrigiert Versprecher, formatiert Listen automatisch als • Stichpunkte, mischt Sprachen nahtlos und nutzt dein persönliches Wörterbuch."
+                    else "Strips fillers & stutters, resolves self-corrections, auto-formats spoken lists as • bullets, mixes languages seamlessly, and adapts to your personal dictionary."
                 )
             }
         }
@@ -2747,9 +2789,9 @@ private fun VoiceSettingsScreen(
                     LocalModelCatalogSection(
                         title = if (de) "Lokale Sprachmodelle (Sherpa-ONNX)" else "On-device Speech Models (Sherpa-ONNX)",
                         recommendationNote = if (de) {
-                            "Empfohlen: FastConformer (103 MB) für maximales Tempo + Satzzeichen oder Kroko Live (54 MB) für Wort-für-Wort-Vorschau."
+                            "Empfohlen: Nemotron 3.5 Live (DE + EN mischen in Echtzeit), Parakeet Ultra (25 Sprachen) oder FastConformer DE (103 MB, ultrakompakt)."
                         } else {
-                            "Recommended: FastConformer (103 MB) for top German speed + punctuation, Canary (146 MB) for DE/EN/FR/ES, or Parakeet Ultra (25 languages)."
+                            "Recommended: Nemotron 3.5 Live (real-time DE + EN code-switching), Parakeet Ultra (25 languages), or FastConformer DE (103 MB, ultra-light)."
                         },
                         models = LocalModelCatalog.sherpaModels,
                         selectedModelId = bestInstalled?.first?.id ?: prefs.selectedWhisperModelId,
@@ -2858,7 +2900,7 @@ private fun VoiceSettingsScreen(
                                         wavPath = result.file.absolutePath,
                                         spec = target.first,
                                         modelPath = target.second,
-                                        languageCode = KeyboardLocales.baseLang(prefs.activeLocale)
+                                        languageCode = if (prefs.voiceMultilingualCodeSwitching) null else KeyboardLocales.baseLang(prefs.activeLocale)
                                     )
                                     val ms = System.currentTimeMillis() - t0
                                     result.file.delete()
@@ -2873,7 +2915,9 @@ private fun VoiceSettingsScreen(
                                                     rawTranscript = rawTxt,
                                                     locale = prefs.activeLocale,
                                                     removeFillers = prefs.voiceRemoveFillers,
-                                                    autoPunctuate = prefs.voiceAutoPunctuate
+                                                    autoPunctuate = prefs.voiceAutoPunctuate,
+                                                    multilingual = prefs.voiceMultilingualCodeSwitching,
+                                                    autoBulletLists = prefs.voiceAutoBulletLists
                                                 )
                                                 "${target.first.shortEngineLabel} · ${ms} ms → „$cleaned“"
                                             }
@@ -3074,28 +3118,81 @@ private fun VoiceSettingsScreen(
     }
 }
 
+private enum class WritingAidMode {
+    LOCAL_LLM,
+    CLOUD,
+    RULES
+}
+
 @Composable
 private fun WritingToolsSettingsScreen(
     prefs: TapwingPrefs,
     de: Boolean,
     secureKeyStorage: SecureKeyStorage,
-    @Suppress("UNUSED_PARAMETER") modelManager: LocalModelManager,
+    modelManager: LocalModelManager,
     onOpenApiKeys: () -> Unit,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val modelStates by modelManager.states.collectAsState()
+
+    var pendingImportSpec by remember { mutableStateOf<LocalModelSpec?>(null) }
+    val importLlmLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val targetSpec = pendingImportSpec
+        pendingImportSpec = null
+        if (uri != null && targetSpec != null) {
+            scope.launch {
+                val ok = modelManager.importModelFromUri(targetSpec, uri)
+                if (ok) {
+                    onUpdatePrefs {
+                        it.copy(
+                            selectedLlmModelId = targetSpec.id,
+                            aiProvider = AiProviderType.LOCAL_LLM,
+                            aiModel = targetSpec.id,
+                            cleanupProvider = AiProviderType.LOCAL_LLM,
+                            cleanupModel = targetSpec.id
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     var nanoStatus by remember { mutableStateOf<NanoAvailability?>(null) }
     var nanoDownloading by remember { mutableStateOf(false) }
+    var flagshipExpanded by rememberSaveable { mutableStateOf(false) }
     var advanced by rememberSaveable { mutableStateOf(false) }
-    val savedCount = remember(prefs) { secureKeyStorage.configuredCloudProviders().size }
+    var llmTestRunning by remember { mutableStateOf(false) }
+    var llmTestOutput by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(prefs.aiProvider, prefs.cleanupProvider, prefs.activeLocale) {
-        nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
+    val savedCount = remember(prefs) { secureKeyStorage.configuredCloudProviders().size }
+    val bestInstalledLlm = remember(modelStates, prefs.selectedLlmModelId) {
+        modelManager.bestInstalledLlmModel(prefs.selectedLlmModelId)
+    }
+    val activeMode = when (prefs.aiProvider) {
+        AiProviderType.LOCAL_LLM -> WritingAidMode.LOCAL_LLM
+        AiProviderType.LOCAL_RULES, AiProviderType.GEMINI_NANO -> WritingAidMode.RULES
+        else -> WritingAidMode.CLOUD
+    }
+    val fastLlmModels = remember { LocalModelCatalog.llmModels.filter { !it.isFlagshipTier } }
+    val flagshipLlmModels = remember { LocalModelCatalog.llmModels.filter { it.isFlagshipTier } }
+
+    LaunchedEffect(activeMode, prefs.activeLocale) {
+        if (activeMode == WritingAidMode.RULES) {
+            nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
+        }
     }
 
+    val cloudProviders = listOf(
+        AiProviderType.GEMINI_API,
+        AiProviderType.GROQ_API,
+        AiProviderType.OPENROUTER_API,
+        AiProviderType.XAI_API,
+        AiProviderType.OPENAI_COMPATIBLE
+    )
     val allTextProviders = listOf(
+        AiProviderType.LOCAL_LLM,
         AiProviderType.LOCAL_RULES,
         AiProviderType.GEMINI_NANO,
         AiProviderType.GEMINI_API,
@@ -3118,147 +3215,383 @@ private fun WritingToolsSettingsScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        // 1. Minimal top toggle + live status
         item {
             AppleGroupedSurface {
-                MinimalToggleRow(if (de) "KI-Schreibhilfe" else "AI Writing Tools", prefs.aiWritingToolsEnabled) { v ->
+                MinimalToggleRow(
+                    title = if (de) "KI-Schreibhilfe & Bereinigung" else "AI Writing Aid & Cleanup",
+                    checked = prefs.aiWritingToolsEnabled
+                ) { v ->
                     onUpdatePrefs { it.copy(aiWritingToolsEnabled = v) }
                 }
                 AppleHairlineDivider(startIndent = 16.dp)
-                MinimalNavRow(
-                    icon = Icons.Rounded.Key,
-                    badgeColor = Color(0xFFFF375F),
-                    title = if (de) "API-Schlüssel-Tresor" else "API Keys Vault",
-                    value = if (savedCount > 0) (if (de) "$savedCount aktiv" else "$savedCount active")
-                    else (if (de) "Einrichten" else "Set up"),
-                    onClick = onOpenApiKeys
-                )
+                val statusSummary = when (activeMode) {
+                    WritingAidMode.LOCAL_LLM -> {
+                        if (bestInstalledLlm != null) {
+                            if (de) "Aktiv · ${bestInstalledLlm.first.shortEngineLabel} (Offline)"
+                            else "Active · ${bestInstalledLlm.first.shortEngineLabel} (Offline)"
+                        } else {
+                            if (de) "Modell unten laden" else "Download a model below"
+                        }
+                    }
+                    WritingAidMode.CLOUD -> {
+                        val provName = AiModelCatalog.displayName(prefs.aiProvider, de)
+                        val hasKey = secureKeyStorage.hasKey(prefs.aiProvider)
+                        if (hasKey) "$provName · ${prefs.aiModel.ifBlank { AiModelCatalog.defaultTextModelFor(prefs.aiProvider) }}"
+                        else if (de) "$provName · API-Schlüssel fehlt" else "$provName · API key missing"
+                    }
+                    WritingAidMode.RULES -> {
+                        if (prefs.aiProvider == AiProviderType.GEMINI_NANO) "Gemini Nano (AICore)"
+                        else if (de) "Sofort-Regeln (0 ms · Offline)" else "Instant rules (0 ms · Offline)"
+                    }
+                }
+                MinimalValueRow(if (de) "Aktive Engine" else "Active engine", statusSummary)
             }
         }
 
-        // 1. Writing Assistant (KI-Schreibhilfe)
+        // 2. Simple 3-way engine mode picker (updates both Writing Aid & Dictation Cleanup seamlessly)
         item {
-            TaskRoutingSection(
-                title = if (de) "1. KI-Schreibhilfe (Text-Aktionen)" else "1. AI Writing Assistant",
-                footer = if (de) {
-                    "Wähle Anbieter, Free-Account-Modell oder eigenen Modellnamen für Umformulieren, Korrigieren & Übersetzen — plus optionalen Fallback."
-                } else {
-                    "Mix any provider, free-tier model, or custom model ID for rewriting & proofreading — plus an automatic fallback."
-                },
-                de = de,
-                isAudioTask = false,
-                primaryProvider = prefs.aiProvider,
-                primaryModel = prefs.aiModel,
-                fallbackProvider = prefs.aiFallbackProvider,
-                fallbackModel = prefs.aiFallbackModel,
-                primaryOptions = allTextProviders,
-                fallbackOptions = allTextProviders,
-                secureKeyStorage = secureKeyStorage,
-                onSelectPrimaryProvider = { prov ->
-                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
-                    onUpdatePrefs { it.copy(aiProvider = prov, aiModel = defaultModel) }
-                },
-                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(aiModel = m) } },
-                onSelectFallbackProvider = { prov ->
-                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
-                    onUpdatePrefs { it.copy(aiFallbackProvider = prov, aiFallbackModel = defaultModel) }
-                },
-                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(aiFallbackModel = m) } },
-                onOpenApiKeys = onOpenApiKeys
-            )
-        }
-
-        // 2. Dictation Cleanup (Bereinigung nach Diktat)
-        item {
-            TaskRoutingSection(
-                title = if (de) "2. Diktat-Bereinigung" else "2. Dictation Cleanup",
-                footer = if (de) {
-                    "Unabhängig vom Diktat-Anbieter: z. B. Gemini für Diktat, Groq Llama 3.1 / Grok für die Glättung."
-                } else {
-                    "Independent from your speech provider: e.g. Gemini for speech, Groq Llama 3.1 / Grok for text cleanup."
-                },
-                de = de,
-                isAudioTask = false,
-                primaryProvider = prefs.cleanupProvider,
-                primaryModel = prefs.cleanupModel,
-                fallbackProvider = prefs.cleanupFallbackProvider,
-                fallbackModel = prefs.cleanupFallbackModel,
-                primaryOptions = allTextProviders,
-                fallbackOptions = allTextProviders,
-                secureKeyStorage = secureKeyStorage,
-                onSelectPrimaryProvider = { prov ->
-                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
-                    onUpdatePrefs { it.copy(cleanupProvider = prov, cleanupModel = defaultModel) }
-                },
-                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(cleanupModel = m) } },
-                onSelectFallbackProvider = { prov ->
-                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
-                    onUpdatePrefs { it.copy(cleanupFallbackProvider = prov, cleanupFallbackModel = defaultModel) }
-                },
-                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(cleanupFallbackModel = m) } },
-                onOpenApiKeys = onOpenApiKeys
-            )
-        }
-
-        // 3. Cloud Speech-to-Text (Diktat)
-        item {
-            TaskRoutingSection(
-                title = if (de) "3. Cloud-Diktat (Sprache → Text)" else "3. Cloud Dictation (Speech → Text)",
-                footer = if (de) {
-                    "Greift in den Diktat-Modi „Cloud“ & „Gemini Live“. Mit Fallback wechselt Tapwing bei Fehlern automatisch auf den zweiten Dienst."
-                } else {
-                    "Used by Cloud & Gemini Live dictation modes. With a fallback configured, Tapwing switches seamlessly on errors."
-                },
-                de = de,
-                isAudioTask = true,
-                primaryProvider = prefs.dictationProvider,
-                primaryModel = prefs.dictationModel,
-                fallbackProvider = prefs.dictationFallbackProvider,
-                fallbackModel = prefs.dictationFallbackModel,
-                primaryOptions = allAudioProviders,
-                fallbackOptions = audioFallbackProviders,
-                secureKeyStorage = secureKeyStorage,
-                onSelectPrimaryProvider = { prov ->
-                    val defaultModel = AiModelCatalog.defaultAudioModelFor(prov)
-                    onUpdatePrefs { it.copy(dictationProvider = prov, dictationModel = defaultModel) }
-                },
-                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(dictationModel = m) } },
-                onSelectFallbackProvider = { prov ->
-                    val defaultModel = AiModelCatalog.defaultAudioModelFor(prov)
-                    onUpdatePrefs { it.copy(dictationFallbackProvider = prov, dictationFallbackModel = defaultModel) }
-                },
-                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(dictationFallbackModel = m) } },
-                onOpenApiKeys = onOpenApiKeys
-            )
-        }
-
-        if (prefs.aiProvider == AiProviderType.GEMINI_NANO || prefs.cleanupProvider == AiProviderType.GEMINI_NANO) item {
             Column {
-                AppleSectionHeader(if (de) "Geräte-Status (Google AICore)" else "Device status (Google AICore)")
+                AppleSectionHeader(if (de) "Modus" else "Mode")
                 AppleGroupedSurface {
-                    val statusText = when (nanoStatus) {
-                        NanoAvailability.AVAILABLE -> if (de) "Bereit auf diesem Gerät ✓" else "Ready on this device ✓"
-                        NanoAvailability.DOWNLOADABLE -> if (de) "Kann über Google AICore geladen werden" else "Ready to download via Google AICore"
-                        NanoAvailability.DOWNLOADING -> if (de) "Wird über Google AICore geladen…" else "Downloading via Google AICore…"
-                        NanoAvailability.UNAVAILABLE -> if (de) "Nicht verfügbar (AICore fehlt)" else "Unavailable (AICore missing)"
-                        null -> if (de) "Prüfe Gerät…" else "Checking device…"
+                    VoiceChoice(
+                        title = if (de) "Lokal LLM · Offline (Empfohlen)" else "Local LLM · Offline (Recommended)",
+                        description = if (de) {
+                            "Blitzschnelle Smartphone-LLMs direkt auf dem Gerät — Cloud-Qualität für Schreibhilfe, Stichpunkte & Diktat-Bereinigung."
+                        } else {
+                            "Fast on-device smartphone LLMs — cloud-grade quality for writing aid, bullet lists & dictation cleanup."
+                        },
+                        selected = activeMode == WritingAidMode.LOCAL_LLM
+                    ) {
+                        val llmId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId
+                        onUpdatePrefs {
+                            it.copy(
+                                aiProvider = AiProviderType.LOCAL_LLM,
+                                aiModel = llmId,
+                                cleanupProvider = AiProviderType.LOCAL_LLM,
+                                cleanupModel = llmId,
+                                selectedLlmModelId = llmId
+                            )
+                        }
                     }
-                    MinimalValueRow(if (de) "Gemini Nano Status" else "Gemini Nano status", statusText)
-                    if (nanoStatus == NanoAvailability.DOWNLOADABLE) {
-                        AppleHairlineDivider(startIndent = 16.dp)
-                        MinimalActionRow(
-                            title = if (nanoDownloading) (if (de) "Starte Download…" else "Starting download…")
-                            else (if (de) "Gemini Nano über AICore laden" else "Download Gemini Nano via AICore"),
-                            textColor = MaterialTheme.colorScheme.primary
-                        ) {
-                            if (nanoDownloading) return@MinimalActionRow
-                            nanoDownloading = true
-                            scope.launch {
-                                GeminiNanoClient.requestDownload(context, prefs.activeLocale)
-                                nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
-                                nanoDownloading = false
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    VoiceChoice(
+                        title = if (de) "Cloud-KI (Eigener API-Key)" else "Cloud AI (Own API key)",
+                        description = if (de) {
+                            "Gemini, Groq, OpenRouter, Grok oder OpenAI mit eigenem Schlüssel."
+                        } else {
+                            "Gemini, Groq, OpenRouter, Grok, or OpenAI with your own key."
+                        },
+                        selected = activeMode == WritingAidMode.CLOUD
+                    ) {
+                        val targetCloud = secureKeyStorage.configuredCloudProviders().firstOrNull()
+                            ?: AiProviderType.GEMINI_API
+                        val defaultModel = AiModelCatalog.defaultTextModelFor(targetCloud)
+                        onUpdatePrefs {
+                            it.copy(
+                                aiProvider = targetCloud,
+                                aiModel = defaultModel,
+                                cleanupProvider = targetCloud,
+                                cleanupModel = defaultModel
+                            )
+                        }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    VoiceChoice(
+                        title = if (de) "Schnell-Regeln (0 ms)" else "Fast rules (0 ms)",
+                        description = if (de) {
+                            "Kein Download, null Speicherbedarf — sofortige lokale Textbereinigung & optional Gemini Nano."
+                        } else {
+                            "Zero download, instant offline rules — plus optional Google Gemini Nano."
+                        },
+                        selected = activeMode == WritingAidMode.RULES
+                    ) {
+                        onUpdatePrefs {
+                            it.copy(
+                                aiProvider = AiProviderType.LOCAL_RULES,
+                                aiModel = "",
+                                cleanupProvider = AiProviderType.LOCAL_RULES,
+                                cleanupModel = ""
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Contextual card for the selected mode
+        when (activeMode) {
+            WritingAidMode.LOCAL_LLM -> {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        LocalModelCatalogSection(
+                            title = if (de) "Lokale KI-Modelle (Handy-optimiert)" else "On-device LLMs (Phone-optimized)",
+                            recommendationNote = if (de) {
+                                "Empfohlen: LFM 2.5 1.2B (731 MB) für bestes Tempo/Qualitäts-Verhältnis auf jedem Smartphone, oder Qwen 3.5 0.8B (533 MB) für sofortige Antwort."
+                            } else {
+                                "Recommended: LFM 2.5 1.2B (731 MB) for the best mobile speed/quality balance, or Qwen 3.5 0.8B (533 MB) for instant replies."
+                            },
+                            models = fastLlmModels,
+                            selectedModelId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId,
+                            states = modelStates,
+                            de = de,
+                            onSelectModel = { spec ->
+                                onUpdatePrefs {
+                                    it.copy(
+                                        selectedLlmModelId = spec.id,
+                                        aiProvider = AiProviderType.LOCAL_LLM,
+                                        aiModel = spec.id,
+                                        cleanupProvider = AiProviderType.LOCAL_LLM,
+                                        cleanupModel = spec.id
+                                    )
+                                }
+                            },
+                            onDownloadModel = { spec ->
+                                onUpdatePrefs {
+                                    it.copy(
+                                        selectedLlmModelId = spec.id,
+                                        aiProvider = AiProviderType.LOCAL_LLM,
+                                        aiModel = spec.id,
+                                        cleanupProvider = AiProviderType.LOCAL_LLM,
+                                        cleanupModel = spec.id
+                                    )
+                                }
+                                modelManager.startDownload(spec)
+                            },
+                            onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
+                            onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
+                            onImportModel = { spec ->
+                                pendingImportSpec = spec
+                                importLlmLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                            },
+                            onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                            showTechnicalDetails = false
+                        )
+
+                        AppleGroupedSurface {
+                            SettingsDisclosure(
+                                title = if (de) "Flaggschiff-Modelle (ab 6–8 GB RAM)" else "Flagship models (6–8+ GB RAM)",
+                                expanded = flagshipExpanded
+                            ) {
+                                flagshipExpanded = !flagshipExpanded
+                            }
+                            AnimatedVisibility(
+                                visible = flagshipExpanded,
+                                enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                                exit = fadeOut(tween(140)) + shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium))
+                            ) {
+                                Column {
+                                    AppleHairlineDivider(startIndent = 16.dp)
+                                    LocalModelCatalogListContent(
+                                        models = flagshipLlmModels,
+                                        selectedModelId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId,
+                                        states = modelStates,
+                                        de = de,
+                                        onSelectModel = { spec ->
+                                            onUpdatePrefs {
+                                                it.copy(
+                                                    selectedLlmModelId = spec.id,
+                                                    aiProvider = AiProviderType.LOCAL_LLM,
+                                                    aiModel = spec.id,
+                                                    cleanupProvider = AiProviderType.LOCAL_LLM,
+                                                    cleanupModel = spec.id
+                                                )
+                                            }
+                                        },
+                                        onDownloadModel = { spec ->
+                                            onUpdatePrefs { it.copy(selectedLlmModelId = spec.id) }
+                                            modelManager.startDownload(spec)
+                                        },
+                                        onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
+                                        onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
+                                        onImportModel = { spec ->
+                                            pendingImportSpec = spec
+                                            importLlmLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                                        },
+                                        onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                                        showTechnicalDetails = false
+                                    )
+                                }
+                            }
+                        }
+
+                        if (bestInstalledLlm != null) {
+                            AppleGroupedSurface {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = if (de) "Lokalen KI-Kurztest ausführen" else "Run local LLM quick test",
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                text = bestInstalledLlm.first.shortEngineLabel,
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        FilledTonalButton(
+                                            enabled = !llmTestRunning,
+                                            shape = CircleShape,
+                                            onClick = {
+                                                llmTestRunning = true
+                                                llmTestOutput = if (de) "Bereinige Beispielsatz lokal …" else "Polishing sample locally…"
+                                                scope.launch {
+                                                    val sample = if (de) {
+                                                        "ähm wir brauchen für das release noch einkaufsliste: design review, sprint planning und deployment"
+                                                    } else {
+                                                        "um shopping list: milk, eggs, coffee and oat milk"
+                                                    }
+                                                    val t0 = System.currentTimeMillis()
+                                                    val res = LocalLlmEngine.processText(
+                                                        text = sample,
+                                                        action = WritingAction.VOICE_CLEANUP,
+                                                        locale = prefs.activeLocale,
+                                                        spec = bestInstalledLlm.first,
+                                                        modelFile = bestInstalledLlm.second,
+                                                        autoBulletLists = prefs.voiceAutoBulletLists
+                                                    )
+                                                    val ms = System.currentTimeMillis() - t0
+                                                    llmTestRunning = false
+                                                    llmTestOutput = res.fold(
+                                                        onSuccess = { out -> "${bestInstalledLlm.first.shortEngineLabel} · ${ms} ms\n$out" },
+                                                        onFailure = { err ->
+                                                            if (de) "Fehler (${ms} ms): ${err.localizedMessage}"
+                                                            else "Error (${ms} ms): ${err.localizedMessage}"
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        ) {
+                                            Text(if (de) "Testen" else "Test", fontSize = 13.sp)
+                                        }
+                                    }
+                                    if (!llmTestOutput.isNullOrBlank()) {
+                                        Text(
+                                            text = llmTestOutput!!,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            WritingAidMode.CLOUD -> {
+                item {
+                    Column {
+                        AppleSectionHeader(if (de) "Cloud-Anbieter" else "Cloud provider")
+                        AppleGroupedSurface {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    cloudProviders.forEach { prov ->
+                                        val hasKey = secureKeyStorage.hasKey(prov)
+                                        FilterChip(
+                                            selected = prefs.aiProvider == prov,
+                                            onClick = {
+                                                val defModel = AiModelCatalog.defaultTextModelFor(prov)
+                                                onUpdatePrefs {
+                                                    it.copy(
+                                                        aiProvider = prov,
+                                                        aiModel = defModel,
+                                                        cleanupProvider = prov,
+                                                        cleanupModel = defModel
+                                                    )
+                                                }
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = if (hasKey) AiModelCatalog.displayName(prov, de)
+                                                    else "${AiModelCatalog.displayName(prov, de)} · 🔑",
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                                val presets = AiModelCatalog.textModelsFor(prefs.aiProvider)
+                                if (presets.isNotEmpty()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        presets.forEach { spec ->
+                                            val tag = if (spec.isFreeTier) "FREE · " else ""
+                                            FilterChip(
+                                                selected = prefs.aiModel.trim() == spec.id,
+                                                onClick = {
+                                                    onUpdatePrefs {
+                                                        it.copy(aiModel = spec.id, cleanupModel = spec.id)
+                                                    }
+                                                },
+                                                label = { Text("$tag${spec.label}", fontSize = 12.sp) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            AppleHairlineDivider(startIndent = 16.dp)
+                            MinimalNavRow(
+                                icon = Icons.Rounded.Key,
+                                badgeColor = Color(0xFFFF375F),
+                                title = if (de) "API-Schlüssel-Tresor" else "API Keys Vault",
+                                value = if (savedCount > 0) (if (de) "$savedCount aktiv" else "$savedCount active")
+                                else (if (de) "Einrichten" else "Set up"),
+                                onClick = onOpenApiKeys
+                            )
+                        }
+                    }
+                }
+            }
+
+            WritingAidMode.RULES -> {
+                if (nanoStatus == NanoAvailability.AVAILABLE || nanoStatus == NanoAvailability.DOWNLOADABLE) {
+                    item {
+                        AppleGroupedSurface {
+                            MinimalToggleRow(
+                                title = if (de) "Google Gemini Nano (AICore) mitnutzen" else "Use Google Gemini Nano (AICore)",
+                                checked = prefs.aiProvider == AiProviderType.GEMINI_NANO
+                            ) { enabled ->
+                                val nextProv = if (enabled) AiProviderType.GEMINI_NANO else AiProviderType.LOCAL_RULES
+                                onUpdatePrefs {
+                                    it.copy(aiProvider = nextProv, cleanupProvider = nextProv)
+                                }
+                            }
+                            if (nanoStatus == NanoAvailability.DOWNLOADABLE) {
+                                AppleHairlineDivider(startIndent = 16.dp)
+                                MinimalActionRow(
+                                    title = if (nanoDownloading) (if (de) "Starte Download…" else "Starting download…")
+                                    else (if (de) "Gemini Nano über AICore laden" else "Download Gemini Nano via AICore"),
+                                    textColor = MaterialTheme.colorScheme.primary
+                                ) {
+                                    if (nanoDownloading) return@MinimalActionRow
+                                    nanoDownloading = true
+                                    scope.launch {
+                                        GeminiNanoClient.requestDownload(context, prefs.activeLocale)
+                                        nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
+                                        nanoDownloading = false
+                                    }
+                                }
                             }
                         }
                     }
@@ -3266,17 +3599,113 @@ private fun WritingToolsSettingsScreen(
             }
         }
 
+        // 4. Single collapsed "Advanced" disclosure for power-user per-task routing & options
         item {
             AppleGroupedSurface {
-                SettingsDisclosure(if (de) "Weitere Optionen" else "More options", advanced) {
+                SettingsDisclosure(if (de) "Erweitert (Experten-Routing)" else "Advanced (per-task routing)", advanced) {
                     advanced = !advanced
                 }
-                if (advanced) {
-                    AppleHairlineDivider(startIndent = 16.dp)
-                    MinimalToggleRow(
-                        if (de) "Alle Tastaturen unterstützen" else "Support all keyboards",
-                        prefs.aiSupportAllKeyboards
-                    ) { enabled -> onUpdatePrefs { it.copy(aiSupportAllKeyboards = enabled) } }
+                AnimatedVisibility(
+                    visible = advanced,
+                    enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                    exit = fadeOut(tween(140)) + shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium))
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalToggleRow(
+                            if (de) "Alle Tastaturen unterstützen" else "Support all keyboards",
+                            prefs.aiSupportAllKeyboards
+                        ) { enabled -> onUpdatePrefs { it.copy(aiSupportAllKeyboards = enabled) } }
+                        AppleHairlineDivider(startIndent = 16.dp)
+                        MinimalNavRow(
+                            icon = Icons.Rounded.Key,
+                            badgeColor = Color(0xFFFF375F),
+                            title = if (de) "API-Schlüssel-Tresor" else "API Keys Vault",
+                            value = if (savedCount > 0) (if (de) "$savedCount aktiv" else "$savedCount active")
+                            else (if (de) "Einrichten" else "Set up"),
+                            onClick = onOpenApiKeys
+                        )
+                        Column(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            TaskRoutingSection(
+                                title = if (de) "Schreibhilfe (Text-Aktionen)" else "Writing Assistant",
+                                footer = if (de) "Separater Anbieter & Fallback für Umformulieren, Korrigieren & Übersetzen."
+                                else "Independent provider & fallback for rewriting and proofreading.",
+                                de = de,
+                                isAudioTask = false,
+                                primaryProvider = prefs.aiProvider,
+                                primaryModel = prefs.aiModel,
+                                fallbackProvider = prefs.aiFallbackProvider,
+                                fallbackModel = prefs.aiFallbackModel,
+                                primaryOptions = allTextProviders,
+                                fallbackOptions = allTextProviders,
+                                secureKeyStorage = secureKeyStorage,
+                                onSelectPrimaryProvider = { prov ->
+                                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
+                                    onUpdatePrefs { it.copy(aiProvider = prov, aiModel = defaultModel) }
+                                },
+                                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(aiModel = m) } },
+                                onSelectFallbackProvider = { prov ->
+                                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
+                                    onUpdatePrefs { it.copy(aiFallbackProvider = prov, aiFallbackModel = defaultModel) }
+                                },
+                                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(aiFallbackModel = m) } },
+                                onOpenApiKeys = onOpenApiKeys
+                            )
+                            TaskRoutingSection(
+                                title = if (de) "Diktat-Bereinigung" else "Dictation Cleanup",
+                                footer = if (de) "Unabhängiger Anbieter für die Bereinigung nach dem Diktieren."
+                                else "Independent provider for post-dictation cleanup.",
+                                de = de,
+                                isAudioTask = false,
+                                primaryProvider = prefs.cleanupProvider,
+                                primaryModel = prefs.cleanupModel,
+                                fallbackProvider = prefs.cleanupFallbackProvider,
+                                fallbackModel = prefs.cleanupFallbackModel,
+                                primaryOptions = allTextProviders,
+                                fallbackOptions = allTextProviders,
+                                secureKeyStorage = secureKeyStorage,
+                                onSelectPrimaryProvider = { prov ->
+                                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
+                                    onUpdatePrefs { it.copy(cleanupProvider = prov, cleanupModel = defaultModel) }
+                                },
+                                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(cleanupModel = m) } },
+                                onSelectFallbackProvider = { prov ->
+                                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
+                                    onUpdatePrefs { it.copy(cleanupFallbackProvider = prov, cleanupFallbackModel = defaultModel) }
+                                },
+                                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(cleanupFallbackModel = m) } },
+                                onOpenApiKeys = onOpenApiKeys
+                            )
+                            TaskRoutingSection(
+                                title = if (de) "Cloud-Diktat (Audio → Text)" else "Cloud Dictation (Audio → Text)",
+                                footer = if (de) "Greift in den Diktat-Modi „Cloud“ & „Gemini Live“."
+                                else "Used by Cloud & Gemini Live dictation modes.",
+                                de = de,
+                                isAudioTask = true,
+                                primaryProvider = prefs.dictationProvider,
+                                primaryModel = prefs.dictationModel,
+                                fallbackProvider = prefs.dictationFallbackProvider,
+                                fallbackModel = prefs.dictationFallbackModel,
+                                primaryOptions = allAudioProviders,
+                                fallbackOptions = audioFallbackProviders,
+                                secureKeyStorage = secureKeyStorage,
+                                onSelectPrimaryProvider = { prov ->
+                                    val defaultModel = AiModelCatalog.defaultAudioModelFor(prov)
+                                    onUpdatePrefs { it.copy(dictationProvider = prov, dictationModel = defaultModel) }
+                                },
+                                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(dictationModel = m) } },
+                                onSelectFallbackProvider = { prov ->
+                                    val defaultModel = AiModelCatalog.defaultAudioModelFor(prov)
+                                    onUpdatePrefs { it.copy(dictationFallbackProvider = prov, dictationFallbackModel = defaultModel) }
+                                },
+                                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(dictationFallbackModel = m) } },
+                                onOpenApiKeys = onOpenApiKeys
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -3335,6 +3764,7 @@ private fun TaskRoutingSection(
                 ) {
                     primaryOptions.forEach { prov ->
                         val hasKey = prov == AiProviderType.LOCAL_RULES ||
+                            prov == AiProviderType.LOCAL_LLM ||
                             prov == AiProviderType.GEMINI_NANO ||
                             secureKeyStorage.hasKey(prov)
                         FilterChip(

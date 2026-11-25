@@ -36,12 +36,21 @@ class WavAudioRecorder {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private class Capture(val file: File) {
         @Volatile var stop = false
+        @Volatile var paused = false
         lateinit var job: Job
         var result: WavRecordingResult? = null
     }
 
     private val microphone = Mutex()
     private var current: Capture? = null
+
+    fun setPaused(paused: Boolean): Boolean {
+        val capture = current ?: return false
+        capture.paused = paused
+        return true
+    }
+
+    fun isPaused(): Boolean = current?.paused == true
 
     @SuppressLint("MissingPermission")
     fun start(
@@ -132,6 +141,10 @@ class WavAudioRecorder {
                     val read = recorder.read(pcm, 0, pcm.size)
                     check(read >= 0) { "AudioRecord read error $read" }
                     if (read == 0) continue
+                    if (capture.paused) {
+                        onRmsDb(0f)
+                        continue
+                    }
                     var sumSquares = 0.0
                     var framePeak = 0
                     for (i in 0 until read) {
@@ -277,7 +290,7 @@ class WavAudioRecorder {
         private const val EDGE_PADDING_BYTES = PCM_BYTES_PER_SECOND * 3 / 10
         private const val MAX_TRIM_BYTES = PCM_BYTES_PER_SECOND * 45L
         private const val WAV_HEADER_BYTES = 44
-        private const val READ_CHUNK_SAMPLES = SAMPLE_RATE / 12 // ~83ms per read
+        private const val READ_CHUNK_SAMPLES = SAMPLE_RATE / 20 // ~50ms per read for snappy live streaming & VU
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
     }

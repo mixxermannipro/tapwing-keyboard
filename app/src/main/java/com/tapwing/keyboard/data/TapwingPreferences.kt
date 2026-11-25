@@ -68,6 +68,7 @@ enum class VoiceEngineMode {
 
 enum class AiProviderType {
     LOCAL_RULES,
+    LOCAL_LLM,
     GEMINI_NANO,
     GROQ_API,
     GEMINI_API,
@@ -136,7 +137,9 @@ data class TapwingPrefs(
     val voiceCleanupUseSystemLanguage: Boolean = true,
     val voiceRemoveFillers: Boolean = true,
     val voiceAutoPunctuate: Boolean = true,
-    val voiceStrictLanguageLock: Boolean = true,
+    val voiceAutoBulletLists: Boolean = true,
+    val voiceMultilingualCodeSwitching: Boolean = true,
+    val voiceStrictLanguageLock: Boolean = false,
     val voiceMinimizeButton: Boolean = true,
     val voiceRotationGraceMs: Long = 1500L,
     val voiceAiPolish: Boolean = true,
@@ -144,6 +147,7 @@ data class TapwingPrefs(
 
     val aiWritingToolsEnabled: Boolean = true,
     val aiSupportAllKeyboards: Boolean = true,
+    val selectedLlmModelId: String = "llm-lfm2.5-1.2b-q4km",
     val aiProvider: AiProviderType = AiProviderType.LOCAL_RULES,
     val aiModel: String = "gemini-3.8-flash",
     val aiCustomEndpoint: String = "",
@@ -232,6 +236,8 @@ class TapwingPreferencesRepository(context: Context) {
         val VOICE_CLEANUP_USE_SYSTEM_LANG = booleanPreferencesKey("voice_cleanup_use_system_lang")
         val VOICE_REMOVE_FILLERS = booleanPreferencesKey("voice_remove_fillers")
         val VOICE_AUTO_PUNCTUATE = booleanPreferencesKey("voice_auto_punctuate")
+        val VOICE_AUTO_BULLET_LISTS = booleanPreferencesKey("voice_auto_bullet_lists")
+        val VOICE_MULTILINGUAL_CODE_SWITCHING = booleanPreferencesKey("voice_multilingual_code_switching")
         val VOICE_STRICT_LANGUAGE_LOCK = booleanPreferencesKey("voice_strict_language_lock")
         val VOICE_MINIMIZE_BUTTON = booleanPreferencesKey("voice_minimize_button")
         val VOICE_ROTATION_GRACE_MS = longPreferencesKey("voice_rotation_grace_ms")
@@ -240,6 +246,7 @@ class TapwingPreferencesRepository(context: Context) {
 
         val AI_WRITING_TOOLS_ENABLED = booleanPreferencesKey("ai_writing_tools_enabled")
         val AI_SUPPORT_ALL_KEYBOARDS = booleanPreferencesKey("ai_support_all_keyboards")
+        val SELECTED_LLM_MODEL_ID = stringPreferencesKey("selected_llm_model_id")
         val AI_PROVIDER = stringPreferencesKey("ai_provider")
         val AI_MODEL = stringPreferencesKey("ai_model")
         val AI_CUSTOM_ENDPOINT = stringPreferencesKey("ai_custom_endpoint")
@@ -350,7 +357,9 @@ class TapwingPreferencesRepository(context: Context) {
             voiceCleanupUseSystemLanguage = p[Keys.VOICE_CLEANUP_USE_SYSTEM_LANG] ?: true,
             voiceRemoveFillers = p[Keys.VOICE_REMOVE_FILLERS] ?: true,
             voiceAutoPunctuate = p[Keys.VOICE_AUTO_PUNCTUATE] ?: true,
-            voiceStrictLanguageLock = p[Keys.VOICE_STRICT_LANGUAGE_LOCK] ?: true,
+            voiceAutoBulletLists = p[Keys.VOICE_AUTO_BULLET_LISTS] ?: true,
+            voiceMultilingualCodeSwitching = p[Keys.VOICE_MULTILINGUAL_CODE_SWITCHING] ?: true,
+            voiceStrictLanguageLock = p[Keys.VOICE_STRICT_LANGUAGE_LOCK] ?: false,
             voiceMinimizeButton = p[Keys.VOICE_MINIMIZE_BUTTON] ?: true,
             voiceRotationGraceMs = (p[Keys.VOICE_ROTATION_GRACE_MS] ?: 1500L).coerceIn(500L, 4000L),
             voiceAiPolish = p[Keys.VOICE_AI_POLISH] ?: true,
@@ -358,6 +367,7 @@ class TapwingPreferencesRepository(context: Context) {
 
             aiWritingToolsEnabled = p[Keys.AI_WRITING_TOOLS_ENABLED] ?: true,
             aiSupportAllKeyboards = p[Keys.AI_SUPPORT_ALL_KEYBOARDS] ?: true,
+            selectedLlmModelId = p[Keys.SELECTED_LLM_MODEL_ID] ?: "llm-lfm2.5-1.2b-q4km",
             aiProvider = parseEnum(p[Keys.AI_PROVIDER], AiProviderType.LOCAL_RULES),
             aiModel = p[Keys.AI_MODEL] ?: "gemini-3.8-flash",
             aiCustomEndpoint = p[Keys.AI_CUSTOM_ENDPOINT] ?: "",
@@ -446,6 +456,8 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.VOICE_CLEANUP_USE_SYSTEM_LANG] = next.voiceCleanupUseSystemLanguage
         mutable[Keys.VOICE_REMOVE_FILLERS] = next.voiceRemoveFillers
         mutable[Keys.VOICE_AUTO_PUNCTUATE] = next.voiceAutoPunctuate
+        mutable[Keys.VOICE_AUTO_BULLET_LISTS] = next.voiceAutoBulletLists
+        mutable[Keys.VOICE_MULTILINGUAL_CODE_SWITCHING] = next.voiceMultilingualCodeSwitching
         mutable[Keys.VOICE_STRICT_LANGUAGE_LOCK] = next.voiceStrictLanguageLock
         mutable[Keys.VOICE_MINIMIZE_BUTTON] = next.voiceMinimizeButton
         mutable[Keys.VOICE_ROTATION_GRACE_MS] = next.voiceRotationGraceMs.coerceIn(500L, 4000L)
@@ -453,6 +465,7 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.VOICE_ONBOARDING_SEEN] = next.voiceOnboardingSeen
         mutable[Keys.AI_WRITING_TOOLS_ENABLED] = next.aiWritingToolsEnabled
         mutable[Keys.AI_SUPPORT_ALL_KEYBOARDS] = next.aiSupportAllKeyboards
+        mutable[Keys.SELECTED_LLM_MODEL_ID] = next.selectedLlmModelId
         mutable[Keys.AI_PROVIDER] = next.aiProvider.name
         mutable[Keys.AI_MODEL] = next.aiModel
         mutable[Keys.AI_CUSTOM_ENDPOINT] = next.aiCustomEndpoint

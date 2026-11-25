@@ -16,14 +16,15 @@ data class WritingToolsOutput(
 class WritingToolsEngine(
     private val secureKeyStorage: SecureKeyStorage,
     private val dictionaryStore: AdaptiveDictionaryStore? = null,
-    @Suppress("UNUSED_PARAMETER") modelManager: LocalModelManager? = null,
+    private val modelManager: LocalModelManager? = null,
     private val appContext: Context? = null
 ) {
 
     suspend fun runAction(
         sourceText: String,
         action: WritingAction,
-        prefs: TapwingPrefs
+        prefs: TapwingPrefs,
+        appPackage: String? = null
     ): WritingToolsOutput {
         val locale = prefs.activeLocale
         if (sourceText.isBlank()) {
@@ -36,7 +37,8 @@ class WritingToolsEngine(
             locale = locale,
             provider = prefs.aiProvider,
             model = prefs.aiModel,
-            prefs = prefs
+            prefs = prefs,
+            appPackage = appPackage
         )
         if (primary is ProviderAttempt.Success) {
             return primary.output
@@ -51,7 +53,8 @@ class WritingToolsEngine(
                 locale = locale,
                 provider = prefs.aiFallbackProvider,
                 model = prefs.aiFallbackModel,
-                prefs = prefs
+                prefs = prefs,
+                appPackage = appPackage
             )
         } else null
 
@@ -74,14 +77,15 @@ class WritingToolsEngine(
     /**
      * Cleans up voice dictation text using the configured Cleanup provider + optional Fallback provider:
      * 1) Smart-Bypass for ultra-short clean utterances (< 1 ms local)
-     * 2) Primary Cleanup backend (Gemini / Groq / OpenRouter / Grok / OpenAI / Gemini Nano)
-     * 3) Configured Cleanup Fallback provider if primary fails or key is missing
+     * 2) Primary Cleanup backend (Local GGUF LLM / Gemini / Groq / OpenRouter / Grok / OpenAI / Gemini Nano)
+     * 3) Configured Cleanup Fallback provider if primary fails or key/model is missing
      * 4) Instant offline rule-based NaturalVoiceCleaner fallback
      */
     suspend fun cleanupVoiceTranscript(
         rawTranscript: String,
         prefs: TapwingPrefs,
-        ruleCleaned: String
+        ruleCleaned: String,
+        appPackage: String? = null
     ): WritingToolsOutput {
         if (rawTranscript.isBlank()) return WritingToolsOutput("", "On-Device")
 
@@ -111,7 +115,8 @@ class WritingToolsEngine(
                 locale = prefs.activeLocale,
                 provider = primaryProvider,
                 model = primaryModel,
-                prefs = prefs
+                prefs = prefs,
+                appPackage = appPackage
             )
             if (primary is ProviderAttempt.Success && !looksOverTruncated(rawTranscript, primary.output.rewrittenText)) {
                 return primary.output
@@ -129,7 +134,8 @@ class WritingToolsEngine(
                 locale = prefs.activeLocale,
                 provider = fallbackProvider,
                 model = fallbackModel,
-                prefs = prefs
+                prefs = prefs,
+                appPackage = appPackage
             )
             if (fallback is ProviderAttempt.Success && !looksOverTruncated(rawTranscript, fallback.output.rewrittenText)) {
                 return fallback.output
@@ -153,7 +159,8 @@ class WritingToolsEngine(
         locale: String,
         provider: AiProviderType,
         model: String,
-        prefs: TapwingPrefs
+        prefs: TapwingPrefs,
+        appPackage: String?
     ): ProviderAttempt {
         if (provider == AiProviderType.LOCAL_RULES) {
             return ProviderAttempt.Success(
@@ -162,6 +169,47 @@ class WritingToolsEngine(
                     badge = "On-Device"
                 )
             )
+        }
+
+        val personalVocabulary = dictionaryStore?.topVocabularyForVoice(appPackage = appPackage, limit = 25).orEmpty()
+
+        if (provider == AiProviderType.LOCAL_LLM) {
+            val preferredLlmId = model.trim().takeIf { LocalModelCatalog.findById(it)?.kind?.isLlm == true }
+                ?: prefs.selectedLlmModelId
+            val installed = modelManager?.bestInstalledLlmModel(preferredLlmId)
+            if (installed == null) {
+                val msg = if (KeyboardLocales.baseLang(locale) == "de") {
+                    "Kein lokales KI-Modell geladen – lade eins unter Schreibhilfe"
+                } else {
+                    "No local LLM downloaded – install one in Writing Aid"
+                }
+                return ProviderAttempt.Failure(msg)
+            }
+            val (spec, modelFile) = installed
+            val res = LocalLlmEngine.processText(
+                text = sourceText,
+                action = action,
+                locale = locale,
+                spec = spec,
+                modelFile = modelFile,
+                customCleanupPrompt = prefs.voiceCleanupPrompt,
+                useSystemLanguageForCleanup = prefs.voiceCleanupUseSystemLanguage,
+                customVocabulary = personalVocabulary,
+                autoBulletLists = prefs.voiceAutoBulletLists
+            )
+            return if (res.isSuccess) {
+                ProviderAttempt.Success(
+                    WritingToolsOutput(
+                        rewrittenText = res.getOrThrow(),
+                        badge = "Lokal · ${spec.shortEngineLabel}"
+                    )
+                )
+            } else {
+                ProviderAttempt.Failure(
+                    res.exceptionOrNull()?.localizedMessage
+                        ?: if (KeyboardLocales.baseLang(locale) == "de") "Lokales LLM fehlgeschlagen" else "Local LLM failed"
+                )
+            }
         }
 
         if (provider == AiProviderType.GEMINI_NANO) {
@@ -206,7 +254,9 @@ class WritingToolsEngine(
                     model = resolvedModel,
                     customEndpoint = prefs.aiCustomEndpoint,
                     customCleanupPrompt = prefs.voiceCleanupPrompt,
-                    useSystemLanguageForCleanup = prefs.voiceCleanupUseSystemLanguage
+                    useSystemLanguageForCleanup = prefs.voiceCleanupUseSystemLanguage,
+                    customVocabulary = personalVocabulary,
+                    autoBulletLists = prefs.voiceAutoBulletLists
                 )
             ) {
                 is CloudAiResult.Success -> ProviderAttempt.Success(
@@ -245,11 +295,13 @@ class WritingToolsEngine(
         private val BYPASS_BLOCKING_CUES = setOf(
             "äh", "ähm", "öhm", "um", "uh", "erm", "nein", "warte", "meine",
             "besser", "eigentlich", "actually", "wait", "scratch", "bullet",
-            "stichpunkt", "komma", "punkt", "fragezeichen"
+            "stichpunkt", "stichpunkte", "komma", "punkt", "fragezeichen",
+            "einkaufsliste", "aufgaben", "liste", "todo", "to-do", "tasks",
+            "erstens", "zweitens", "first", "second", "agenda", "checkliste"
         )
 
         /**
-         * Avoids a network round-trip when a short 1-4 word phrase already needs no AI semantic rewrite.
+         * Avoids a network/LLM round-trip when a short 1-4 word phrase already needs no AI semantic rewrite.
          */
         fun shouldSkipCloudPolish(rawTranscript: String, ruleCleaned: String): Boolean {
             val trimmed = rawTranscript.trim()
@@ -257,7 +309,7 @@ class WritingToolsEngine(
             val words = trimmed.split(Regex("""\s+""")).filter { it.isNotBlank() }
             if (words.size > 4) return false
             return words.none { word ->
-                word.lowercase().trim(',', '.', '!', '?') in BYPASS_BLOCKING_CUES
+                word.lowercase().trim(',', '.', '!', '?', ':') in BYPASS_BLOCKING_CUES
             }
         }
     }

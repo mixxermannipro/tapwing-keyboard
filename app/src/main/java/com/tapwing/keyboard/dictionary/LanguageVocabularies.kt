@@ -596,6 +596,25 @@ object LanguageVocabularies {
         else -> listOf("Hello", "Thanks", "Okay")
     }
 
+    private val lowercaseVocabCache = java.util.concurrent.ConcurrentHashMap<String, Set<String>>()
+
+    fun containsStandardWord(word: String, locale: String): Boolean {
+        val lower = word.trim().lowercase()
+        if (lower.isEmpty()) return false
+        val base = KeyboardLocales.baseLang(locale)
+        val primary = lowercaseVocabCache.getOrPut(base) {
+            vocabularyFor(base).mapTo(hashSetOf()) { it.lowercase() }
+        }
+        if (lower in primary) return true
+        if (base != "en") {
+            val en = lowercaseVocabCache.getOrPut("en") {
+                vocabularyFor("en").mapTo(hashSetOf()) { it.lowercase() }
+            }
+            if (lower in en) return true
+        }
+        return false
+    }
+
     fun isNeverAutoCapitalizeMidSentence(word: String, locale: String): Boolean {
         val base = KeyboardLocales.baseLang(locale)
         val lower = word.lowercase()

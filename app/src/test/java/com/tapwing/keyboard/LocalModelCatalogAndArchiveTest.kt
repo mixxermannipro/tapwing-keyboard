@@ -57,6 +57,23 @@ class LocalModelCatalogAndArchiveTest {
         assertTrue(parakeetV2.supportsLocale("en-US"))
         assertTrue(parakeetV2.supportsLocale("en-GB"))
         assertFalse(parakeetV2.supportsLocale("de-DE"))
+
+        val nemotron = LocalModelCatalog.findById("sherpa-nemotron-3.5-streaming-multilingual-int8")!!
+        assertEquals(LocalModelKind.SHERPA_STREAMING, nemotron.kind)
+        assertTrue(nemotron.supportsStreaming)
+        assertTrue(nemotron.supportsMultilingualCodeSwitching)
+        assertEquals("", nemotron.streamingModelType)
+        assertTrue(nemotron.supportsLocale("de-DE"))
+        assertTrue(nemotron.supportsLocale("en-US"))
+        assertEquals(nemotron.id, LocalModelCatalog.recommendedForLocale("de-DE", multilingual = true).id)
+
+        assertTrue(LocalModelCatalog.llmModels.size >= 6)
+        assertTrue(LocalModelCatalog.llmModels.all { it.kind.isLlm && it.fileName.endsWith(".gguf") })
+        val recLlm = LocalModelCatalog.recommendedLlm()
+        assertEquals("llm-lfm2.5-1.2b-q4km", recLlm.id)
+        assertTrue(recLlm.isRecommended)
+        assertTrue(LocalModelCatalog.findById("llm-qwen3.5-0.8b-q4km")!!.supportsNoThinkTag)
+        assertTrue(LocalModelCatalog.findById("llm-qwen3.5-4b-q4km")!!.isFlagshipTier)
     }
 
     @Test

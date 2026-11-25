@@ -43,9 +43,14 @@ object CloudAiClient {
         model: String,
         customEndpoint: String,
         customCleanupPrompt: String = "",
-        useSystemLanguageForCleanup: Boolean = true
+        useSystemLanguageForCleanup: Boolean = true,
+        customVocabulary: Set<String> = emptySet(),
+        autoBulletLists: Boolean = true
     ): CloudAiResult = withContext(Dispatchers.IO) {
-        if (provider == AiProviderType.LOCAL_RULES || provider == AiProviderType.GEMINI_NANO) {
+        if (provider == AiProviderType.LOCAL_RULES ||
+            provider == AiProviderType.GEMINI_NANO ||
+            provider == AiProviderType.LOCAL_LLM
+        ) {
             return@withContext CloudAiResult.Success(
                 LocalWritingAssistant.transform(text, action, locale),
                 "On-Device"
@@ -59,7 +64,9 @@ object CloudAiClient {
             action = action,
             locale = locale,
             customCleanupPrompt = customCleanupPrompt,
-            useSystemLanguageForCleanup = useSystemLanguageForCleanup
+            useSystemLanguageForCleanup = useSystemLanguageForCleanup,
+            customVocabulary = customVocabulary,
+            autoBulletLists = autoBulletLists
         )
         val fastMode = action == WritingAction.VOICE_CLEANUP
         return@withContext when (provider) {
@@ -89,31 +96,26 @@ object CloudAiClient {
         action: WritingAction,
         locale: String,
         customCleanupPrompt: String = "",
-        useSystemLanguageForCleanup: Boolean = true
+        useSystemLanguageForCleanup: Boolean = true,
+        customVocabulary: Set<String> = emptySet(),
+        autoBulletLists: Boolean = true
     ): String {
         if (action == WritingAction.VOICE_CLEANUP) {
             val sys = CleanupPromptBuilder.resolveSystemPrompt(
                 customPrompt = customCleanupPrompt,
                 useSystemLanguage = useSystemLanguageForCleanup,
-                activeKeyboardLocale = locale
+                activeKeyboardLocale = locale,
+                customVocabulary = customVocabulary,
+                autoBulletLists = autoBulletLists
             )
             return "$sys\n\nTranscript:\n$text"
         }
-        val spec = KeyboardLocales.specFor(locale)
-        val langDisplay = Locale.forLanguageTag(spec.bcp47Tag).getDisplayLanguage(Locale.ENGLISH).ifBlank { "English" }
-        val sysLang = KeyboardLocales.systemLanguageDisplayName()
-        val instruction = when (action) {
-            WritingAction.PROOFREAD -> "Fix spelling, punctuation, and grammar while keeping original meaning and language."
-            WritingAction.PROFESSIONAL -> "Rewrite in a polite, clear, professional tone."
-            WritingAction.CASUAL -> "Rewrite in a friendly, natural, casual tone."
-            WritingAction.CONCISE -> "Make the text shorter and more direct while preserving all facts."
-            WritingAction.EMOTIVE -> "Make the text warmer, more expressive, and engaging."
-            WritingAction.REPHRASE -> "Rephrase cleanly with fresh wording while keeping the exact intent."
-            WritingAction.SUMMARIZE -> "Summarize the key points clearly and concisely as short bullet points."
-            WritingAction.TRANSLATE -> "Translate naturally into $langDisplay (or into $sysLang if already in $langDisplay)."
-            WritingAction.VOICE_CLEANUP -> ""
-        }
-        return "Language: $langDisplay (${spec.bcp47Tag}). Task: $instruction Return ONLY the rewritten text with no quotes or explanation.\n\nText:\n$text"
+        val sys = CleanupPromptBuilder.buildWritingActionSystemPrompt(
+            action = action,
+            locale = locale,
+            customVocabulary = customVocabulary
+        )
+        return "$sys\n\nText:\n$text"
     }
 
     private fun callGemini(apiKey: String, model: String, prompt: String, fastMode: Boolean): CloudAiResult {
