@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -18,6 +19,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 sealed interface ModelInstallState {
     data object NotInstalled : ModelInstallState
@@ -36,7 +38,7 @@ class LocalModelManager(context: Context) {
     private val appContext = context.applicationContext
     private val modelsRoot: File = File(appContext.noBackupFilesDir ?: appContext.filesDir, "tapwing_models")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val activeJobs = mutableMapOf<String, Job>()
+    private val activeJobs = ConcurrentHashMap<String, Job>()
 
     private val _states = MutableStateFlow<Map<String, ModelInstallState>>(emptyMap())
     val states: StateFlow<Map<String, ModelInstallState>> = _states.asStateFlow()
@@ -245,7 +247,7 @@ class LocalModelManager(context: Context) {
 
     private suspend fun downloadAndInstallSherpa(spec: LocalModelSpec) {
         val targetDir = sherpaModelDirFor(spec)
-        val parentDir = targetDir.parentFile!!
+        val parentDir = targetDir.parentFile ?: modelsRoot
         val archivePart = File(parentDir, "${spec.id}.tar.bz2.part")
         val extractTmpDir = File(parentDir, "${spec.id}.tmp")
         val estBytes = spec.approxSizeMb * 1_000_000L
@@ -336,7 +338,7 @@ class LocalModelManager(context: Context) {
     suspend fun importModelFromUri(spec: LocalModelSpec, uri: Uri): Boolean = withContext(Dispatchers.IO) {
         if (spec.kind.isSherpa) {
             val targetDir = sherpaModelDirFor(spec)
-            val parentDir = targetDir.parentFile!!
+            val parentDir = targetDir.parentFile ?: modelsRoot
             val archivePart = File(parentDir, "${spec.id}.tar.bz2.part")
             val extractTmpDir = File(parentDir, "${spec.id}.tmp")
             updateState(spec.id, ModelInstallState.Downloading(0.15f, 0L, spec.approxSizeMb * 1_000_000L))
@@ -434,6 +436,9 @@ class LocalModelManager(context: Context) {
         var redirects = 0
         var conn: HttpURLConnection
         while (true) {
+            if (!isHttpsUrl(currentUrl)) {
+                throw SecurityException("Blocked non-HTTPS model download URL")
+            }
             conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
                 connectTimeout = 20_000
@@ -444,7 +449,11 @@ class LocalModelManager(context: Context) {
             if (code in 300..399) {
                 val loc = conn.getHeaderField("Location") ?: error("Redirect without Location")
                 conn.disconnect()
-                currentUrl = URL(URL(currentUrl), loc).toString()
+                val nextUrl = URL(URL(currentUrl), loc).toString()
+                if (!isHttpsUrl(nextUrl)) {
+                    throw SecurityException("Blocked non-HTTPS redirect target")
+                }
+                currentUrl = nextUrl
                 redirects++
                 if (redirects > 10) error("Too many redirects")
                 continue
@@ -485,14 +494,21 @@ class LocalModelManager(context: Context) {
     }
 
     private fun updateState(id: String, state: ModelInstallState) {
-        val next = _states.value.toMutableMap()
-        next[id] = state
-        _states.value = next
+        _states.update { current ->
+            val next = LinkedHashMap(current)
+            next[id] = state
+            next
+        }
     }
 
     companion object {
         private const val MIN_VALID_MODEL_BYTES = 1_000_000L
         private const val MIN_VALID_ONNX_BYTES = 10_240L
+
+        internal fun isHttpsUrl(raw: String): Boolean = runCatching {
+            val u = URL(raw.trim())
+            u.protocol.equals("https", ignoreCase = true) && u.host.isNotBlank()
+        }.getOrDefault(false)
 
         internal fun requiredSpaceMbFor(spec: LocalModelSpec): Long {
             val factor = if (spec.kind.isSherpa) 2.2 else 1.15

@@ -438,15 +438,17 @@ object LocalModelCatalog {
         val base = KeyboardLocales.baseLang(locale)
         if (multilingual) {
             return when {
-                base in NEMOTRON_MULTILINGUAL_LANGS -> findById("sherpa-nemotron-3.5-streaming-multilingual-int8")!!
-                base in EUROPEAN_25_LANGS -> findById("sherpa-parakeet-ultra-0.6b-int8")!!
+                base in NEMOTRON_MULTILINGUAL_LANGS ->
+                    findById("sherpa-nemotron-3.5-streaming-multilingual-int8") ?: recommendedSherpa()
+                base in EUROPEAN_25_LANGS ->
+                    findById("sherpa-parakeet-ultra-0.6b-int8") ?: recommendedSherpa()
                 else -> recommendedWhisper()
             }
         }
         return when {
-            base == "de" -> findById("sherpa-fastconformer-de-pc-int8")!!
-            base in setOf("en", "fr", "es") -> findById("sherpa-canary-180m-flash-int8")!!
-            base in EUROPEAN_25_LANGS -> findById("sherpa-parakeet-ultra-0.6b-int8")!!
+            base == "de" -> findById("sherpa-fastconformer-de-pc-int8") ?: recommendedSherpa()
+            base in setOf("en", "fr", "es") -> findById("sherpa-canary-180m-flash-int8") ?: recommendedSherpa()
+            base in EUROPEAN_25_LANGS -> findById("sherpa-parakeet-ultra-0.6b-int8") ?: recommendedSherpa()
             else -> recommendedWhisper()
         }
     }

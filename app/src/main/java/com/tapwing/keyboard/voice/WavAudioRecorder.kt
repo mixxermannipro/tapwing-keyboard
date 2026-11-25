@@ -42,6 +42,7 @@ class WavAudioRecorder {
     }
 
     private val microphone = Mutex()
+    @Volatile
     private var current: Capture? = null
 
     fun setPaused(paused: Boolean): Boolean {

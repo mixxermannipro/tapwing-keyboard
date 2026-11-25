@@ -3,7 +3,4 @@
     <files-path
         name="clipboard_images"
         path="clipboard_images/" />
-    <cache-path
-        name="shared_cache"
-        path="." />
 </paths>

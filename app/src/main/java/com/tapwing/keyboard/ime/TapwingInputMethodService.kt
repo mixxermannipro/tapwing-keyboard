@@ -897,6 +897,7 @@ class TapwingInputMethodService :
             LocalInferenceEngine.unloadAll()
         } else if (level >= TRIM_MEMORY_UI_HIDDEN) {
             LocalInferenceEngine.unloadWhisper()
+            com.tapwing.keyboard.ai.LocalLlmEngine.unloadAll()
         }
     }
 
@@ -1691,10 +1692,10 @@ class TapwingInputMethodService :
             prefs.dictationFallbackProvider,
             prefs.dictationFallbackModel
         )
-        val fallbackCloud = explicitFallbackCloud ?: if (live != null) {
+        val fallbackCloud = explicitFallbackCloud ?: if (live != null && geminiKey != null) {
             CloudDictation(
                 provider = CloudSpeechProvider.GEMINI,
-                apiKey = geminiKey!!,
+                apiKey = geminiKey,
                 natural = natural,
                 removeFillers = prefs.voiceRemoveFillers,
                 autoPunctuate = prefs.voiceAutoPunctuate,

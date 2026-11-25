@@ -707,12 +707,18 @@ object SuggestionEngine {
         }
     }
 
-    private val coordsByLanguage = java.util.concurrent.ConcurrentHashMap<String, Map<Char, Pair<Float, Float>>>()
+    private const val COORD_TABLE_CHARS = 384 // Covers ASCII + Latin-1 + Turkish/Polish Latin Extended-A
+    private val coordsTableByLanguage = java.util.concurrent.ConcurrentHashMap<String, FloatArray>()
+    private val dpRowScratch = object : ThreadLocal<Array<DoubleArray>>() {
+        override fun initialValue(): Array<DoubleArray> = Array(3) { DoubleArray(64) }
+    }
 
-    private fun keyGridCoords(locale: String): Map<Char, Pair<Float, Float>> =
-        coordsByLanguage.getOrPut(KeyboardLocales.baseLang(locale)) { buildKeyGrid(KeyboardLocales.baseLang(locale)) }
+    private fun keyGridCoordTable(locale: String): FloatArray =
+        coordsTableByLanguage.getOrPut(KeyboardLocales.baseLang(locale)) {
+            buildKeyGridTable(KeyboardLocales.baseLang(locale))
+        }
 
-    private fun buildKeyGrid(baseLang: String): Map<Char, Pair<Float, Float>> {
+    private fun buildKeyGridTable(baseLang: String): FloatArray {
         val top = when (baseLang) {
             "de" -> "qwertzuiop"
             "fr" -> "azertyuiop"
@@ -731,15 +737,31 @@ object SuggestionEngine {
             "tr" -> "zxcvbnmöç"
             else -> "zxcvbnm"
         }
-        val coords = HashMap<Char, Pair<Float, Float>>(32)
-        top.forEachIndexed { idx, ch -> coords[ch] = idx.toFloat() to 0f }
-        mid.forEachIndexed { idx, ch -> coords[ch] = (idx + 0.5f) to 1f }
-        bot.forEachIndexed { idx, ch -> coords[ch] = (idx + 1.5f) to 2f }
-        coords['ä'] = coords['a'] ?: (0.5f to 1f)
-        coords['ö'] = coords['o'] ?: (8f to 0f)
-        coords['ü'] = coords['u'] ?: (6f to 0f)
-        coords['ß'] = coords['s'] ?: (1.5f to 1f)
-        return coords
+        // Flat layout: index = ch.code * 2 -> x, index + 1 -> y (NaN means unmapped)
+        val table = FloatArray(COORD_TABLE_CHARS * 2) { Float.NaN }
+        fun put(ch: Char, x: Float, y: Float) {
+            val code = ch.code
+            if (code in 0 until COORD_TABLE_CHARS) {
+                table[code * 2] = x
+                table[code * 2 + 1] = y
+            }
+        }
+        fun copyOrPut(ch: Char, ref: Char, fallbackX: Float, fallbackY: Float) {
+            val rc = ref.code
+            if (rc in 0 until COORD_TABLE_CHARS && !table[rc * 2].isNaN()) {
+                put(ch, table[rc * 2], table[rc * 2 + 1])
+            } else {
+                put(ch, fallbackX, fallbackY)
+            }
+        }
+        top.forEachIndexed { idx, ch -> put(ch, idx.toFloat(), 0f) }
+        mid.forEachIndexed { idx, ch -> put(ch, idx + 0.5f, 1f) }
+        bot.forEachIndexed { idx, ch -> put(ch, idx + 1.5f, 2f) }
+        copyOrPut('ä', 'a', 0.5f, 1f)
+        copyOrPut('ö', 'o', 8f, 0f)
+        copyOrPut('ü', 'u', 6f, 0f)
+        copyOrPut('ß', 's', 1.5f, 1f)
+        return table
     }
 
     private fun isUmlautPair(ca: Char, cb: Char): Boolean =
@@ -760,25 +782,42 @@ object SuggestionEngine {
         val n = a.length
         val m = b.length
         if (kotlin.math.abs(n - m) > 2) return 99.0
-        val coords = keyGridCoords(locale)
-        var prev2 = DoubleArray(m + 1)
-        var prev1 = DoubleArray(m + 1) { it.toDouble() }
-        var curr = DoubleArray(m + 1)
+        val table = keyGridCoordTable(locale)
+        val scratch = dpRowScratch.get()
+        var prev2: DoubleArray
+        var prev1: DoubleArray
+        var curr: DoubleArray
+        if (scratch != null && m + 1 <= scratch[0].size) {
+            prev2 = scratch[0]
+            prev1 = scratch[1]
+            curr = scratch[2]
+        } else {
+            prev2 = DoubleArray(m + 1)
+            prev1 = DoubleArray(m + 1)
+            curr = DoubleArray(m + 1)
+        }
+        for (j in 0..m) {
+            prev2[j] = 0.0
+            prev1[j] = j.toDouble()
+        }
         for (i in 1..n) {
             curr[0] = i.toDouble()
             var rowMin = curr[0]
             val ca = a[i - 1]
-            val pa = coords[ca]
+            val caCode = ca.code
+            val ax = if (caCode in 0 until COORD_TABLE_CHARS) table[caCode * 2] else Float.NaN
+            val ay = if (!ax.isNaN()) table[caCode * 2 + 1] else Float.NaN
             for (j in 1..m) {
                 val cb = b[j - 1]
                 val subCost = when {
                     ca == cb -> 0.0
                     isUmlautPair(ca, cb) -> 0.25
                     else -> {
-                        val pb = coords[cb]
-                        if (pa != null && pb != null) {
-                            val dx = pa.first - pb.first
-                            val dy = pa.second - pb.second
+                        val cbCode = cb.code
+                        val bx = if (!ax.isNaN() && cbCode in 0 until COORD_TABLE_CHARS) table[cbCode * 2] else Float.NaN
+                        if (!bx.isNaN()) {
+                            val dx = ax - bx
+                            val dy = ay - table[cbCode * 2 + 1]
                             val distSq = dx * dx + dy * dy
                             when {
                                 distSq <= 1.5625f -> 0.45
@@ -790,11 +829,11 @@ object SuggestionEngine {
                         }
                     }
                 }
-                var best = minOf(
-                    prev1[j] + 1.0,
-                    curr[j - 1] + 1.0,
-                    prev1[j - 1] + subCost
-                )
+                var best = prev1[j] + 1.0
+                val ins = curr[j - 1] + 1.0
+                if (ins < best) best = ins
+                val sub = prev1[j - 1] + subCost
+                if (sub < best) best = sub
                 if (i > 1 && j > 1 && ca == b[j - 2] && a[i - 2] == cb) {
                     val trans = prev2[j - 2] + 0.65
                     if (trans < best) best = trans
@@ -821,22 +860,29 @@ object SuggestionEngine {
         val n = a.length
         val m = b.length
         if (kotlin.math.abs(n - m) > 2) return 99
-        val d = Array(n + 1) { IntArray(m + 1) }
-        for (i in 0..n) d[i][0] = i
-        for (j in 0..m) d[0][j] = j
+        var prev2 = IntArray(m + 1)
+        var prev1 = IntArray(m + 1) { it }
+        var curr = IntArray(m + 1)
         for (i in 1..n) {
+            curr[0] = i
+            val ca = a[i - 1]
             for (j in 1..m) {
-                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                val cb = b[j - 1]
+                val cost = if (ca == cb) 0 else 1
                 var best = min(
-                    min(d[i - 1][j] + 1, d[i][j - 1] + 1),
-                    d[i - 1][j - 1] + cost
+                    min(prev1[j] + 1, curr[j - 1] + 1),
+                    prev1[j - 1] + cost
                 )
-                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) {
-                    best = min(best, d[i - 2][j - 2] + cost)
+                if (i > 1 && j > 1 && ca == b[j - 2] && a[i - 2] == cb) {
+                    best = min(best, prev2[j - 2] + cost)
                 }
-                d[i][j] = best
+                curr[j] = best
             }
+            val tmp = prev2
+            prev2 = prev1
+            prev1 = curr
+            curr = tmp
         }
-        return d[n][m]
+        return prev1[m]
     }
 }

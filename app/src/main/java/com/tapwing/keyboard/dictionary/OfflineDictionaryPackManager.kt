@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -17,6 +18,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 data class OfflinePackSpec(
     val langCode: String,
@@ -69,8 +71,8 @@ class OfflineDictionaryPackManager(context: Context) {
     private val appContext = context.applicationContext
     private val packsDir: File = File(appContext.noBackupFilesDir ?: appContext.filesDir, "tapwing_dictionaries")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val activeJobs = mutableMapOf<String, Job>()
-    private val loadedCache = java.util.concurrent.ConcurrentHashMap<String, LoadedDictionaryPack>()
+    private val activeJobs = ConcurrentHashMap<String, Job>()
+    private val loadedCache = ConcurrentHashMap<String, LoadedDictionaryPack>()
 
     private val _states = MutableStateFlow<Map<String, PackInstallState>>(emptyMap())
     val states: StateFlow<Map<String, PackInstallState>> = _states.asStateFlow()
@@ -80,22 +82,24 @@ class OfflineDictionaryPackManager(context: Context) {
     }
 
     fun refreshStates() {
-        val next = LinkedHashMap<String, PackInstallState>()
-        availablePacks.forEach { spec ->
-            val current = _states.value[spec.langCode]
-            if (current is PackInstallState.Downloading) {
-                next[spec.langCode] = current
-            } else {
-                val file = packFileFor(spec.langCode)
-                if (file.isFile && file.length() > 10_000L) {
-                    val count = loadedCache[spec.langCode]?.wordFreq?.size ?: estimateLines(file)
-                    next[spec.langCode] = PackInstallState.Installed(count, file.length())
+        _states.update { currentMap ->
+            val next = LinkedHashMap<String, PackInstallState>()
+            availablePacks.forEach { spec ->
+                val current = currentMap[spec.langCode]
+                if (current is PackInstallState.Downloading) {
+                    next[spec.langCode] = current
                 } else {
-                    next[spec.langCode] = PackInstallState.NotInstalled
+                    val file = packFileFor(spec.langCode)
+                    if (file.isFile && file.length() > 10_000L) {
+                        val count = loadedCache[spec.langCode]?.wordFreq?.size ?: estimateLines(file)
+                        next[spec.langCode] = PackInstallState.Installed(count, file.length())
+                    } else {
+                        next[spec.langCode] = PackInstallState.NotInstalled
+                    }
                 }
             }
+            next
         }
-        _states.value = next
     }
 
     fun packFileFor(langCode: String): File {
@@ -198,14 +202,36 @@ class OfflineDictionaryPackManager(context: Context) {
     }
 
     private suspend fun downloadToFile(urlStr: String, dest: File, onProgress: (Float) -> Unit) {
-        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 20_000
-            setRequestProperty("User-Agent", "TapwingKeyboard/2.6 (Android)")
+        var currentUrl = urlStr
+        var redirects = 0
+        var conn: HttpURLConnection
+        while (true) {
+            val parsed = URL(currentUrl)
+            if (!parsed.protocol.equals("https", ignoreCase = true) || parsed.host.isBlank()) {
+                throw SecurityException("Blocked non-HTTPS dictionary download URL")
+            }
+            conn = (parsed.openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                connectTimeout = 15_000
+                readTimeout = 20_000
+                setRequestProperty("User-Agent", "TapwingKeyboard/2.6 (Android)")
+            }
+            val code = conn.responseCode
+            if (code in 300..399) {
+                val loc = conn.getHeaderField("Location") ?: error("Redirect without Location")
+                conn.disconnect()
+                currentUrl = URL(parsed, loc).toString()
+                redirects++
+                if (redirects > 5) error("Too many redirects")
+                continue
+            }
+            if (code !in 200..299) {
+                conn.disconnect()
+                error("HTTP $code")
+            }
+            break
         }
         try {
-            val code = conn.responseCode
-            if (code !in 200..299) error("HTTP $code")
             val total = conn.contentLengthLong.takeIf { it > 0L } ?: 650_000L
             conn.inputStream.use { input ->
                 FileOutputStream(dest).use { output ->
@@ -214,8 +240,11 @@ class OfflineDictionaryPackManager(context: Context) {
                     while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                         val n = input.read(buf)
                         if (n <= 0) break
-                        output.write(buf, 0, n)
                         readTotal += n
+                        if (readTotal > MAX_PACK_BYTES) {
+                            throw SecurityException("Dictionary pack exceeds ${MAX_PACK_BYTES / (1024 * 1024)} MB limit")
+                        }
+                        output.write(buf, 0, n)
                         onProgress((readTotal.toFloat() / total.toFloat()).coerceIn(0.05f, 0.99f))
                     }
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
@@ -228,9 +257,11 @@ class OfflineDictionaryPackManager(context: Context) {
     }
 
     private fun updateState(langCode: String, state: PackInstallState) {
-        val next = _states.value.toMutableMap()
-        next[langCode] = state
-        _states.value = next
+        _states.update { current ->
+            val next = LinkedHashMap(current)
+            next[langCode] = state
+            next
+        }
     }
 
     private fun estimateLines(file: File): Int {
@@ -244,6 +275,7 @@ class OfflineDictionaryPackManager(context: Context) {
     }
 
     companion object {
+        private const val MAX_PACK_BYTES = 10L * 1024L * 1024L
         val availablePacks: List<OfflinePackSpec> = listOf(
             OfflinePackSpec("de", "Deutsch (50.000 Wörter)", 620, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/de/de_50k.txt"),
             OfflinePackSpec("en", "English (50,000 words)", 560, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt"),

@@ -18,11 +18,16 @@ object TarBz2Extractor {
         val extractedBytes: Long
     )
 
+    const val DEFAULT_MAX_EXTRACTED_BYTES: Long = 2_500_000_000L
+    const val DEFAULT_MAX_EXTRACTED_FILES: Int = 2_048
+
     fun extract(
         archiveFile: File,
         targetDir: File,
         skipDirs: Set<String> = setOf("test_wavs"),
         skipFiles: Set<String> = setOf("readme.md", ".gitattributes", ".ds_store"),
+        maxExtractedBytes: Long = DEFAULT_MAX_EXTRACTED_BYTES,
+        maxExtractedFiles: Int = DEFAULT_MAX_EXTRACTED_FILES,
         onProgress: ((filesExtracted: Int, bytesExtracted: Long) -> Unit)? = null
     ): ExtractResult {
         if (!targetDir.exists()) targetDir.mkdirs()
@@ -40,6 +45,9 @@ object TarBz2Extractor {
                 TarArchiveInputStream(bzIn).use { tarIn ->
                     while (true) {
                         val entry: TarArchiveEntry = tarIn.nextEntry ?: break
+                        if (entry.isSymbolicLink || entry.isLink) {
+                            throw SecurityException("Blocked archive symlink/hardlink entry: ${entry.name}")
+                        }
                         val cleanSegments = sanitizeEntryPath(entry.name) ?: continue
                         if (cleanSegments.isEmpty()) continue
 
@@ -75,6 +83,9 @@ object TarBz2Extractor {
                         }
 
                         if (!entry.isFile) continue
+                        if (filesCount >= maxExtractedFiles) {
+                            throw SecurityException("Archive exceeds max allowed file count ($maxExtractedFiles)")
+                        }
 
                         val outFile = resolveSafely(targetDir, prefixWithSep, relativeSegments)
                         outFile.parentFile?.let { if (!it.exists()) it.mkdirs() }
@@ -83,8 +94,11 @@ object TarBz2Extractor {
                             while (true) {
                                 val read = tarIn.read(buffer)
                                 if (read <= 0) break
-                                out.write(buffer, 0, read)
                                 totalBytes += read
+                                if (totalBytes > maxExtractedBytes) {
+                                    throw SecurityException("Archive exceeds max extracted size limit ($maxExtractedBytes bytes)")
+                                }
+                                out.write(buffer, 0, read)
                             }
                             out.flush()
                         }

@@ -498,9 +498,10 @@ private fun ScreenshotPreviewStripChip(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                if (thumb != null) {
+                val bmp = thumb
+                if (bmp != null) {
                     Image(
-                        bitmap = thumb!!.asImageBitmap(),
+                        bitmap = bmp.asImageBitmap(),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier

@@ -1128,9 +1128,10 @@ fun ClipboardPanel(
                             modifier = Modifier.padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            if (clip.isImage && thumb != null) {
+                            val bmp = thumb
+                            if (clip.isImage && bmp != null) {
                                 Image(
-                                    bitmap = thumb!!.asImageBitmap(),
+                                    bitmap = bmp.asImageBitmap(),
                                     contentDescription = clip.text,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier

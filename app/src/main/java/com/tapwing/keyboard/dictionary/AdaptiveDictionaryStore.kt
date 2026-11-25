@@ -209,8 +209,9 @@ class AdaptiveDictionaryStore(
         // If typed at the start of a sentence with simple TitleCase (e.g. "Und", "Ich", "The"),
         // store its base unigram as lowercase unless it's already an explicitly capitalized custom word
         // or a known German noun.
+        val customExact = customWordsLower[lower]
         val storedForm = when {
-            customWordsLower.containsKey(lower) -> customWordsLower[lower]!!
+            customExact != null -> customExact
             wasSentenceStart && isSingleLeadingCap &&
                 !(KeyboardLocales.baseLang(locale) == "de" && lower in LanguageVocabularies.germanCapitalNouns) -> lower
             else -> clean
