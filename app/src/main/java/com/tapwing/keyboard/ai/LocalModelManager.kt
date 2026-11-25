@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -183,11 +184,24 @@ class LocalModelManager(context: Context) {
 
     fun startDownload(spec: LocalModelSpec) {
         if (activeJobs[spec.id]?.isActive == true) return
+        if (!modelsRoot.exists()) modelsRoot.mkdirs()
+        if (!hasEnoughStorageForDownload(modelsRoot.usableSpace, spec)) {
+            val needMb = requiredSpaceMbFor(spec)
+            updateState(
+                spec.id,
+                ModelInstallState.Error("Not enough free storage (need ~${needMb} MB)")
+            )
+            return
+        }
         val job = scope.launch {
-            if (spec.kind.isSherpa) {
-                downloadAndInstallSherpa(spec)
-            } else {
-                downloadAndInstallSingleFile(spec)
+            try {
+                if (spec.kind.isSherpa) {
+                    downloadAndInstallSherpa(spec)
+                } else {
+                    downloadAndInstallSingleFile(spec)
+                }
+            } finally {
+                activeJobs.remove(spec.id)
             }
         }
         activeJobs[spec.id] = job
@@ -449,7 +463,7 @@ class LocalModelManager(context: Context) {
                     val buffer = ByteArray(32 * 1024)
                     var downloaded = 0L
                     var lastReportMs = 0L
-                    while (scope.isActive) {
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                         val read = input.read(buffer)
                         if (read <= 0) break
                         output.write(buffer, 0, read)
@@ -460,6 +474,7 @@ class LocalModelManager(context: Context) {
                             onProgress(downloaded, total)
                         }
                     }
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     output.flush()
                     onProgress(downloaded, total)
                 }
@@ -478,6 +493,17 @@ class LocalModelManager(context: Context) {
     companion object {
         private const val MIN_VALID_MODEL_BYTES = 1_000_000L
         private const val MIN_VALID_ONNX_BYTES = 10_240L
+
+        internal fun requiredSpaceMbFor(spec: LocalModelSpec): Long {
+            val factor = if (spec.kind.isSherpa) 2.2 else 1.15
+            return (spec.approxSizeMb * factor).toLong().coerceAtLeast(spec.approxSizeMb + 20L)
+        }
+
+        internal fun hasEnoughStorageForDownload(usableSpaceBytes: Long, spec: LocalModelSpec): Boolean {
+            if (usableSpaceBytes <= 0L) return true // Unknown/unmounted test fs
+            val neededBytes = requiredSpaceMbFor(spec) * 1_000_000L
+            return usableSpaceBytes >= neededBytes
+        }
 
         internal fun hasValidModelHeader(file: File, kind: LocalModelKind): Boolean {
             return runCatching {

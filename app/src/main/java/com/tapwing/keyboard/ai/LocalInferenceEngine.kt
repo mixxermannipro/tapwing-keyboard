@@ -165,17 +165,27 @@ object LocalInferenceEngine {
         }.getOrDefault(jsonRaw)
     }
 
+    private val BRACKET_ARTIFACT_REGEX = Regex(
+        """\[(?:BLANK_AUDIO|SILENCE|MUSIC|APPLAUSE|LAUGHTER|INAUDIBLE|NOISE|MUSIK|STILLE|LACHEN|APPLAUS|GERÄUSCH|STÖHNT)[^\]]*]""",
+        RegexOption.IGNORE_CASE
+    )
+    private val PAREN_ARTIFACT_REGEX = Regex(
+        """\((?:Musik|Music|Silence|Stille|Lachen|Laughter|Applaus|Applause|Stöhnt|Groaning|Sighs|Seufzt|Noise|Geräusche?)\)""",
+        RegexOption.IGNORE_CASE
+    )
+    private val MULTI_SPACE_REGEX = Regex("""[ \t]{2,}""")
+    private val STOCK_CAPTION_REGEX = Regex(
+        """(?:Untertitel\s+der\s+Amara\.org-Community|Vielen\s+Dank\s+für(?:'s|s)?\s+Zuschauen|Thanks?\s+for\s+watching)[.!?]*""",
+        RegexOption.IGNORE_CASE
+    )
+
     internal fun cleanWhisperArtifacts(raw: String): String {
         var cleaned = raw
-            .replace(Regex("""\[(?:BLANK_AUDIO|SILENCE|MUSIC|APPLAUSE|LAUGHTER|INAUDIBLE|NOISE|MUSIK|STILLE|LACHEN|APPLAUS|GERÄUSCH|STÖHNT)[^\]]*]""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\((?:Musik|Music|Silence|Stille|Lachen|Laughter|Applaus|Applause|Stöhnt|Groaning|Sighs|Seufzt|Noise|Geräusche?)\)""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""[ \t]{2,}"""), " ")
+            .replace(BRACKET_ARTIFACT_REGEX, "")
+            .replace(PAREN_ARTIFACT_REGEX, "")
+            .replace(MULTI_SPACE_REGEX, " ")
             .trim()
-        val stockCaption = Regex(
-            """(?:Untertitel\s+der\s+Amara\.org-Community|Vielen\s+Dank\s+für(?:'s|s)?\s+Zuschauen|Thanks?\s+for\s+watching)[.!?]*""",
-            RegexOption.IGNORE_CASE
-        )
-        if (cleaned.all { !it.isLetterOrDigit() } || stockCaption.matches(cleaned)) cleaned = ""
+        if (cleaned.all { !it.isLetterOrDigit() } || STOCK_CAPTION_REGEX.matches(cleaned)) cleaned = ""
         return cleaned
     }
 }

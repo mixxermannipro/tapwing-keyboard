@@ -118,6 +118,31 @@ object CloudAiClient {
         return "$sys\n\nText:\n$text"
     }
 
+    internal fun isValidHttpUrl(raw: String): Boolean {
+        val trimmed = raw.trim()
+        return runCatching {
+            val u = URL(trimmed)
+            (u.protocol == "https" || u.protocol == "http") && u.host.isNotBlank()
+        }.getOrDefault(false)
+    }
+
+    private fun readStreamSafely(stream: java.io.InputStream?): String {
+        if (stream == null) return ""
+        return BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { it.readText() }
+    }
+
+    private fun executeWithTransientRetry(block: () -> Pair<Int, CloudAiResult>): CloudAiResult {
+        var attempt = 0
+        while (true) {
+            val (status, result) = block()
+            if (result is CloudAiResult.Success) return result
+            val isTransient = status == -1 || status == 429 || status in 500..599
+            if (attempt >= 1 || !isTransient) return result
+            attempt++
+            runCatching { Thread.sleep(RETRY_DELAY_MS) }
+        }
+    }
+
     private fun callGemini(apiKey: String, model: String, prompt: String, fastMode: Boolean): CloudAiResult {
         val cleanModel = model.trim().ifEmpty { "gemini-3.8-flash" }
         val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent"
@@ -143,37 +168,42 @@ object CloudAiClient {
             put("generationConfig", genConfig)
         }.toString()
 
-        return runCatching {
-            val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = if (fastMode) FAST_CONNECT_TIMEOUT_MS else TIMEOUT_MS
-                readTimeout = if (fastMode) FAST_READ_TIMEOUT_MS else TIMEOUT_MS
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                setRequestProperty("x-goog-api-key", apiKey)
+        return executeWithTransientRetry {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = if (fastMode) FAST_CONNECT_TIMEOUT_MS else TIMEOUT_MS
+                    readTimeout = if (fastMode) FAST_READ_TIMEOUT_MS else TIMEOUT_MS
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("x-goog-api-key", apiKey)
+                }
+                OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { it.write(body) }
+                val code = conn.responseCode
+                val raw = readStreamSafely(if (code in 200..299) conn.inputStream else conn.errorStream)
+                if (code !in 200..299) {
+                    return@executeWithTransientRetry code to CloudAiResult.Failure("Gemini HTTP $code")
+                }
+                val json = JSONObject(raw)
+                val candidates = json.optJSONArray("candidates")
+                val first = candidates?.optJSONObject(0)
+                val content = first?.optJSONObject("content")
+                val parts = content?.optJSONArray("parts")
+                val out = (0 until (parts?.length() ?: 0)).mapNotNull { idx ->
+                    parts?.optJSONObject(idx)?.takeUnless { it.optBoolean("thought") }?.optString("text")
+                }.joinToString("").trim()
+                if (out.isEmpty()) {
+                    code to CloudAiResult.Failure("Empty Gemini response")
+                } else {
+                    code to CloudAiResult.Success(CleanupPromptBuilder.sanitizeModelOutput(out), "Gemini ($cleanModel)")
+                }
+            } catch (ex: Exception) {
+                val status = if (ex is java.io.IOException) -1 else 0
+                status to CloudAiResult.Failure(ex.localizedMessage ?: "Network error")
+            } finally {
+                conn?.disconnect()
             }
-            OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { it.write(body) }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val raw = BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { it.readText() }
-            if (code !in 200..299) {
-                return@runCatching CloudAiResult.Failure("Gemini HTTP $code")
-            }
-            val json = JSONObject(raw)
-            val candidates = json.optJSONArray("candidates")
-            val first = candidates?.optJSONObject(0)
-            val content = first?.optJSONObject("content")
-            val parts = content?.optJSONArray("parts")
-            val out = (0 until (parts?.length() ?: 0)).mapNotNull { idx ->
-                parts?.optJSONObject(idx)?.takeUnless { it.optBoolean("thought") }?.optString("text")
-            }.joinToString("").trim()
-            if (out.isEmpty()) {
-                CloudAiResult.Failure("Empty Gemini response")
-            } else {
-                CloudAiResult.Success(CleanupPromptBuilder.sanitizeModelOutput(out), "Gemini ($cleanModel)")
-            }
-        }.getOrElse { ex ->
-            CloudAiResult.Failure(ex.localizedMessage ?: "Network error")
         }
     }
 
@@ -226,6 +256,9 @@ object CloudAiClient {
     ): CloudAiResult {
         val cleanModel = model.trim().ifEmpty { "gpt-4.1-mini" }
         val base = customEndpoint.trim().ifEmpty { OPENAI_ENDPOINT }
+        if (!isValidHttpUrl(base)) {
+            return CloudAiResult.Failure("Invalid custom endpoint URL")
+        }
         return callOpenAiCompatible(
             apiKey = apiKey,
             model = cleanModel,
@@ -259,34 +292,41 @@ object CloudAiClient {
             )
         }.toString()
 
-        return runCatching {
-            val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = if (fastMode) FAST_CONNECT_TIMEOUT_MS else TIMEOUT_MS
-                readTimeout = if (fastMode) FAST_READ_TIMEOUT_MS else TIMEOUT_MS
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                setRequestProperty("Authorization", "Bearer $apiKey")
-                extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
+        return executeWithTransientRetry {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = if (fastMode) FAST_CONNECT_TIMEOUT_MS else TIMEOUT_MS
+                    readTimeout = if (fastMode) FAST_READ_TIMEOUT_MS else TIMEOUT_MS
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    setRequestProperty("Authorization", "Bearer $apiKey")
+                    extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
+                }
+                OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { it.write(body) }
+                val code = conn.responseCode
+                val raw = readStreamSafely(if (code in 200..299) conn.inputStream else conn.errorStream)
+                if (code !in 200..299) {
+                    return@executeWithTransientRetry code to CloudAiResult.Failure("API HTTP $code")
+                }
+                val json = JSONObject(raw)
+                val choices = json.optJSONArray("choices")
+                val message = choices?.optJSONObject(0)?.optJSONObject("message")
+                val out = message?.optString("content")?.trim().orEmpty()
+                if (out.isEmpty()) {
+                    code to CloudAiResult.Failure("Empty API response")
+                } else {
+                    code to CloudAiResult.Success(CleanupPromptBuilder.sanitizeModelOutput(out), label)
+                }
+            } catch (ex: Exception) {
+                val status = if (ex is java.io.IOException) -1 else 0
+                status to CloudAiResult.Failure(ex.localizedMessage ?: "Network error")
+            } finally {
+                conn?.disconnect()
             }
-            OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { it.write(body) }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val raw = BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).use { it.readText() }
-            if (code !in 200..299) {
-                return@runCatching CloudAiResult.Failure("API HTTP $code")
-            }
-            val json = JSONObject(raw)
-            val choices = json.optJSONArray("choices")
-            val message = choices?.optJSONObject(0)?.optJSONObject("message")
-            val out = message?.optString("content")?.trim().orEmpty()
-            if (out.isEmpty()) {
-                CloudAiResult.Failure("Empty API response")
-            } else {
-                CloudAiResult.Success(CleanupPromptBuilder.sanitizeModelOutput(out), label)
-            }
-        }.getOrElse { ex ->
-            CloudAiResult.Failure(ex.localizedMessage ?: "Network error")
         }
     }
+
+    private const val RETRY_DELAY_MS = 350L
 }

@@ -178,6 +178,8 @@ object NaturalVoiceCleaner {
     private val wordTokenRegex = Regex("""\p{L}+(['-]\p{L}+)?""")
     private val nonWhitespaceRegex = Regex("""\S+""")
     private val multiSpacesRegex = Regex("""[ \t]+""")
+    private val whitespaceSplitRegex = Regex("""\s+""")
+    private val emailDotRegex = Regex("""\s+(?:punkt|dot)\s+""")
     private val spaceBeforePunctRegex = Regex(""" *([.,!?:;])""")
     private val spacesAroundNewlineRegex = Regex(""" *\n+ *""")
     private val listLineEndRegex = Regex("""^(?:•|\d+\.)\s.*""")
@@ -472,7 +474,7 @@ object NaturalVoiceCleaner {
             text = spokenEmailRegex.replace(text) { m ->
                 val user = m.groupValues[1].lowercase()
                 val domain = m.groupValues[2].lowercase()
-                    .replace(Regex("""\s+(?:punkt|dot)\s+"""), ".")
+                    .replace(emailDotRegex, ".")
                     .replace(" ", "")
                 val tld = m.groupValues[3].lowercase()
                 "$user@$domain.$tld"
@@ -676,7 +678,7 @@ object NaturalVoiceCleaner {
         return germanSubordinateConj.replace(input) { match ->
             val before = input.substring(0, match.range.first)
             val currentSentence = before.substringAfterLast('.').substringAfterLast('!').substringAfterLast('?').substringAfterLast('\n')
-            val words = currentSentence.trim().split(Regex("""\s+""")).filter { it.isNotEmpty() }
+            val words = currentSentence.trim().split(whitespaceSplitRegex).filter { it.isNotEmpty() }
             val lastWord = words.lastOrNull()?.lowercase()?.trim(',', '.', '!', '?', ':').orEmpty()
             if (words.size >= 3 && lastWord !in germanCommaExcludePrev) ", " else match.value
         }

@@ -46,7 +46,8 @@ class SettingsActivity : ComponentActivity() {
                 TapwingTheme(
                     themeMode = prefs.themeMode,
                     darkModePreference = prefs.darkMode,
-                    appleModeEnabled = prefs.appleModeEnabled
+                    appleModeEnabled = prefs.appleModeEnabled,
+                    highContrast = prefs.highContrastKeys
                 ) {
                     TapwingSettingsApp(
                         prefs = prefs,

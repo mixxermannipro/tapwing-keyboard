@@ -165,7 +165,8 @@ fun TapwingKeyboardRoot(
         TapwingTheme(
             themeMode = prefs.themeMode,
             darkModePreference = prefs.darkMode,
-            appleModeEnabled = prefs.appleModeEnabled
+            appleModeEnabled = prefs.appleModeEnabled,
+            highContrast = prefs.highContrastKeys
         ) {
             val kbColors = LocalTapwingKeyboardColors.current
             val view = LocalView.current

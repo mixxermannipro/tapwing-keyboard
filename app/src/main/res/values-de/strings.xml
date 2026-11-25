@@ -165,4 +165,8 @@
     <string name="settings_section_content">Inhalte &amp; Leiste</string>
     <string name="settings_section_ai">KI &amp; Dienste</string>
     <string name="settings_section_system">Statistik &amp; System</string>
+    <string name="cd_close">Schließen</string>
+    <string name="cd_pin">Anpinnen</string>
+    <string name="cd_unpin">Lösen</string>
+    <string name="cd_delete">Löschen</string>
 </resources>

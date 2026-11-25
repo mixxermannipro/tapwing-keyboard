@@ -840,8 +840,12 @@ fun WritingToolsOnboardingCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Rounded.Close, contentDescription = null, tint = kbColors.keyHintText)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = stringResource(R.string.cd_close),
+                        tint = kbColors.keyHintText
+                    )
                 }
             }
             Text(
@@ -897,9 +901,13 @@ fun NaturalVoiceOnboardingSheet(
                     onClick = onDismiss,
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .size(28.dp)
+                        .size(32.dp)
                 ) {
-                    Icon(Icons.Rounded.Close, contentDescription = null, tint = kbColors.keyHintText)
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = stringResource(R.string.cd_close),
+                        tint = kbColors.keyHintText
+                    )
                 }
             }
 
@@ -1165,29 +1173,43 @@ fun ClipboardPanel(
                                     Spacer(Modifier.width(1.dp))
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.PushPin,
-                                        contentDescription = null,
-                                        tint = if (clip.pinned) kbColors.actionSurface else kbColors.keyHintText,
+                                    Box(
                                         modifier = Modifier
-                                            .size(16.dp)
-                                            .clickable {
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .clickable(role = androidx.compose.ui.semantics.Role.Button) {
                                                 if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                                 onTogglePin(clip)
-                                            }
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                    Icon(
-                                        imageVector = Icons.Rounded.DeleteOutline,
-                                        contentDescription = null,
-                                        tint = kbColors.keyHintText,
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.PushPin,
+                                            contentDescription = stringResource(
+                                                if (clip.pinned) R.string.cd_unpin else R.string.cd_pin
+                                            ),
+                                            tint = if (clip.pinned) kbColors.actionSurface else kbColors.keyHintText,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                    Box(
                                         modifier = Modifier
-                                            .size(16.dp)
-                                            .clickable {
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .clickable(role = androidx.compose.ui.semantics.Role.Button) {
                                                 if (prefs.hapticFeedback) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
                                                 onDeleteClip(clip)
-                                            }
-                                    )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.DeleteOutline,
+                                            contentDescription = stringResource(R.string.cd_delete),
+                                            tint = kbColors.keyHintText,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
