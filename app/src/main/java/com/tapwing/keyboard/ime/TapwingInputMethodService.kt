@@ -68,6 +68,7 @@ import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.SecureKeyStorage
+import com.tapwing.keyboard.data.SmartFieldType
 import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.data.ThemeMode
@@ -104,6 +105,7 @@ import com.tapwing.keyboard.voice.GeminiLiveConfig
 import com.tapwing.keyboard.voice.NaturalVoiceCleaner
 import com.tapwing.keyboard.voice.TapwingVoiceController
 import com.tapwing.keyboard.voice.VoiceCommandResult
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -129,6 +131,8 @@ private val PASTE_DISMISS_KEYS = setOf(
 )
 private val PUNCTUATION_OUTPUTS = setOf(".", ",", "!", "?", ":", ";")
 private val WORD_DELETE_REGEX = Regex("""\s*\S+\s*$""")
+private val WHITESPACE_COLLAPSE_REGEX = Regex("""\s+""")
+private val VOICE_WORD_REGEX = Regex("""[\p{L}]{2,}""")
 
 class TapwingInputMethodService :
     InputMethodService(),
@@ -139,7 +143,10 @@ class TapwingInputMethodService :
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val store = ViewModelStore()
     private val savedStateController = SavedStateRegistryController.create(this)
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val crashGuard = CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.w("TapwingIME", "Recovered from background coroutine error", throwable)
+    }
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + crashGuard)
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val viewModelStore: ViewModelStore get() = store
@@ -190,10 +197,15 @@ class TapwingInputMethodService :
     private var prefsLoaded = false
     private var privateEditor by mutableStateOf(true)
     private var editorField = EditorField.UNKNOWN
+    private var smartFieldType = SmartFieldType.NONE
     private val languageToolsAllowed: Boolean
         get() = editorField.allowsLearning(currentEditorInfo?.imeOptions ?: 0)
-    private val isEmailField: Boolean get() = editorField == EditorField.EMAIL
+    /** Allows smart suggestions, voice dictation & glide typing in browser omniboxes & non-private fields. */
+    private val interactiveTypingAllowed: Boolean
+        get() = !privateEditor && (languageToolsAllowed || isUrlField)
+    private val isEmailField: Boolean get() = editorField == EditorField.EMAIL || smartFieldType == SmartFieldType.EMAIL
     private val isUrlField: Boolean get() = editorField == EditorField.URL
+    private val hasSmartField: Boolean get() = !privateEditor && smartFieldType != SmartFieldType.NONE
     private var voicePrefs: TapwingPrefs? = null
     private var voiceEditJob: Job? = null
     private var voiceEditGeneration = 0
@@ -346,6 +358,47 @@ class TapwingInputMethodService :
     private fun editorFieldFor(info: EditorInfo?): EditorField =
         EditorField.detect(info?.inputType ?: InputType.TYPE_NULL, info?.fieldName, info?.hintText?.toString())
 
+    private fun detectSmartField(info: EditorInfo?, isPrivate: Boolean): SmartFieldType {
+        if (info == null || isPrivate) return SmartFieldType.NONE
+        return SmartFieldDetector.detectField(
+            inputType = info.inputType,
+            fieldName = info.fieldName,
+            hint = info.hintText?.toString(),
+            label = info.label?.toString()
+        )
+    }
+
+    private fun captureDynamicProfileFromCurrentField() {
+        if (privateEditor || !currentPrefs.smartProfileAutoLearn ||
+            !currentPrefs.learningEnabled || currentPrefs.incognitoMode
+        ) return
+        val field = smartFieldType
+        if (field == SmartFieldType.NONE) return
+        val ic = currentInputConnection ?: return
+        val before = ic.safeGetTextBeforeCursor(96)
+        val after = runCatching { ic.getTextAfterCursor(32, 0)?.toString().orEmpty() }.getOrDefault("")
+        val fullValue = (before + after).trim()
+        if (fullValue.length !in 2..90 || '\n' in fullValue) return
+        dictionaryStore.recordLearnedProfileValue(
+            fieldType = field,
+            rawValue = fullValue,
+            appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null,
+            learningEnabled = true,
+            incognito = false
+        )
+    }
+
+    private fun handleLongPressSuggestion(chip: SuggestionChip) {
+        if (privateEditor || currentPrefs.incognitoMode) return
+        if (chip.isEmoji || chip.isMath || chip.isShortcut || chip.isGrammarFix) return
+        if (chip.isSmartFill && chip.smartFieldType != null) {
+            dictionaryStore.removeLearnedProfileValue(chip.smartFieldType, chip.text)
+        } else {
+            dictionaryStore.removeLearnedWord(chip.text)
+        }
+        refreshContextAndSuggestions(force = true)
+    }
+
     override fun onCreate() {
         super.onCreate()
         savedStateController.performRestore(null)
@@ -464,7 +517,7 @@ class TapwingInputMethodService :
                     isTyping = isTyping,
                     proactiveUndo = proactiveUndoState,
                     recentScreenshot = recentScreenshot.takeIf { !privateEditor && !currentPrefs.incognitoMode },
-                    clipboardPreview = pasteSuggestion?.text?.take(160)?.replace(Regex("""\s+"""), " "),
+                    clipboardPreview = pasteSuggestion?.text?.take(160)?.replace(WHITESPACE_COLLAPSE_REGEX, " "),
                     clipboardTimestamp = pasteSuggestion?.timestamp,
                     clipboardVerificationCode = pasteSuggestion?.verificationCode == true,
                     onPasteClipboard = ::pasteFromSuggestion,
@@ -489,6 +542,7 @@ class TapwingInputMethodService :
                     onToggleOneHandedSide = ::swapOneHandedSide,
                     onExitOneHanded = { updatePref { it.copy(oneHandedMode = OneHandedMode.OFF) } },
                     onSelectSuggestion = ::applySuggestionChip,
+                    onLongPressSuggestion = ::handleLongPressSuggestion,
                     onTriggerUndo = { performUndo() },
                     onEditorUndo = { performUndo(allowHostUndo = true) },
                     onDismissUndo = {
@@ -630,6 +684,7 @@ class TapwingInputMethodService :
         val changedEditor = !restarting || currentEditorInfo?.packageName != info?.packageName ||
             currentEditorInfo?.fieldId != info?.fieldId || privateEditor != nextPrivate
         if (changedEditor) {
+            captureDynamicProfileFromCurrentField()
             editorGeneration++
             resetWritingRequest()
             if (nextPrivate) recentScreenshot = null
@@ -647,6 +702,7 @@ class TapwingInputMethodService :
         currentTargetPackage = info?.packageName.orEmpty()
         editorField = nextField
         privateEditor = nextPrivate
+        smartFieldType = detectSmartField(info, nextPrivate)
         if (inputViewActive) {
             updatePasteSuggestion()
             refreshContextAndSuggestions()
@@ -655,6 +711,7 @@ class TapwingInputMethodService :
 
     override fun onFinishInput() {
         super.onFinishInput()
+        captureDynamicProfileFromCurrentField()
         editorGeneration++
         resetWritingRequest()
         clearAutofillSuggestions()
@@ -666,12 +723,20 @@ class TapwingInputMethodService :
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
 
-        dictionaryStore.reloadIfModifiedOnDisk()
-        snippetsSnapshot = dictionaryStore.listSnippets()
-        recentEmojisSnapshot = dictionaryStore.listRecentEmojis()
-        offlinePackManager.refreshStates()
+        // Offload disk stat/reload I/O from Main Thread so keyboard opens with zero frame drops!
+        serviceScope.launch(Dispatchers.IO) {
+            dictionaryStore.reloadIfModifiedOnDisk()
+            offlinePackManager.refreshStates()
+            modelManager.refreshStates()
+            val refreshedSnippets = dictionaryStore.listSnippets()
+            val refreshedEmojis = dictionaryStore.listRecentEmojis()
+            withContext(Dispatchers.Main) {
+                snippetsSnapshot = refreshedSnippets
+                recentEmojisSnapshot = refreshedEmojis
+                if (inputViewActive) refreshContextAndSuggestions(force = true)
+            }
+        }
         offlinePackManager.preloadLocaleAsync(currentPrefs.activeLocale)
-        modelManager.refreshStates()
         ensureScreenshotObserverIfPermitted()
         if (currentPrefs.voiceEngine == VoiceEngineMode.AUTO_LOCAL_FIRST) {
             voiceController.prepareOfflineSpeech(currentPrefs.activeLocale)
@@ -690,6 +755,7 @@ class TapwingInputMethodService :
         currentTargetPackage = info?.packageName.orEmpty()
         editorField = editorFieldFor(info)
         privateEditor = editorField.isPrivate(info?.imeOptions ?: 0)
+        smartFieldType = detectSmartField(info, privateEditor)
         inputViewActive = true
         if (clipboardReady && prefsLoaded) {
             clipboardStore.prune(currentPrefs.clipboardRetention, currentPrefs.clipboardMaxItems)
@@ -723,11 +789,13 @@ class TapwingInputMethodService :
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        captureDynamicProfileFromCurrentField()
         inputViewActive = false
         pasteExpiryJob?.cancel()
         pasteSuggestion = null
         if (::dictionaryStore.isInitialized) dictionaryStore.flush()
         if (::statsStore.isInitialized) statsStore.flush()
+        if (clipboardReady) clipboardStore.flush()
         if (finishingInput) clearAutofillSuggestions()
         cancelVoice(keepRotationResume = !finishingInput)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
@@ -895,6 +963,7 @@ class TapwingInputMethodService :
         super.onTrimMemory(level)
         if (level >= TRIM_MEMORY_BACKGROUND) {
             LocalInferenceEngine.unloadAll()
+            if (::offlinePackManager.isInitialized) offlinePackManager.clearMemoryCache()
         } else if (level >= TRIM_MEMORY_UI_HIDDEN) {
             LocalInferenceEngine.unloadWhisper()
             com.tapwing.keyboard.ai.LocalLlmEngine.unloadAll()
@@ -904,6 +973,9 @@ class TapwingInputMethodService :
     override fun onDestroy() {
         if (::dictionaryStore.isInitialized) dictionaryStore.flush()
         if (::statsStore.isInitialized) statsStore.flush()
+        if (clipboardReady) clipboardStore.flush()
+        if (::offlinePackManager.isInitialized) offlinePackManager.close()
+        if (::modelManager.isInitialized) modelManager.close()
         runCatching {
             val cm = getSystemService(ClipboardManager::class.java)
             cm?.removePrimaryClipChangedListener(clipboardListener)
@@ -988,7 +1060,7 @@ class TapwingInputMethodService :
                 }
             }
             KeyActionType.EMOJI_PANEL -> {
-                val before = ic.getTextBeforeCursor(40, 0)?.toString().orEmpty()
+                val before = ic.safeGetTextBeforeCursor(40)
                 lastWordBeforeEmoji = SuggestionEngine.extractPreviousWord(before)
                 panelMode = KeyboardPanelMode.EMOJI
             }
@@ -996,6 +1068,7 @@ class TapwingInputMethodService :
             KeyActionType.ENTER -> {
                 pendingSmartUndoPair = null
                 pendingSuggestionSpace = null
+                captureDynamicProfileFromCurrentField()
                 learnCompletedTrailingWord()
                 performEditorEnterAction(ic)
                 refreshContextAndSuggestions()
@@ -1010,15 +1083,19 @@ class TapwingInputMethodService :
                     // Remove only the space inserted by Tapwing at this caret position.
                     val spaceAnchor = pendingSuggestionSpace
                     if (spaceAnchor != null && spaceAnchor == ic.readUndoAnchor() && spaceAnchor.before.endsWith(" ")) {
-                        ic.deleteSurroundingText(1, 0)
+                        runCatching { ic.deleteSurroundingText(1, 0) }
                     }
                     pendingSuggestionSpace = null
-                    correction = maybeAutoCorrectTrailingWord()
-                    learnCompletedTrailingWord()
+                    val before = ic.safeGetTextBeforeCursor(140)
+                    correction = maybeAutoCorrectTrailingWord(before)
+                    val learningBefore = if (correction != null) {
+                        before.dropLast(correction.first.length) + correction.second
+                    } else before
+                    learnCompletedTrailingWord(learningBefore)
                 } else {
                     pendingSuggestionSpace = null
                 }
-                val committed = ic.commitText(output, 1)
+                val committed = runCatching { ic.commitText(output, 1) }.getOrDefault(false)
                 if (correction != null) recordAutocorrection(correction, if (committed) output else "")
                 else undoManager.dismissBanner()
                 statsStore.recordKeystroke(output.length, currentPrefs.incognitoMode)
@@ -1033,49 +1110,49 @@ class TapwingInputMethodService :
 
     private fun performEditorEnterAction(ic: android.view.inputmethod.InputConnection) {
         if (resolvedImeAction.insertNewlineDirectly) {
-            ic.commitText("\n", 1)
+            runCatching { ic.commitText("\n", 1) }
         } else {
             val performed = (resolvedImeAction.editorActionId != EditorInfo.IME_ACTION_UNSPECIFIED &&
-                ic.performEditorAction(resolvedImeAction.editorActionId)) ||
+                runCatching { ic.performEditorAction(resolvedImeAction.editorActionId) }.getOrDefault(false)) ||
                 sendDefaultEditorAction(true)
             if (!performed) {
                 if (resolvedImeAction.sendEnterKeyFallback) {
                     sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
                 } else {
-                    ic.commitText("\n", 1)
+                    runCatching { ic.commitText("\n", 1) }
                 }
             }
         }
     }
 
     private fun tryCycleSelectedTextCase(ic: android.view.inputmethod.InputConnection): Boolean {
-        val selected = ic.getSelectedText(0)?.toString().orEmpty()
+        val selected = ic.safeGetSelectedText()
         if (selected.isEmpty() || selected.none(Char::isLetter)) return false
         val cycled = SelectedTextCaseCycler.cycle(selected, currentPrefs.activeLocale)
         if (cycled == selected) return false
 
         val selectionStart = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ic.getSurroundingText(0, 0, 0)?.let { s ->
+            runCatching { ic.getSurroundingText(0, 0, 0) }.getOrNull()?.let { s ->
                 if (s.offset >= 0 && s.selectionStart >= 0) s.offset + s.selectionStart else null
             }
         } else null
 
-        ic.beginBatchEdit()
+        runCatching { ic.beginBatchEdit() }
         try {
-            if (!ic.commitText(cycled, 1)) return false
+            if (!runCatching { ic.commitText(cycled, 1) }.getOrDefault(false)) return false
             if (selectionStart != null) {
-                ic.setSelection(selectionStart, selectionStart + cycled.length)
+                runCatching { ic.setSelection(selectionStart, selectionStart + cycled.length) }
             }
         } finally {
-            ic.endBatchEdit()
+            runCatching { ic.endBatchEdit() }
         }
         return true
     }
 
     private fun handleSwipeWord(points: List<SwipePoint>, keyCenters: List<KeyCenter>) {
-        if (!languageToolsAllowed || !currentPrefs.glideTypingEnabled) return
+        if (!interactiveTypingAllowed || !currentPrefs.glideTypingEnabled) return
         val ic = currentInputConnection ?: return
-        val before = runCatching { ic.getTextBeforeCursor(80, 0)?.toString().orEmpty() }.getOrDefault("")
+        val before = ic.safeGetTextBeforeCursor(80)
         val atStart = SuggestionEngine.isAtSentenceStart(before, "")
         val (p1, p2) = SuggestionEngine.extractPreviousTwoWords(before)
         val appPkg = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null
@@ -1095,22 +1172,24 @@ class TapwingInputMethodService :
         val top = candidates.firstOrNull() ?: return
         val needsSpace = before.isNotEmpty() && !before.last().isWhitespace()
         val insertion = (if (needsSpace) " " else "") + top + " "
-        val selected = runCatching { ic.getSelectedText(0)?.toString().orEmpty() }.getOrDefault("")
+        val selected = ic.safeGetSelectedText()
         if (!runCatching { ic.commitText(insertion, 1) }.getOrDefault(false)) return
         statsStore.recordSwipeWord(top.length, currentPrefs.incognitoMode)
         pendingSuggestionSpace = ic.readUndoAnchor()
         pendingSmartUndoPair = null
 
-        dictionaryStore.recordTypedWord(
-            word = top,
-            previousWord = p1.takeIf { it.isNotEmpty() },
-            learningEnabled = currentPrefs.learningEnabled,
-            incognito = currentPrefs.incognitoMode,
-            previousTwoWord = p2.takeIf { it.isNotEmpty() },
-            wasSentenceStart = atStart,
-            locale = currentPrefs.activeLocale,
-            appPackage = appPkg
-        )
+        if (languageToolsAllowed) {
+            dictionaryStore.recordTypedWord(
+                word = top,
+                previousWord = p1.takeIf { it.isNotEmpty() },
+                learningEnabled = currentPrefs.learningEnabled,
+                incognito = currentPrefs.incognitoMode,
+                previousTwoWord = p2.takeIf { it.isNotEmpty() },
+                wasSentenceStart = atStart,
+                locale = currentPrefs.activeLocale,
+                appPackage = appPkg
+            )
+        }
 
         recordEditorUndo(
             beforeText = selected,
@@ -1142,12 +1221,13 @@ class TapwingInputMethodService :
     private fun handleSpaceKey() {
         val ic = currentInputConnection ?: return
         val now = System.currentTimeMillis()
-        val before = runCatching { ic.getTextBeforeCursor(48, 0)?.toString().orEmpty() }.getOrDefault("")
+        // Single consolidated Binder IPC read reused across double-space, autocorrect, and learning!
+        val before = ic.safeGetTextBeforeCursor(140)
         pendingSuggestionSpace = null
 
         if (languageToolsAllowed && currentPrefs.doubleSpacePeriod && (now - lastSpaceTapMs) <= 320L &&
             before.endsWith(" ") && before.length >= 2 && before[before.length - 2].isLetterOrDigit() &&
-            ic.getSelectedText(0).isNullOrEmpty() && ic.replaceEditorText(1, 0, " ", ". ")
+            ic.safeGetSelectedText().isEmpty() && ic.replaceEditorText(1, 0, " ", ". ")
         ) {
             lastSpaceTapMs = 0L
             pendingSmartUndoPair = null
@@ -1157,8 +1237,11 @@ class TapwingInputMethodService :
         }
 
         lastSpaceTapMs = now
-        val correctedPair = maybeAutoCorrectTrailingWord()
-        learnCompletedTrailingWord()
+        val correctedPair = maybeAutoCorrectTrailingWord(before)
+        val learningBefore = if (correctedPair != null) {
+            before.dropLast(correctedPair.first.length) + correctedPair.second
+        } else before
+        learnCompletedTrailingWord(learningBefore)
         val committed = runCatching { ic.commitText(" ", 1) }.getOrDefault(false)
         if (committed && SmartLayoutBehavior.shouldAutoReturnToLettersAfterSpace(layoutPage, before)) {
             layoutPage = KeyboardLayoutPage.LETTERS
@@ -1184,11 +1267,26 @@ class TapwingInputMethodService :
         )
     }
 
-    private fun learnCompletedTrailingWord() {
+    private fun learnCompletedTrailingWord(preFetchedBefore: String? = null) {
         if (!languageToolsAllowed) return
         if (!currentPrefs.learningEnabled || currentPrefs.incognitoMode) return
         val ic = currentInputConnection ?: return
-        val before = runCatching { ic.getTextBeforeCursor(140, 0)?.toString().orEmpty() }.getOrDefault("")
+        val before = preFetchedBefore ?: ic.safeGetTextBeforeCursor(140)
+
+        // Dynamically recognize inline emails or phone numbers typed in free text (e.g. chats/notes)
+        if (currentPrefs.smartProfileAutoLearn) {
+            val rawToken = SuggestionEngine.extractTrailingToken(before)
+            SmartFieldDetector.detectInlineEntity(rawToken)?.let { (entityType, cleanEntity) ->
+                dictionaryStore.recordLearnedProfileValue(
+                    fieldType = entityType,
+                    rawValue = cleanEntity,
+                    appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null,
+                    learningEnabled = true,
+                    incognito = false
+                )
+            }
+        }
+
         val trailing = SuggestionEngine.extractTrailingWord(before)
         if (trailing.isEmpty()) return
 
@@ -1208,10 +1306,15 @@ class TapwingInputMethodService :
         )
     }
 
-    private fun maybeAutoCorrectTrailingWord(): Pair<String, String>? {
-        if (!languageToolsAllowed || !currentPrefs.autoCorrect) return null
+    private fun maybeAutoCorrectTrailingWord(preFetchedBefore: String? = null): Pair<String, String>? {
+        if (!interactiveTypingAllowed || !currentPrefs.autoCorrect) return null
         val ic = currentInputConnection ?: return null
-        val before = runCatching { ic.getTextBeforeCursor(96, 0)?.toString().orEmpty() }.getOrDefault("")
+        val before = preFetchedBefore ?: ic.safeGetTextBeforeCursor(96)
+        // Never autocorrect explicit URLs/domains in a browser address bar, while allowing normal searches!
+        if (isUrlField) {
+            val trailingToken = SuggestionEngine.extractTrailingToken(before)
+            if (SuggestionEngine.isExplicitUrlInput(before, trailingToken)) return null
+        }
         val trailing = SuggestionEngine.extractTrailingWord(before)
         if (trailing.isBlank()) return null
 
@@ -1230,7 +1333,7 @@ class TapwingInputMethodService :
             appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null
         )
         if (correction != null && correction != trailing &&
-            ic.getSelectedText(0).isNullOrEmpty() &&
+            ic.safeGetSelectedText().isEmpty() &&
             ic.replaceEditorText(trailing.length, 0, trailing, correction)
         ) {
             statsStore.recordAutocorrect(currentPrefs.incognitoMode)
@@ -1365,14 +1468,16 @@ class TapwingInputMethodService :
     private fun applySuggestionChip(chip: SuggestionChip) {
         if (privateEditor || chip !in suggestions) return
         val ic = currentInputConnection ?: return
-        if (!ic.getSelectedText(0).isNullOrEmpty()) return
+        if (ic.safeGetSelectedText().isNotEmpty()) return
         pendingSmartUndoPair = null
+        val fullBefore = ic.safeGetTextBeforeCursor(160)
         val before = if (chip.replaceCharCount > 0) {
-            ic.getTextBeforeCursor(chip.replaceCharCount, 0)?.toString() ?: return
+            if (fullBefore.length < chip.replaceCharCount) return
+            fullBefore.takeLast(chip.replaceCharCount)
         } else ""
         if (before.length != chip.replaceCharCount) return
         val contextBefore = if (languageToolsAllowed) {
-            ic.getTextBeforeCursor(160, 0)?.toString().orEmpty().dropLast(before.length)
+            fullBefore.dropLast(before.length)
         } else ""
         val insertion = if (chip.appendSpace && !chip.isEmoji && !chip.isMath) "${chip.text} " else chip.text
         if (!ic.replaceEditorText(before.length, 0, before, insertion)) return
@@ -1385,7 +1490,15 @@ class TapwingInputMethodService :
             statsStore.recordSuggestionAccepted(saved, currentPrefs.incognitoMode)
         }
 
-        if (languageToolsAllowed && !chip.isEmoji && !chip.isMath && !chip.isShortcut && !chip.isGrammarFix) {
+        if (chip.isSmartFill && chip.smartFieldType != null) {
+            dictionaryStore.recordProfileSelection(
+                fieldType = chip.smartFieldType,
+                value = chip.text,
+                appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null,
+                learningEnabled = currentPrefs.learningEnabled && currentPrefs.smartProfileAutoLearn,
+                incognito = currentPrefs.incognitoMode
+            )
+        } else if (languageToolsAllowed && !chip.isEmoji && !chip.isMath && !chip.isShortcut && !chip.isGrammarFix) {
             val cleanWord = chip.text.trim()
             val atStart = SuggestionEngine.isAtSentenceStart(contextBefore, "")
             val (prev1, prev2) = SuggestionEngine.extractPreviousTwoWords(contextBefore)
@@ -1447,14 +1560,14 @@ class TapwingInputMethodService :
             if (smartBackspace) return false
             undoManager.dismissBanner()
             proactiveUndoState = null
-            val undone = allowHostUndo && ic.performContextMenuAction(android.R.id.undo)
+            val undone = allowHostUndo && runCatching { ic.performContextMenuAction(android.R.id.undo) }.getOrDefault(false)
             if (undone) refreshContextAndSuggestions()
             return undone
         }
         if (smartBackspace && (snapshot.reason != UndoReason.AUTOCORRECT ||
                 pendingSmartUndoPair == null || !snapshot.afterText.endsWith(" "))) return false
         val actual = if (snapshot.afterText.isEmpty()) "" else {
-            ic.getTextBeforeCursor(snapshot.afterText.length, 0)?.toString()
+            ic.safeGetTextBeforeCursor(snapshot.afterText.length)
         }
         if (actual != snapshot.afterText) return false
         val original = if (smartBackspace) snapshot.beforeText.removeSuffix(" ") else snapshot.beforeText
@@ -1479,8 +1592,8 @@ class TapwingInputMethodService :
 
     private fun refreshContextAndSuggestions(force: Boolean = false) {
         val ic = currentInputConnection
-        if (privateEditor || (!languageToolsAllowed && !isEmailField && !isUrlField) ||
-            !ic?.getSelectedText(0).isNullOrEmpty()
+        if (privateEditor || (!languageToolsAllowed && !isEmailField && !isUrlField && !hasSmartField) ||
+            ic?.safeGetSelectedText()?.isNotEmpty() == true
         ) {
             lastSuggestionKey = ""
             if (shiftState == ShiftState.ONCE) shiftState = ShiftState.OFF
@@ -1488,17 +1601,16 @@ class TapwingInputMethodService :
             suggestions = emptyList()
             return
         }
-        val before = ic?.getTextBeforeCursor(160, 0)?.toString().orEmpty()
-        val contextKey = "${currentPrefs.activeLocale}|${currentPrefs.incognitoMode}|$isEmailField|$isUrlField|$before"
+        val before = ic?.safeGetTextBeforeCursor(160).orEmpty()
+        val contextKey = "${currentPrefs.activeLocale}|${currentPrefs.incognitoMode}|$isEmailField|$isUrlField|$smartFieldType|${currentPrefs.smartFillEnabled}|${currentPrefs.personalProfile.hashCode()}|$before"
         if (!force && contextKey == lastSuggestionKey) return
         lastSuggestionKey = contextKey
 
         val trailing = SuggestionEngine.extractTrailingWord(before)
-        isTyping = trailing.isNotEmpty() || isEmailField || isUrlField
         val latestClipText = if (clipboardAllowed()) {
             clipboardStore.items.value.firstOrNull { !it.isImage }?.text.orEmpty()
         } else ""
-        suggestions = SuggestionEngine.suggestionsFor(
+        val nextSuggestions = SuggestionEngine.suggestionsFor(
             textBeforeCursor = before,
             locale = currentPrefs.activeLocale,
             includeEmoji = currentPrefs.candidateEmojiSuggestions,
@@ -1512,12 +1624,19 @@ class TapwingInputMethodService :
             appPackage = if (currentPrefs.perAppLearningEnabled) currentTargetPackage else null,
             latestClipboardText = latestClipText,
             userName = currentPrefs.snippetUserName,
-            userEmail = currentPrefs.snippetUserEmail
+            userEmail = currentPrefs.snippetUserEmail,
+            smartFieldType = smartFieldType,
+            personalProfile = currentPrefs.personalProfile,
+            smartFillEnabled = currentPrefs.smartFillEnabled
         )
+        suggestions = nextSuggestions
+        isTyping = trailing.isNotEmpty() || isEmailField || isUrlField || nextSuggestions.any { it.isSmartFill }
 
         if (layoutPage == KeyboardLayoutPage.LETTERS && shiftState != ShiftState.CAPS_LOCK) {
-            val shouldCap = languageToolsAllowed && SuggestionEngine.isAtSentenceStart(before) &&
-                trailing.isEmpty()
+            val shouldCap = trailing.isEmpty() && (
+                (languageToolsAllowed && SuggestionEngine.isAtSentenceStart(before)) ||
+                (hasSmartField && smartFieldType.prefersLeadingCapitalization() && before.isBlank())
+            )
             shiftState = if (shouldCap) ShiftState.ONCE else ShiftState.OFF
         }
     }
@@ -1626,7 +1745,7 @@ class TapwingInputMethodService :
     }
 
     private fun startVoice() {
-        if (!languageToolsAllowed) return
+        if (!interactiveTypingAllowed) return
         val prefs = currentPrefs
         voicePrefs = prefs
         val de = KeyboardLocales.baseLang(prefs.activeLocale) == "de"
@@ -1854,17 +1973,19 @@ class TapwingInputMethodService :
         if (!commitTextWithUndo(text, UndoReason.VOICE_INSERT, if (de) "Diktat rückgängig" else "Undo dictation")) return
         voiceController.recordInsertionTiming()
         statsStore.recordVoiceDictation(text.length, prefs.incognitoMode)
-        lastVoiceInsertedWords = Regex("""[\p{L}]{2,}""")
+        lastVoiceInsertedWords = VOICE_WORD_REGEX
             .findAll(text)
             .map { it.value.lowercase() }
             .toSet()
-        dictionaryStore.recordTextBatch(
-            text = text,
-            learningEnabled = prefs.learningEnabled,
-            incognito = prefs.incognitoMode,
-            locale = prefs.activeLocale,
-            appPackage = if (prefs.perAppLearningEnabled) currentTargetPackage else null
-        )
+        if (languageToolsAllowed) {
+            dictionaryStore.recordTextBatch(
+                text = text,
+                learningEnabled = prefs.learningEnabled,
+                incognito = prefs.incognitoMode,
+                locale = prefs.activeLocale,
+                appPackage = if (prefs.perAppLearningEnabled) currentTargetPackage else null
+            )
+        }
     }
 
     private fun deletePreviousSentence(de: Boolean) {

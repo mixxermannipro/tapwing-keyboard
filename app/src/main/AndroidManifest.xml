@@ -44,6 +44,10 @@
         android:theme="@style/Theme.Tapwing"
         android:usesCleartextTraffic="false">
 
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr" />
+
         <service
             android:name=".ime.TapwingInputMethodService"
             android:directBootAware="true"

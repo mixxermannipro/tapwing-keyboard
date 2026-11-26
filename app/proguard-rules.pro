@@ -7,6 +7,7 @@
 # Keep ML Kit & CameraX reflection targets
 -keep class com.google.mlkit.vision.text.** { *; }
 -dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.**
 -dontwarn androidx.camera.**
 
 # Keep Llamatik native JNI bridges (Whisper & Llama)
@@ -22,4 +23,10 @@
 # Keep DataStore & Kotlin coroutines metadata
 -keepclassmembers class * {
     @androidx.annotation.Keep <methods>;
+}
+
+# Strip verbose & debug logging in release builds for smaller DEX & faster execution
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
 }

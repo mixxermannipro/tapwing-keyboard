@@ -44,36 +44,48 @@ class LocalModelManager(context: Context) {
     val states: StateFlow<Map<String, ModelInstallState>> = _states.asStateFlow()
 
     init {
-        refreshStates()
+        refreshStatesAsync()
+    }
+
+    fun refreshStatesAsync() {
+        scope.launch { refreshStates() }
+    }
+
+    fun close() {
+        activeJobs.values.forEach { it.cancel() }
+        activeJobs.clear()
+        scope.coroutineContext[Job]?.cancel()
     }
 
     fun refreshStates() {
-        val next = LinkedHashMap<String, ModelInstallState>()
-        LocalModelCatalog.allModels.forEach { spec ->
-            val current = _states.value[spec.id]
-            if (current is ModelInstallState.Downloading || current is ModelInstallState.Extracting) {
-                next[spec.id] = current
-            } else if (spec.kind.isSherpa) {
-                val dir = sherpaModelDirFor(spec)
-                if (hasValidSherpaInstallation(spec, dir)) {
-                    next[spec.id] = ModelInstallState.Installed(dir.absolutePath, directorySizeBytes(dir))
-                } else {
-                    if (dir.exists()) dir.deleteRecursively()
-                    next[spec.id] = ModelInstallState.NotInstalled
-                }
-            } else {
-                val file = modelFileFor(spec)
-                if (file.isFile && file.length() > MIN_VALID_MODEL_BYTES && hasValidModelHeader(file, spec.kind)) {
-                    next[spec.id] = ModelInstallState.Installed(file.absolutePath, file.length())
-                } else {
-                    if (file.isFile && (file.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(file, spec.kind))) {
-                        file.delete()
+        _states.update { currentMap ->
+            val next = LinkedHashMap<String, ModelInstallState>()
+            LocalModelCatalog.allModels.forEach { spec ->
+                val current = currentMap[spec.id]
+                if (current is ModelInstallState.Downloading || current is ModelInstallState.Extracting) {
+                    next[spec.id] = current
+                } else if (spec.kind.isSherpa) {
+                    val dir = sherpaModelDirFor(spec)
+                    if (hasValidSherpaInstallation(spec, dir)) {
+                        next[spec.id] = ModelInstallState.Installed(dir.absolutePath, directorySizeBytes(dir))
+                    } else {
+                        if (dir.exists()) dir.deleteRecursively()
+                        next[spec.id] = ModelInstallState.NotInstalled
                     }
-                    next[spec.id] = ModelInstallState.NotInstalled
+                } else {
+                    val file = modelFileFor(spec)
+                    if (file.isFile && file.length() > MIN_VALID_MODEL_BYTES && hasValidModelHeader(file, spec.kind)) {
+                        next[spec.id] = ModelInstallState.Installed(file.absolutePath, file.length())
+                    } else {
+                        if (file.isFile && (file.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(file, spec.kind))) {
+                            file.delete()
+                        }
+                        next[spec.id] = ModelInstallState.NotInstalled
+                    }
                 }
             }
+            next
         }
-        _states.value = next
     }
 
     fun modelFileFor(spec: LocalModelSpec): File {

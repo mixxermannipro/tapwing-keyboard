@@ -35,10 +35,16 @@ data class ClipboardClip(
  */
 class ClipboardStore(
     private val storageFile: File?,
+    private val synchronousPersistence: Boolean = true,
     private val clockMs: () -> Long = { System.currentTimeMillis() }
 ) {
     private val _items = MutableStateFlow<List<ClipboardClip>>(emptyList())
     val items: StateFlow<List<ClipboardClip>> = _items.asStateFlow()
+
+    @Volatile
+    private var dirty: Boolean = false
+    private var pendingSnapshot: List<ClipboardClip>? = null
+    private var pendingFlush: java.util.concurrent.ScheduledFuture<*>? = null
 
     init {
         loadFromDisk()
@@ -169,7 +175,13 @@ class ClipboardStore(
             .take(limit)
 
         val merged = pinned + unpinned
-        if (_items.value != merged && !saveToDisk(merged)) return false
+        if (_items.value != merged) {
+            if (synchronousPersistence) {
+                if (!saveToDisk(merged)) return false
+            } else {
+                scheduleSave(merged)
+            }
+        }
         val keptPaths = merged.mapNotNull { it.imagePath }.toSet()
         rawList.mapNotNull { it.imagePath }.filter { it !in keptPaths }.forEach { path ->
             runCatching { File(path).delete() }
@@ -177,6 +189,38 @@ class ClipboardStore(
 
         _items.value = merged
         return true
+    }
+
+    fun flush() {
+        val snapshot: List<ClipboardClip>?
+        synchronized(this) {
+            pendingFlush?.cancel(false)
+            pendingFlush = null
+            if (!dirty) return
+            snapshot = pendingSnapshot ?: _items.value
+            dirty = false
+            pendingSnapshot = null
+        }
+        if (snapshot != null) {
+            saveToDisk(snapshot)
+        }
+    }
+
+    private fun scheduleSave(list: List<ClipboardClip>) {
+        if (storageFile == null) return
+        dirty = true
+        pendingSnapshot = list
+        pendingFlush?.cancel(false)
+        pendingFlush = ioExecutor.schedule({
+            val snapshot = synchronized(this) {
+                if (!dirty) return@schedule
+                dirty = false
+                val s = pendingSnapshot ?: _items.value
+                pendingSnapshot = null
+                s
+            }
+            saveToDisk(snapshot)
+        }, PERSIST_DEBOUNCE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
     private fun loadFromDisk() {
@@ -254,6 +298,10 @@ class ClipboardStore(
 
     companion object {
         private const val CLIPBOARD_FILE_NAME = "tapwing_clipboard_history.json"
+        private const val PERSIST_DEBOUNCE_MS = 800L
+        private val ioExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "tapwing-clipboard-io").apply { isDaemon = true }
+        }
 
         internal fun fingerprint(file: File): String? = runCatching {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -289,7 +337,7 @@ class ClipboardStore(
                     }
                 }
             }
-            return ClipboardStore(ceFile)
+            return ClipboardStore(ceFile, synchronousPersistence = false)
         }
     }
 }

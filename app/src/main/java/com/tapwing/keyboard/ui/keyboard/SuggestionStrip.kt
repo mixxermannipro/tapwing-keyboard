@@ -45,16 +45,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
+import androidx.compose.material.icons.rounded.Business
+import androidx.compose.material.icons.rounded.Cake
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DocumentScanner
+import androidx.compose.material.icons.rounded.Email
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material.icons.rounded.Tune
@@ -92,6 +99,7 @@ import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.clipboard.RecentScreenshot
 import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.QuickBarAction
+import com.tapwing.keyboard.data.SmartFillKind
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.dictionary.SuggestionChip
 import com.tapwing.keyboard.settings.springPressScale
@@ -135,6 +143,7 @@ fun SuggestionStrip(
     onQuickAction: (QuickBarAction) -> Unit,
     onLongPressQuickBar: () -> Unit,
     onSelectSuggestion: (SuggestionChip) -> Unit,
+    onLongPressSuggestion: (SuggestionChip) -> Unit = {},
     onTriggerUndo: () -> Unit,
     onDismissUndo: () -> Unit,
     onTapScreenshotChip: (RecentScreenshot) -> Unit,
@@ -157,14 +166,15 @@ fun SuggestionStrip(
     val voiceActive = voiceState.isListening || voiceState.isProcessing
     val showAutofill = inlineAutofillViews.isNotEmpty()
     val showVoiceError = !showAutofill && !voiceActive && !voiceState.errorMessage.isNullOrBlank()
+    val hasSmartFill = suggestions.any { it.isSmartFill }
     val showNextWords = suggestions.any { it.isNextWord }
     val undoAvailable = proactiveUndo != null && prefs.proactiveUndo
-    val showUndo = !showVoiceError && !showAutofill && undoAvailable && !showNextWords
-    val showClipboard = !showVoiceError && !showAutofill && !undoAvailable && !clipboardPreview.isNullOrBlank()
-    val showShot = !showClipboard && !showVoiceError && !undoAvailable && !showAutofill &&
+    val showUndo = !showVoiceError && !showAutofill && undoAvailable && !showNextWords && !hasSmartFill
+    val showClipboard = !showVoiceError && !showAutofill && !undoAvailable && !hasSmartFill && !clipboardPreview.isNullOrBlank()
+    val showShot = !showClipboard && !showVoiceError && !undoAvailable && !showAutofill && !hasSmartFill &&
         recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
     val showSuggestions = !showVoiceError && !showUndo && !showShot && !showAutofill && suggestions.isNotEmpty() &&
-        (isTyping || showNextWords || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
+        (isTyping || showNextWords || hasSmartFill || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
     val middleKind = when {
         showVoiceError || showUndo || showShot -> 1
         showClipboard -> 4
@@ -292,7 +302,8 @@ fun SuggestionStrip(
                                 SuggestionCells(
                                     suggestions = suggestions.take(3),
                                     hapticEnabled = prefs.hapticFeedback,
-                                    onSelect = onSelectSuggestion
+                                    onSelect = onSelectSuggestion,
+                                    onLongPress = onLongPressSuggestion
                                 )
                             }
                             if (showNextWords && undoAvailable) {
@@ -600,12 +611,24 @@ private fun FlatStripButton(
     }
 }
 
-/** 1:1 Gboard suggestion strip cells with subtle vertical dividers and tactile haptic feedback. */
+private fun SmartFillKind.icon() = when (this) {
+    SmartFillKind.NAME -> Icons.Rounded.Person
+    SmartFillKind.EMAIL -> Icons.Rounded.Email
+    SmartFillKind.PHONE -> Icons.Rounded.Phone
+    SmartFillKind.ADDRESS -> Icons.Rounded.LocationOn
+    SmartFillKind.BIRTHDATE, SmartFillKind.AGE -> Icons.Rounded.Cake
+    SmartFillKind.COMPANY -> Icons.Rounded.Business
+    SmartFillKind.WEBSITE -> Icons.Rounded.Language
+}
+
+/** 1:1 Gboard suggestion strip cells with subtle vertical dividers, Smart-Fill badges, and long-press forget. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SuggestionCells(
     suggestions: List<SuggestionChip>,
     hapticEnabled: Boolean,
-    onSelect: (SuggestionChip) -> Unit
+    onSelect: (SuggestionChip) -> Unit,
+    onLongPress: (SuggestionChip) -> Unit = {}
 ) {
     val kbColors = LocalTapwingKeyboardColors.current
     val view = LocalView.current
@@ -625,12 +648,13 @@ private fun SuggestionCells(
                         .background(kbColors.keyHintText.copy(alpha = 0.25f))
                 )
             }
-            val isEmphasized = chip.isCorrection || chip.isGrammarFix || chip.isShortcut || chip.isMath
+            val isEmphasized = chip.isSmartFill || chip.isCorrection || chip.isGrammarFix || chip.isShortcut || chip.isMath
             val label = when {
                 chip.isShortcut -> "⚡ ${chip.text}"
                 chip.isMath -> "🧮 ${chip.text}"
                 else -> chip.text
             }
+            val fillIcon = chip.smartFillKind?.icon()
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -638,23 +662,49 @@ private fun SuggestionCells(
                     .padding(horizontal = 2.dp)
                     .clip(RoundedCornerShape(if (isEmphasized) 16.dp else 12.dp))
                     .background(
-                        if (isEmphasized) kbColors.actionSurface.copy(alpha = 0.24f) else Color.Transparent
+                        when {
+                            chip.isSmartFill -> kbColors.actionSurface.copy(alpha = 0.28f)
+                            isEmphasized -> kbColors.actionSurface.copy(alpha = 0.22f)
+                            else -> Color.Transparent
+                        }
                     )
-                    .clickable(role = Role.Button) {
-                        view.tapHaptic(hapticEnabled)
-                        onSelect(chip)
-                    },
+                    .combinedClickable(
+                        role = Role.Button,
+                        onClick = {
+                            view.tapHaptic(hapticEnabled)
+                            onSelect(chip)
+                        },
+                        onLongClick = {
+                            if (!chip.isSmartFill && !chip.isMath && !chip.isEmoji && !chip.isShortcut) {
+                                if (hapticEnabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                onLongPress(chip)
+                            }
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = label,
-                    color = kbColors.stripChipText,
-                    fontSize = 15.5.sp,
-                    fontWeight = if (isEmphasized) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 6.dp)
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    if (fillIcon != null) {
+                        Icon(
+                            imageVector = fillIcon,
+                            contentDescription = null,
+                            tint = kbColors.stripChipText.copy(alpha = 0.85f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                    Text(
+                        text = label,
+                        color = kbColors.stripChipText,
+                        fontSize = if (chip.isSmartFill && label.length > 18) 13.5.sp else 15.sp,
+                        fontWeight = if (isEmphasized) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

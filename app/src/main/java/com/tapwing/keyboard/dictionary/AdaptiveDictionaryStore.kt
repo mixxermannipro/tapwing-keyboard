@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.core.content.ContextCompat
 import com.tapwing.keyboard.ai.WritingAction
 import com.tapwing.keyboard.data.KeyboardLocales
+import com.tapwing.keyboard.data.PersonalProfile
+import com.tapwing.keyboard.data.SmartFieldType
+import com.tapwing.keyboard.ime.SmartFieldDetector
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -34,9 +37,9 @@ data class ImportSummary(
 
 /**
  * Persistent custom dictionary & adaptive typing-learning store.
- * Learns unigrams, bigrams, trigrams, recency order, emoji habits, and rejected autocorrections
- * while strictly separating sentence-start capitalization from mid-sentence casing so words
- * like "und" are never erroneously capitalized mid-sentence.
+ * Learns unigrams, bigrams, trigrams, recency order, emoji habits, personal smart-fill entities,
+ * per-app preferences, and rejected autocorrections while strictly separating sentence-start
+ * capitalization from mid-sentence casing so words like "und" are never erroneously capitalized mid-sentence.
  */
 class AdaptiveDictionaryStore(
     private val storageFile: File?,
@@ -50,6 +53,8 @@ class AdaptiveDictionaryStore(
 
     private val learnedUnigrams = linkedMapOf<String, Int>()
     private val learnedUnigramsLower = linkedMapOf<String, String>()
+    // O(1) 2-char prefix bucket index across customWords + learnedUnigrams (avoids O(N) scans per keystroke)
+    private val prefix2Index = HashMap<String, LinkedHashSet<String>>(256)
     // Tracks mid-sentence exact casing counts: lowercase -> (exactForm -> count)
     private val midSentenceCaseCounts = linkedMapOf<String, LinkedHashMap<String, Int>>()
     // Monotonic order index for recency weighting
@@ -67,6 +72,10 @@ class AdaptiveDictionaryStore(
     private val recentEmojis = mutableListOf<String>()
     private val snippets = mutableListOf<TextSnippet>()
     private val rejectedCorrections = linkedSetOf<String>()
+    // Dynamic auto-learned personal smart-fill entries: SmartFieldType.name -> (value -> usageScore)
+    private val learnedProfileFields = linkedMapOf<String, LinkedHashMap<String, Int>>()
+    // Per-app preferred profile choice: appPackage -> (SmartFieldType.name -> preferredValue)
+    private val perAppProfileChoices = linkedMapOf<String, LinkedHashMap<String, String>>()
 
     private var lastLoadedModMs: Long = -1L
     @Volatile
@@ -77,6 +86,26 @@ class AdaptiveDictionaryStore(
         seedDefaultShortcutsIfEmpty()
         seedDefaultSnippetsIfEmpty()
         loadFromDisk()
+    }
+
+    private fun indexWord(word: String) {
+        if (word.length < 2) return
+        val key = word.substring(0, 2).lowercase()
+        prefix2Index.getOrPut(key) { linkedSetOf() }.add(word)
+    }
+
+    private fun unindexWord(word: String) {
+        if (word.length < 2) return
+        val key = word.substring(0, 2).lowercase()
+        val bucket = prefix2Index[key] ?: return
+        bucket.remove(word)
+        if (bucket.isEmpty()) prefix2Index.remove(key)
+    }
+
+    private fun rebuildPrefixIndex() {
+        prefix2Index.clear()
+        for (w in customWords.keys) indexWord(w)
+        for (w in learnedUnigrams.keys) indexWord(w)
     }
 
     @Synchronized
@@ -116,6 +145,7 @@ class AdaptiveDictionaryStore(
                 if (prev == null) wordsAdded++
                 customWords[clean] = maxOf(prev ?: 0, weight.coerceIn(1, 10_000))
                 customWordsLower[clean.lowercase()] = clean
+                indexWord(clean)
             }
         }
 
@@ -150,6 +180,7 @@ class AdaptiveDictionaryStore(
         if (clean.length < 2) return
         customWords[clean] = maxOf(customWords[clean] ?: 0, weight)
         customWordsLower[clean.lowercase()] = clean
+        indexWord(clean)
         saveToDisk()
     }
 
@@ -157,6 +188,7 @@ class AdaptiveDictionaryStore(
     fun removeCustomWord(word: String) {
         customWords.remove(word)
         customWordsLower.remove(word.lowercase())
+        if (!learnedUnigrams.containsKey(word)) unindexWord(word)
         saveToDisk()
     }
 
@@ -230,6 +262,7 @@ class AdaptiveDictionaryStore(
         val currentCount = learnedUnigrams[unigramKey] ?: 0
         learnedUnigrams[unigramKey] = (currentCount + 1).coerceAtMost(20_000)
         learnedUnigramsLower.putIfAbsent(lower, unigramKey)
+        indexWord(unigramKey)
         recencyClock++
         wordRecency[lower] = recencyClock
 
@@ -240,8 +273,10 @@ class AdaptiveDictionaryStore(
             val dominant = dominantMidSentenceForm(lower)
             if (dominant != null && dominant != unigramKey) {
                 val movedCount = learnedUnigrams.remove(unigramKey) ?: (currentCount + 1)
+                if (!customWords.containsKey(unigramKey)) unindexWord(unigramKey)
                 learnedUnigrams[dominant] = movedCount
                 learnedUnigramsLower[lower] = dominant
+                indexWord(dominant)
             }
         }
 
@@ -449,6 +484,7 @@ class AdaptiveDictionaryStore(
         // Also reinforce the corrected spelling as a learned word so STT/LLM prompts prioritize it.
         learnedUnigrams[target] = maxOf((learnedUnigrams[target] ?: 0) + 2, 3)
         learnedUnigramsLower[target.lowercase()] = target
+        indexWord(target)
         recencyClock++
         wordRecency[target.lowercase()] = recencyClock
         saveToDisk()
@@ -594,9 +630,9 @@ class AdaptiveDictionaryStore(
         appPackage: String? = null
     ) {
         if (!learningEnabled || incognito || text.isBlank()) return
-        val sentences = text.split(Regex("""[.!?\n]+"""))
+        val sentences = text.split(BATCH_SENTENCE_SPLIT_REGEX)
         for (sentence in sentences) {
-            val words = Regex("""[\p{L}][\p{L}'-]*""").findAll(sentence).map { it.value }.toList()
+            val words = BATCH_WORD_REGEX.findAll(sentence).map { it.value }.toList()
             var p1: String? = null
             var p2: String? = null
             words.forEachIndexed { idx, w ->
@@ -626,6 +662,7 @@ class AdaptiveDictionaryStore(
         customWordsLower.putIfAbsent(lower, clean)
         learnedUnigrams[clean] = maxOf(learnedUnigrams[clean] ?: 0, 3)
         learnedUnigramsLower[lower] = clean
+        indexWord(clean)
         recencyClock++
         wordRecency[lower] = recencyClock
         saveToDisk()
@@ -641,10 +678,16 @@ class AdaptiveDictionaryStore(
     fun removeLearnedWord(word: String) {
         val lower = word.trim().lowercase()
         val existingKey = learnedUnigramsLower.remove(lower)
-        if (existingKey != null) learnedUnigrams.remove(existingKey)
+        if (existingKey != null) {
+            learnedUnigrams.remove(existingKey)
+            if (!customWords.containsKey(existingKey)) unindexWord(existingKey)
+        }
         learnedUnigrams.remove(word)
+        if (!customWords.containsKey(word)) unindexWord(word)
         midSentenceCaseCounts.remove(lower)
         wordRecency.remove(lower)
+        learnedBigrams.values.forEach { it.remove(word); it.remove(lower) }
+        learnedTrigrams.values.forEach { it.remove(word); it.remove(lower) }
         saveToDisk()
     }
 
@@ -757,11 +800,31 @@ class AdaptiveDictionaryStore(
             scored[cleanWord] = maxOf(scored[cleanWord] ?: 0.0, total)
         }
 
-        customWords.forEach { (word, weight) ->
-            addScore(word, 1_000.0 + weight)
-        }
-        learnedUnigrams.forEach { (word, count) ->
-            addScore(word, 500.0 + count * 15.0)
+        if (lower.length >= 2) {
+            val bucket = prefix2Index[lower.substring(0, 2)]
+            if (bucket != null) {
+                for (word in bucket) {
+                    val customWeight = customWords[word]
+                    if (customWeight != null) {
+                        addScore(word, 1_000.0 + customWeight)
+                    }
+                    val learnedCount = learnedUnigrams[word]
+                    if (learnedCount != null) {
+                        addScore(word, 500.0 + learnedCount * 15.0)
+                    }
+                }
+            }
+        } else {
+            customWords.forEach { (word, weight) ->
+                if (word.isNotEmpty() && word[0].lowercaseChar() == lower[0]) {
+                    addScore(word, 1_000.0 + weight)
+                }
+            }
+            learnedUnigrams.forEach { (word, count) ->
+                if (word.isNotEmpty() && word[0].lowercaseChar() == lower[0]) {
+                    addScore(word, 500.0 + count * 15.0)
+                }
+            }
         }
         appMap?.forEach { (word, count) ->
             addScore(word, 650.0 + count * 30.0)
@@ -772,11 +835,203 @@ class AdaptiveDictionaryStore(
         bigramMap?.forEach { (word, count) ->
             addScore(word, 700.0 + count * 20.0)
         }
+        trigramMap?.forEach { (word, count) ->
+            addScore(word, 820.0 + count * 50.0)
+        }
 
         return scored.entries
             .sortedByDescending { it.value }
             .take(limit)
             .map { it.key }
+    }
+
+    /**
+     * Dynamically auto-learns a verified personal info value (e.g. email, phone, name, address)
+     * entered by the user, plus tracks per-app preference (e.g. work email in Outlook, private in Chrome).
+     */
+    @Synchronized
+    fun recordLearnedProfileValue(
+        fieldType: SmartFieldType,
+        rawValue: String,
+        appPackage: String? = null,
+        learningEnabled: Boolean = true,
+        incognito: Boolean = false
+    ) {
+        if (!learningEnabled || incognito || fieldType == SmartFieldType.NONE) return
+        val clean = rawValue.trim()
+        if (!SmartFieldDetector.isValidAutoLearnValue(fieldType, clean)) return
+        val bucket = learnedProfileFields.getOrPut(fieldType.name) { linkedMapOf() }
+        // Deduplicate case-insensitively for emails/names while keeping latest clean casing
+        val existingKey = bucket.keys.firstOrNull { it.equals(clean, ignoreCase = true) }
+        val prevCount = existingKey?.let { bucket.remove(it) } ?: 0
+        bucket[clean] = (prevCount + 1).coerceAtMost(5_000)
+        trimSubMap(bucket, MAX_PROFILE_VALUES_PER_TYPE)
+
+        // If full name learned, also learn first & last name parts dynamically
+        if (fieldType == SmartFieldType.FULL_NAME && ' ' in clean) {
+            val parts = clean.split(' ').filter { it.isNotBlank() }
+            if (parts.size >= 2) {
+                val first = parts.first()
+                val last = parts.drop(1).joinToString(" ")
+                if (SmartFieldDetector.isValidAutoLearnValue(SmartFieldType.FIRST_NAME, first)) {
+                    val fb = learnedProfileFields.getOrPut(SmartFieldType.FIRST_NAME.name) { linkedMapOf() }
+                    fb[first] = ((fb[first] ?: 0) + 1).coerceAtMost(5_000)
+                    trimSubMap(fb, MAX_PROFILE_VALUES_PER_TYPE)
+                }
+                if (SmartFieldDetector.isValidAutoLearnValue(SmartFieldType.LAST_NAME, last)) {
+                    val lb = learnedProfileFields.getOrPut(SmartFieldType.LAST_NAME.name) { linkedMapOf() }
+                    lb[last] = ((lb[last] ?: 0) + 1).coerceAtMost(5_000)
+                    trimSubMap(lb, MAX_PROFILE_VALUES_PER_TYPE)
+                }
+            }
+        }
+
+        val cleanPkg = appPackage?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanPkg != null) {
+            val appMap = perAppProfileChoices.getOrPut(cleanPkg) { linkedMapOf() }
+            appMap[fieldType.name] = clean
+            trimOuterMap(perAppProfileChoices, MAX_APP_PROFILES)
+        }
+        saveToDisk()
+    }
+
+    /** Records that the user picked a specific Smart-Fill chip in an app so that app prefers it next time. */
+    @Synchronized
+    fun recordProfileSelection(
+        fieldType: SmartFieldType,
+        value: String,
+        appPackage: String? = null,
+        learningEnabled: Boolean = true,
+        incognito: Boolean = false
+    ) {
+        if (!learningEnabled || incognito || fieldType == SmartFieldType.NONE) return
+        val clean = value.trim()
+        if (clean.isEmpty()) return
+        val cleanPkg = appPackage?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanPkg != null) {
+            val appMap = perAppProfileChoices.getOrPut(cleanPkg) { linkedMapOf() }
+            appMap[fieldType.name] = clean
+            trimOuterMap(perAppProfileChoices, MAX_APP_PROFILES)
+            saveToDisk()
+        }
+    }
+
+    /**
+     * Merges explicitly configured PersonalProfile entries with dynamically auto-learned values,
+     * ranking the per-app preferred choice first and filtering smoothly by any typed prefix.
+     */
+    @Synchronized
+    fun suggestProfileValues(
+        fieldType: SmartFieldType,
+        profile: PersonalProfile?,
+        locale: String,
+        prefix: String = "",
+        appPackage: String? = null,
+        limit: Int = 3
+    ): List<String> {
+        if (fieldType == SmartFieldType.NONE || limit <= 0) return emptyList()
+        val ordered = LinkedHashMap<String, String>() // lower -> display
+
+        fun addCandidate(raw: String?) {
+            val clean = raw?.trim().orEmpty()
+            if (clean.isEmpty()) return
+            ordered.putIfAbsent(clean.lowercase(), clean)
+        }
+
+        // 1. Per-app preferred choice gets top priority (e.g. work email in Outlook, personal in Chrome)
+        val cleanPkg = appPackage?.trim()?.takeIf { it.isNotEmpty() }
+        if (cleanPkg != null) {
+            perAppProfileChoices[cleanPkg]?.get(fieldType.name)?.let { addCandidate(it) }
+        }
+
+        // 2. Explicit user-configured PersonalProfile entries
+        if (profile != null) {
+            when (fieldType) {
+                SmartFieldType.FIRST_NAME -> {
+                    addCandidate(profile.firstName)
+                    if (profile.fullName.isNotEmpty() && profile.fullName != profile.firstName) {
+                        addCandidate(profile.fullName)
+                    }
+                }
+                SmartFieldType.LAST_NAME -> addCandidate(profile.lastName)
+                SmartFieldType.FULL_NAME -> {
+                    addCandidate(profile.fullName)
+                    addCandidate(profile.firstName)
+                }
+                SmartFieldType.EMAIL -> profile.emails.forEach { addCandidate(it) }
+                SmartFieldType.PHONE -> profile.phones.forEach { addCandidate(it) }
+                SmartFieldType.STREET_ADDRESS -> {
+                    addCandidate(profile.fullAddress.takeIf { it.isNotBlank() && it != profile.street })
+                    addCandidate(profile.street)
+                }
+                SmartFieldType.POSTAL_CODE -> addCandidate(profile.postalCode)
+                SmartFieldType.CITY -> addCandidate(profile.city)
+                SmartFieldType.COUNTRY -> addCandidate(profile.country)
+                SmartFieldType.BIRTHDATE -> {
+                    val formatted = profile.formattedBirthDate(locale)
+                    addCandidate(formatted)
+                    if (profile.birthDate.isNotBlank() && profile.birthDate != formatted) {
+                        addCandidate(profile.birthDate)
+                    }
+                }
+                SmartFieldType.AGE -> {
+                    profile.computedAgeYears()?.let { age ->
+                        addCandidate(age.toString())
+                    }
+                }
+                SmartFieldType.COMPANY -> addCandidate(profile.company)
+                SmartFieldType.WEBSITE -> addCandidate(profile.website)
+                SmartFieldType.NONE -> Unit
+            }
+        }
+
+        // 3. Dynamically auto-learned values sorted by usage count
+        learnedProfileFields[fieldType.name]
+            ?.entries
+            ?.sortedByDescending { it.value }
+            ?.forEach { (value, _) -> addCandidate(value) }
+
+        val trimmedPrefix = prefix.trim()
+        val filtered = if (trimmedPrefix.isEmpty()) {
+            ordered.values.toList()
+        } else {
+            val digitsPrefix = if (fieldType == SmartFieldType.PHONE) trimmedPrefix.filter(Char::isDigit) else ""
+            ordered.values.filter { cand ->
+                if (cand.equals(trimmedPrefix, ignoreCase = true)) return@filter false
+                if (cand.startsWith(trimmedPrefix, ignoreCase = true)) return@filter true
+                if (fieldType == SmartFieldType.PHONE && digitsPrefix.isNotEmpty()) {
+                    val candDigits = cand.filter(Char::isDigit)
+                    candDigits.startsWith(digitsPrefix) || candDigits.contains(digitsPrefix)
+                } else {
+                    false
+                }
+            }
+        }
+        return filtered.take(limit)
+    }
+
+    @Synchronized
+    fun listLearnedProfileValues(): Map<SmartFieldType, List<String>> {
+        val out = linkedMapOf<SmartFieldType, List<String>>()
+        learnedProfileFields.forEach { (typeName, values) ->
+            val type = runCatching { SmartFieldType.valueOf(typeName) }.getOrNull() ?: return@forEach
+            val sorted = values.entries.sortedByDescending { it.value }.map { it.key }
+            if (sorted.isNotEmpty()) out[type] = sorted
+        }
+        return out
+    }
+
+    @Synchronized
+    fun removeLearnedProfileValue(fieldType: SmartFieldType, value: String) {
+        val bucket = learnedProfileFields[fieldType.name] ?: return
+        bucket.remove(value)
+        if (bucket.isEmpty()) learnedProfileFields.remove(fieldType.name)
+        perAppProfileChoices.values.forEach { appMap ->
+            if (appMap[fieldType.name]?.equals(value, ignoreCase = true) == true) {
+                appMap.remove(fieldType.name)
+            }
+        }
+        saveToDisk()
     }
 
     @Synchronized
@@ -890,6 +1145,9 @@ class AdaptiveDictionaryStore(
         voiceCorrections.clear()
         recentEmojis.clear()
         rejectedCorrections.clear()
+        learnedProfileFields.clear()
+        perAppProfileChoices.clear()
+        rebuildPrefixIndex()
         saveToDisk()
     }
 
@@ -899,6 +1157,7 @@ class AdaptiveDictionaryStore(
         customWordsLower.clear()
         val shortcutKeys = shortcuts.keys
         entryLocales.keys.retainAll { it in shortcutKeys }
+        rebuildPrefixIndex()
         saveToDisk()
     }
 
@@ -956,6 +1215,7 @@ class AdaptiveDictionaryStore(
         val toRemove = learnedUnigrams.entries.sortedBy { it.value }.take(learnedUnigrams.size - MAX_UNIGRAMS).map { it.key }
         toRemove.forEach { key ->
             learnedUnigrams.remove(key)
+            if (!customWords.containsKey(key)) unindexWord(key)
             val lower = key.lowercase()
             learnedUnigramsLower.remove(lower)
             midSentenceCaseCounts.remove(lower)
@@ -1149,6 +1409,34 @@ class AdaptiveDictionaryStore(
                     if (v.isNotEmpty()) rejectedCorrections += v
                 }
             }
+
+            learnedProfileFields.clear()
+            root.optJSONObject("learnedProfileFields")?.let { obj ->
+                obj.keys().forEach { typeName ->
+                    val sub = obj.optJSONObject(typeName) ?: return@forEach
+                    val map = linkedMapOf<String, Int>()
+                    sub.keys().forEach { value ->
+                        val v = value.trim()
+                        if (v.isNotEmpty()) map[v] = sub.optInt(value, 1)
+                    }
+                    if (map.isNotEmpty()) learnedProfileFields[typeName] = map
+                }
+            }
+
+            perAppProfileChoices.clear()
+            root.optJSONObject("perAppProfileChoices")?.let { obj ->
+                obj.keys().forEach { pkg ->
+                    val sub = obj.optJSONObject(pkg) ?: return@forEach
+                    val map = linkedMapOf<String, String>()
+                    sub.keys().forEach { typeName ->
+                        val chosen = sub.optString(typeName, "").trim()
+                        if (chosen.isNotEmpty()) map[typeName] = chosen
+                    }
+                    if (map.isNotEmpty()) perAppProfileChoices[pkg] = map
+                }
+            }
+
+            rebuildPrefixIndex()
             lastLoadedModMs = file.lastModified()
         }
     }
@@ -1276,6 +1564,16 @@ class AdaptiveDictionaryStore(
         root.put("rejected", JSONArray().apply {
             rejectedCorrections.forEach { put(it) }
         })
+        root.put("learnedProfileFields", JSONObject().apply {
+            learnedProfileFields.forEach { (typeName, sub) ->
+                put(typeName, JSONObject().apply { sub.forEach { (v, c) -> put(v, c) } })
+            }
+        })
+        root.put("perAppProfileChoices", JSONObject().apply {
+            perAppProfileChoices.forEach { (pkg, sub) ->
+                put(pkg, JSONObject().apply { sub.forEach { (t, v) -> put(t, v) } })
+            }
+        })
         return root.toString()
     }
 
@@ -1292,6 +1590,10 @@ class AdaptiveDictionaryStore(
         private const val MAX_LEARNED_CORRECTIONS = 300
         private const val MAX_VOICE_CORRECTIONS = 300
         private const val MAX_RECENT_EMOJIS = 28
+        private const val MAX_PROFILE_VALUES_PER_TYPE = 6
+
+        private val BATCH_SENTENCE_SPLIT_REGEX = Regex("""[.!?\n]+""")
+        private val BATCH_WORD_REGEX = Regex("""[\p{L}][\p{L}'-]*""")
 
         private val ioExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "tapwing-dict-io").apply { isDaemon = true }

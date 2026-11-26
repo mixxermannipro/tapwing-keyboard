@@ -202,10 +202,12 @@ import com.tapwing.keyboard.data.ClipboardRetention
 import com.tapwing.keyboard.data.DarkModePreference
 import com.tapwing.keyboard.data.KeyboardLocales
 import com.tapwing.keyboard.data.OneHandedMode
+import com.tapwing.keyboard.data.PersonalProfile
 import com.tapwing.keyboard.data.QuickBarAction
 import com.tapwing.keyboard.data.QuickSearchEngine
 import com.tapwing.keyboard.data.SearchApp
 import com.tapwing.keyboard.data.SecureKeyStorage
+import com.tapwing.keyboard.data.SmartFieldType
 import com.tapwing.keyboard.data.SplitKeyboardMode
 import com.tapwing.keyboard.data.TapwingPrefs
 import com.tapwing.keyboard.data.ThemeMode
@@ -323,16 +325,22 @@ fun TapwingSettingsApp(
         hasAutofillProvider = context.getSystemService(AutofillManager::class.java)?.isEnabled == true
     }
 
+    val ioScope = rememberCoroutineScope()
+
     DisposableEffect(lifecycleOwner, prefs.quickSearchEngine) {
         refreshImeStatus()
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshImeStatus()
                 installedSearchApp = prefs.quickSearchEngine.installedApp(context)
-                dictionaryStore.reloadIfModifiedOnDisk()
-                statsStore.reloadIfModifiedOnDisk()
-                packManager.refreshStates()
-                dictRevision++
+                ioScope.launch(Dispatchers.IO) {
+                    dictionaryStore.reloadIfModifiedOnDisk()
+                    statsStore.reloadIfModifiedOnDisk()
+                    packManager.refreshStates()
+                    withContext(Dispatchers.Main) {
+                        dictRevision++
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -400,7 +408,13 @@ fun TapwingSettingsApp(
                             SettingsRoute.GLIDE_TYPING -> GlideTypingScreen(prefs, de, onUpdatePrefs)
                             SettingsRoute.QUICK_BAR -> QuickBarSettingsScreen(prefs, de, onUpdatePrefs)
                             SettingsRoute.QUICK_SEARCH -> QuickSearchSettingsScreen(prefs, installedSearchApp, onUpdatePrefs)
-                            SettingsRoute.AUTOFILL -> AutofillSettingsScreen(prefs, hasAutofillProvider, onUpdatePrefs)
+                            SettingsRoute.AUTOFILL -> AutofillSettingsScreen(
+                                prefs = prefs,
+                                de = de,
+                                hasAutofillProvider = hasAutofillProvider,
+                                dictionaryStore = dictionaryStore,
+                                onUpdatePrefs = onUpdatePrefs
+                            )
                             SettingsRoute.LANGUAGES -> LanguagesScreen(
                                 prefs = prefs,
                                 de = de,
@@ -641,15 +655,19 @@ private fun SettingsRoute.liveSummary(
         if (de) "${prefs.quickBarActions.size} Aktionen in der Leiste" else "${prefs.quickBarActions.size} toolbar shortcuts"
     }
     SettingsRoute.WRITING_TOOLS -> {
-        when (prefs.aiProvider) {
-            AiProviderType.LOCAL_LLM -> {
-                val spec = LocalModelCatalog.findById(prefs.selectedLlmModelId)
-                val label = spec?.shortEngineLabel ?: "Lokal LLM"
-                if (de) "Lokal · $label (Offline)" else "Local · $label (Offline)"
+        if (!prefs.aiWritingToolsEnabled) {
+            if (de) "Aus" else "Off"
+        } else {
+            when (prefs.aiProvider) {
+                AiProviderType.LOCAL_LLM -> {
+                    val spec = LocalModelCatalog.findById(prefs.selectedLlmModelId)
+                    val label = spec?.shortEngineLabel ?: "Lokal-KI"
+                    if (de) "Lokal-KI · $label" else "Local AI · $label"
+                }
+                AiProviderType.LOCAL_RULES -> if (de) "Sofort (Offline)" else "Instant (Offline)"
+                AiProviderType.GEMINI_NANO -> "Gemini Nano"
+                else -> "${AiModelCatalog.displayName(prefs.aiProvider, de)} · Cloud"
             }
-            AiProviderType.LOCAL_RULES -> if (de) "Schnell-Regeln (Offline)" else "Fast rules (Offline)"
-            AiProviderType.GEMINI_NANO -> "Gemini Nano (AICore)"
-            else -> "${AiModelCatalog.displayName(prefs.aiProvider, de)} · Cloud"
         }
     }
     SettingsRoute.API_KEYS -> {
@@ -657,10 +675,12 @@ private fun SettingsRoute.liveSummary(
     }
     SettingsRoute.QUICK_SEARCH -> prefs.quickSearchEngine.label
     SettingsRoute.AUTOFILL -> {
-        if (hasAutofillProvider && prefs.inlineAutofillEnabled) {
-            if (de) "Inline-Vorschläge aktiv" else "Inline suggestions on"
-        } else {
-            if (de) "Passwortmanager verknüpfen" else "Connect password manager"
+        val count = prefs.personalProfile.filledFieldCount
+        when {
+            count > 0 && prefs.smartFillEnabled -> if (de) "Profil aktiv ($count Felder) · Smart-Fill" else "Profile active ($count fields) · Smart Fill"
+            prefs.smartFillEnabled && prefs.smartProfileAutoLearn -> if (de) "Auto-Erkennung aktiv" else "Auto-detect active"
+            hasAutofillProvider && prefs.inlineAutofillEnabled -> if (de) "Passwortmanager aktiv" else "Password manager on"
+            else -> if (de) "Profil & Passwörter einrichten" else "Set up profile & passwords"
         }
     }
     SettingsRoute.STATS -> {
@@ -934,15 +954,451 @@ private fun QuickSearchSettingsScreen(
 @Composable
 private fun AutofillSettingsScreen(
     prefs: TapwingPrefs,
+    de: Boolean,
     hasAutofillProvider: Boolean,
+    dictionaryStore: AdaptiveDictionaryStore,
     onUpdatePrefs: ((TapwingPrefs) -> TapwingPrefs) -> Unit
 ) {
     val context = LocalContext.current
+    val profile = prefs.personalProfile
+    var firstName by remember(profile.firstName) { mutableStateOf(profile.firstName) }
+    var lastName by remember(profile.lastName) { mutableStateOf(profile.lastName) }
+    var birthDate by remember(profile.birthDate) { mutableStateOf(profile.birthDate) }
+    var street by remember(profile.street) { mutableStateOf(profile.street) }
+    var postalCode by remember(profile.postalCode) { mutableStateOf(profile.postalCode) }
+    var city by remember(profile.city) { mutableStateOf(profile.city) }
+    var country by remember(profile.country) { mutableStateOf(profile.country) }
+    var company by remember(profile.company) { mutableStateOf(profile.company) }
+    var website by remember(profile.website) { mutableStateOf(profile.website) }
+    var newEmail by remember { mutableStateOf("") }
+    var newPhone by remember { mutableStateOf("") }
+    var addressExpanded by rememberSaveable {
+        mutableStateOf(profile.street.isNotBlank() || profile.postalCode.isNotBlank() || profile.city.isNotBlank() || profile.company.isNotBlank())
+    }
+    var learnedRevision by remember { mutableIntStateOf(0) }
+    val learnedValues = remember(learnedRevision) { dictionaryStore.listLearnedProfileValues() }
+
+    fun saveProfile(transform: (PersonalProfile) -> PersonalProfile) {
+        onUpdatePrefs { current ->
+            val updated = transform(current.personalProfile)
+            current.copy(
+                personalProfile = updated,
+                snippetUserName = updated.fullName.ifBlank { current.snippetUserName },
+                snippetUserEmail = updated.primaryEmail.ifBlank { current.snippetUserEmail }
+            )
+        }
+    }
+
+    val liveAge = remember(birthDate) { PersonalProfile(birthDate = birthDate).computedAgeYears() }
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
+        // 1. Smart-Fill & Dynamic Auto-Detection controls
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Smart-Fill & Erkennung" else "Smart Fill & Auto-Detect")
+                AppleGroupedSurface {
+                    MinimalToggleRow(
+                        title = if (de) "Persönliche Vorschläge in der Leiste" else "Personal suggestions in strip",
+                        checked = prefs.smartFillEnabled
+                    ) { enabled ->
+                        onUpdatePrefs { it.copy(smartFillEnabled = enabled) }
+                    }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalToggleRow(
+                        title = if (de) "Dynamisch erkennen & aktualisieren" else "Auto-detect & update dynamically",
+                        checked = prefs.smartProfileAutoLearn
+                    ) { enabled ->
+                        onUpdatePrefs { it.copy(smartProfileAutoLearn = enabled) }
+                    }
+                }
+                AppleSectionFooter(
+                    if (de) "Erkennt Vorname, Nachname, E-Mail, Telefon, Adresse & Alter automatisch in Formularen und Chats (z. B. „Meine Nummer ist …“). Merkt sich je App die passende Adresse — 100% lokal auf dem Gerät."
+                    else "Automatically recognizes name, email, phone, address, and age in forms and chats (e.g. \"My email is …\"). Learns per-app preferences 100% on-device."
+                )
+            }
+        }
+
+        // 2. Core Personal Profile (Name, Birthday + live Age, Emails, Phones)
+        item {
+            Column {
+                AppleSectionHeader(if (de) "Persönliches Profil" else "Personal Profile")
+                AppleGroupedSurface {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = if (de) "Vorname" else "First name",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                AppleInlineField(
+                                    value = firstName,
+                                    onValueChange = { v ->
+                                        firstName = v
+                                        saveProfile { it.copy(firstName = v) }
+                                    },
+                                    placeholder = if (de) "z. B. Max" else "e.g. Alex"
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = if (de) "Nachname" else "Last name",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                AppleInlineField(
+                                    value = lastName,
+                                    onValueChange = { v ->
+                                        lastName = v
+                                        saveProfile { it.copy(lastName = v) }
+                                    },
+                                    placeholder = if (de) "z. B. Mustermann" else "e.g. Miller"
+                                )
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (de) "Geburtsdatum" else "Birthdate",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (liveAge != null) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer
+                                    ) {
+                                        Text(
+                                            text = if (de) "Alter: $liveAge Jahre (auto)" else "Age: $liveAge yrs (auto)",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            AppleInlineField(
+                                value = birthDate,
+                                onValueChange = { v ->
+                                    birthDate = v
+                                    saveProfile { it.copy(birthDate = v) }
+                                },
+                                placeholder = if (de) "TT.MM.JJJJ (z. B. 14.05.1995)" else "YYYY-MM-DD (e.g. 1995-05-14)"
+                            )
+                        }
+
+                        AppleHairlineDivider(startIndent = 0.dp)
+
+                        // Multiple Email Addresses
+                        Text(
+                            text = if (de) "E-Mail-Adressen" else "Email addresses",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        profile.emails.forEachIndexed { idx, email ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                                    .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = email,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                IconButton(
+                                    onClick = {
+                                        saveProfile { p -> p.copy(emails = p.emails.filterIndexed { i, _ -> i != idx }) }
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = stringResource(R.string.cd_delete),
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                AppleInlineField(
+                                    value = newEmail,
+                                    onValueChange = { newEmail = it },
+                                    placeholder = if (de) "name@beispiel.de hinzufügen" else "Add name@example.com"
+                                )
+                            }
+                            FilledTonalButton(
+                                enabled = newEmail.trim().contains("@"),
+                                shape = CircleShape,
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                onClick = {
+                                    val clean = newEmail.trim()
+                                    if (clean.contains("@")) {
+                                        saveProfile { p -> p.copy(emails = (p.emails + clean).distinctBy { it.lowercase() }) }
+                                        newEmail = ""
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+
+                        AppleHairlineDivider(startIndent = 0.dp)
+
+                        // Multiple Phone Numbers
+                        Text(
+                            text = if (de) "Telefonnummern" else "Phone numbers",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        profile.phones.forEachIndexed { idx, phone ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                                    .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = phone,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                IconButton(
+                                    onClick = {
+                                        saveProfile { p -> p.copy(phones = p.phones.filterIndexed { i, _ -> i != idx }) }
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = stringResource(R.string.cd_delete),
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                AppleInlineField(
+                                    value = newPhone,
+                                    onValueChange = { newPhone = it },
+                                    placeholder = if (de) "+49 170 1234567 hinzufügen" else "Add +1 555 123 4567"
+                                )
+                            }
+                            FilledTonalButton(
+                                enabled = newPhone.count(Char::isDigit) >= 6,
+                                shape = CircleShape,
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                onClick = {
+                                    val clean = newPhone.trim()
+                                    if (clean.count(Char::isDigit) >= 6) {
+                                        saveProfile { p -> p.copy(phones = (p.phones + clean).distinct()) }
+                                        newPhone = ""
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Collapsible Address, Company & Website section (keeps screen sleek & uncluttered)
+        item {
+            AppleGroupedSurface {
+                SettingsDisclosure(
+                    title = if (de) "Adresse, Firma & Website" else "Address, company & website",
+                    expanded = addressExpanded
+                ) {
+                    addressExpanded = !addressExpanded
+                }
+                AnimatedVisibility(
+                    visible = addressExpanded,
+                    enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                    exit = fadeOut(tween(140)) + shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        AppleHairlineDivider(startIndent = 0.dp)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(if (de) "Straße & Hausnummer" else "Street address", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            AppleInlineField(
+                                value = street,
+                                onValueChange = { v -> street = v; saveProfile { it.copy(street = v) } },
+                                placeholder = if (de) "Musterstraße 12" else "123 Main St"
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(modifier = Modifier.weight(0.42f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(if (de) "PLZ" else "Postal code", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                AppleInlineField(
+                                    value = postalCode,
+                                    onValueChange = { v -> postalCode = v; saveProfile { it.copy(postalCode = v) } },
+                                    placeholder = if (de) "10115" else "94105"
+                                )
+                            }
+                            Column(modifier = Modifier.weight(0.58f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(if (de) "Stadt" else "City", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                AppleInlineField(
+                                    value = city,
+                                    onValueChange = { v -> city = v; saveProfile { it.copy(city = v) } },
+                                    placeholder = if (de) "Berlin" else "San Francisco"
+                                )
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(if (de) "Land" else "Country", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                AppleInlineField(
+                                    value = country,
+                                    onValueChange = { v -> country = v; saveProfile { it.copy(country = v) } },
+                                    placeholder = if (de) "Deutschland" else "Germany"
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(if (de) "Firma" else "Company", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                AppleInlineField(
+                                    value = company,
+                                    onValueChange = { v -> company = v; saveProfile { it.copy(company = v) } },
+                                    placeholder = if (de) "Optional" else "Optional"
+                                )
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(if (de) "Website" else "Website", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            AppleInlineField(
+                                value = website,
+                                onValueChange = { v -> website = v; saveProfile { it.copy(website = v) } },
+                                placeholder = "https://..."
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Dynamically auto-detected values (1-tap promote into profile or delete)
+        if (learnedValues.isNotEmpty()) {
+            item {
+                Column {
+                    AppleSectionHeader(if (de) "Automatisch erkannt" else "Auto-detected")
+                    AppleGroupedSurface {
+                        val entries = learnedValues.entries.flatMap { (type, vals) -> vals.map { type to it } }.take(12)
+                        entries.forEachIndexed { index, (fieldType, value) ->
+                            if (index > 0) AppleHairlineDivider(startIndent = 16.dp)
+                            val typeLabel = when (fieldType) {
+                                SmartFieldType.FIRST_NAME -> if (de) "Vorname" else "First name"
+                                SmartFieldType.LAST_NAME -> if (de) "Nachname" else "Last name"
+                                SmartFieldType.FULL_NAME -> if (de) "Name" else "Name"
+                                SmartFieldType.EMAIL -> "E-Mail"
+                                SmartFieldType.PHONE -> if (de) "Telefon" else "Phone"
+                                SmartFieldType.STREET_ADDRESS -> if (de) "Adresse" else "Address"
+                                SmartFieldType.POSTAL_CODE -> if (de) "PLZ" else "ZIP"
+                                SmartFieldType.CITY -> if (de) "Stadt" else "City"
+                                SmartFieldType.BIRTHDATE -> if (de) "Geburtsdatum" else "Birthdate"
+                                SmartFieldType.COMPANY -> if (de) "Firma" else "Company"
+                                else -> fieldType.name
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(value, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(typeLabel, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                TextButton(
+                                    onClick = {
+                                        saveProfile { p ->
+                                            when (fieldType) {
+                                                SmartFieldType.EMAIL -> p.copy(emails = (p.emails + value).distinctBy { it.lowercase() })
+                                                SmartFieldType.PHONE -> p.copy(phones = (p.phones + value).distinct())
+                                                SmartFieldType.FIRST_NAME -> p.copy(firstName = value)
+                                                SmartFieldType.LAST_NAME -> p.copy(lastName = value)
+                                                SmartFieldType.FULL_NAME -> {
+                                                    val parts = value.split(' ').filter { it.isNotBlank() }
+                                                    if (parts.size >= 2) p.copy(firstName = parts.first(), lastName = parts.drop(1).joinToString(" "))
+                                                    else p.copy(firstName = value)
+                                                }
+                                                SmartFieldType.STREET_ADDRESS -> p.copy(street = value)
+                                                SmartFieldType.POSTAL_CODE -> p.copy(postalCode = value)
+                                                SmartFieldType.CITY -> p.copy(city = value)
+                                                SmartFieldType.BIRTHDATE -> p.copy(birthDate = value)
+                                                SmartFieldType.COMPANY -> p.copy(company = value)
+                                                else -> p
+                                            }
+                                        }
+                                        dictionaryStore.removeLearnedProfileValue(fieldType, value)
+                                        learnedRevision++
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(if (de) "Übernehmen" else "Save", fontSize = 12.sp)
+                                }
+                                IconButton(
+                                    onClick = {
+                                        dictionaryStore.removeLearnedProfileValue(fieldType, value)
+                                        learnedRevision++
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = stringResource(R.string.cd_delete),
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    AppleSectionFooter(
+                        if (de) "Beim Tippen erkannt. Übernehme Einträge dauerhaft ins Profil oder entferne sie mit einem Tipp."
+                        else "Detected while typing. Save entries into your profile or dismiss with one tap."
+                    )
+                }
+            }
+        }
+
+        // 5. Android Password Manager & Inline Autofill
         item {
             Column {
                 AppleSectionHeader(stringResource(
@@ -964,17 +1420,14 @@ private fun AutofillSettingsScreen(
                         )
                         settingsIntents.any { runCatching { context.startActivity(it) }.isSuccess }
                     }
+                    AppleHairlineDivider(startIndent = 16.dp)
+                    MinimalActionRow(stringResource(R.string.autofill_bitwarden_help), MaterialTheme.colorScheme.primary) {
+                        context.openSettingsLink("https://bitwarden.com/help/auto-fill-android/")
+                    }
                 }
                 AppleSectionFooter(stringResource(
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) R.string.autofill_help else R.string.autofill_requires_android_11
                 ))
-            }
-        }
-        item {
-            AppleGroupedSurface {
-                MinimalActionRow(stringResource(R.string.autofill_bitwarden_help), MaterialTheme.colorScheme.primary) {
-                    context.openSettingsLink("https://bitwarden.com/help/auto-fill-android/")
-                }
             }
         }
     }
@@ -3201,9 +3654,9 @@ private fun VoiceSettingsScreen(
 }
 
 private enum class WritingAidMode {
+    RULES,
     LOCAL_LLM,
-    CLOUD,
-    RULES
+    CLOUD
 }
 
 @Composable
@@ -3243,12 +3696,10 @@ private fun WritingToolsSettingsScreen(
 
     var nanoStatus by remember { mutableStateOf<NanoAvailability?>(null) }
     var nanoDownloading by remember { mutableStateOf(false) }
-    var flagshipExpanded by rememberSaveable { mutableStateOf(false) }
-    var advanced by rememberSaveable { mutableStateOf(false) }
-    var llmTestRunning by remember { mutableStateOf(false) }
-    var llmTestOutput by remember { mutableStateOf<String?>(null) }
+    var moreModelsExpanded by rememberSaveable { mutableStateOf(false) }
+    var advancedExpanded by rememberSaveable { mutableStateOf(false) }
 
-    val savedCount = remember(prefs) { secureKeyStorage.configuredCloudProviders().size }
+    val savedCloudCount = remember(prefs) { secureKeyStorage.configuredCloudProviders().size }
     val bestInstalledLlm = remember(modelStates, prefs.selectedLlmModelId) {
         modelManager.bestInstalledLlmModel(prefs.selectedLlmModelId)
     }
@@ -3259,6 +3710,15 @@ private fun WritingToolsSettingsScreen(
     }
     val fastLlmModels = remember { LocalModelCatalog.llmModels.filter { !it.isFlagshipTier } }
     val flagshipLlmModels = remember { LocalModelCatalog.llmModels.filter { it.isFlagshipTier } }
+    val cloudProviders = remember {
+        listOf(
+            AiProviderType.GEMINI_API,
+            AiProviderType.GROQ_API,
+            AiProviderType.OPENROUTER_API,
+            AiProviderType.XAI_API,
+            AiProviderType.OPENAI_COMPATIBLE
+        )
+    }
 
     LaunchedEffect(activeMode, prefs.activeLocale) {
         if (activeMode == WritingAidMode.RULES) {
@@ -3266,759 +3726,371 @@ private fun WritingToolsSettingsScreen(
         }
     }
 
-    val cloudProviders = listOf(
-        AiProviderType.GEMINI_API,
-        AiProviderType.GROQ_API,
-        AiProviderType.OPENROUTER_API,
-        AiProviderType.XAI_API,
-        AiProviderType.OPENAI_COMPATIBLE
-    )
-    val allTextProviders = listOf(
-        AiProviderType.LOCAL_LLM,
-        AiProviderType.LOCAL_RULES,
-        AiProviderType.GEMINI_NANO,
-        AiProviderType.GEMINI_API,
-        AiProviderType.GROQ_API,
-        AiProviderType.OPENROUTER_API,
-        AiProviderType.XAI_API,
-        AiProviderType.OPENAI_COMPATIBLE
-    )
-    val allAudioProviders = listOf(
-        AiProviderType.GROQ_API,
-        AiProviderType.GEMINI_API,
-        AiProviderType.OPENAI_COMPATIBLE
-    )
-    val audioFallbackProviders = listOf(
-        AiProviderType.LOCAL_RULES,
-        AiProviderType.GROQ_API,
-        AiProviderType.GEMINI_API,
-        AiProviderType.OPENAI_COMPATIBLE
-    )
+    fun selectMode(mode: WritingAidMode) {
+        when (mode) {
+            WritingAidMode.RULES -> onUpdatePrefs {
+                it.copy(
+                    aiProvider = AiProviderType.LOCAL_RULES,
+                    aiModel = "",
+                    cleanupProvider = AiProviderType.LOCAL_RULES,
+                    cleanupModel = ""
+                )
+            }
+            WritingAidMode.LOCAL_LLM -> {
+                val llmId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId
+                onUpdatePrefs {
+                    it.copy(
+                        selectedLlmModelId = llmId,
+                        aiProvider = AiProviderType.LOCAL_LLM,
+                        aiModel = llmId,
+                        cleanupProvider = AiProviderType.LOCAL_LLM,
+                        cleanupModel = llmId
+                    )
+                }
+            }
+            WritingAidMode.CLOUD -> {
+                val targetCloud = secureKeyStorage.configuredCloudProviders().firstOrNull()
+                    ?: AiProviderType.GEMINI_API
+                val defaultModel = AiModelCatalog.defaultTextModelFor(targetCloud)
+                onUpdatePrefs {
+                    it.copy(
+                        aiProvider = targetCloud,
+                        aiModel = defaultModel,
+                        cleanupProvider = targetCloud,
+                        cleanupModel = defaultModel
+                    )
+                }
+            }
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // 1. Minimal top toggle + live status
+        // 1. Clean master switch
         item {
             AppleGroupedSurface {
                 MinimalToggleRow(
-                    title = if (de) "KI-Schreibhilfe & Bereinigung" else "AI Writing Aid & Cleanup",
+                    title = if (de) "Schreibhilfe aktivieren" else "Enable Writing Aid",
                     checked = prefs.aiWritingToolsEnabled
-                ) { v ->
-                    onUpdatePrefs { it.copy(aiWritingToolsEnabled = v) }
-                }
-                AppleHairlineDivider(startIndent = 16.dp)
-                val statusSummary = when (activeMode) {
-                    WritingAidMode.LOCAL_LLM -> {
-                        if (bestInstalledLlm != null) {
-                            if (de) "Aktiv · ${bestInstalledLlm.first.shortEngineLabel} (Offline)"
-                            else "Active · ${bestInstalledLlm.first.shortEngineLabel} (Offline)"
-                        } else {
-                            if (de) "Modell unten laden" else "Download a model below"
-                        }
-                    }
-                    WritingAidMode.CLOUD -> {
-                        val provName = AiModelCatalog.displayName(prefs.aiProvider, de)
-                        val hasKey = secureKeyStorage.hasKey(prefs.aiProvider)
-                        if (hasKey) "$provName · ${prefs.aiModel.ifBlank { AiModelCatalog.defaultTextModelFor(prefs.aiProvider) }}"
-                        else if (de) "$provName · API-Schlüssel fehlt" else "$provName · API key missing"
-                    }
-                    WritingAidMode.RULES -> {
-                        if (prefs.aiProvider == AiProviderType.GEMINI_NANO) "Gemini Nano (AICore)"
-                        else if (de) "Sofort-Regeln (0 ms · Offline)" else "Instant rules (0 ms · Offline)"
-                    }
-                }
-                MinimalValueRow(if (de) "Aktive Engine" else "Active engine", statusSummary)
-            }
-        }
-
-        // 2. Compact Dropdown mode picker (updates both Writing Aid & Dictation Cleanup seamlessly)
-        item {
-            Column {
-                AppleSectionHeader(if (de) "KI-Modus" else "AI Mode")
-                AppleGroupedSurface {
-                    val modeOptions = listOf(
-                        DropdownOption(
-                            value = WritingAidMode.LOCAL_LLM,
-                            label = if (de) "Lokal LLM (Offline)" else "Local LLM (Offline)",
-                            subtitle = if (de) {
-                                "Blitzschnelle Smartphone-LLMs direkt auf dem Gerät — Cloud-Qualität für Schreibhilfe & Diktat."
-                            } else {
-                                "Fast on-device smartphone LLMs — cloud-grade quality for writing aid & dictation."
-                            }
-                        ),
-                        DropdownOption(
-                            value = WritingAidMode.CLOUD,
-                            label = if (de) "Cloud-KI (API-Key)" else "Cloud AI (API key)",
-                            subtitle = if (de) {
-                                "Gemini, Groq, OpenRouter, Grok oder OpenAI mit eigenem Schlüssel."
-                            } else {
-                                "Gemini, Groq, OpenRouter, Grok, or OpenAI with your own key."
-                            }
-                        ),
-                        DropdownOption(
-                            value = WritingAidMode.RULES,
-                            label = if (de) "Schnell-Regeln (0 ms)" else "Fast rules (0 ms)",
-                            subtitle = if (de) {
-                                "Kein Download, null Speicherbedarf — sofortige lokale Regeln & optional Gemini Nano."
-                            } else {
-                                "Zero download, instant offline rules — plus optional Google Gemini Nano."
-                            }
-                        )
-                    )
-                    MinimalDropdownRow(
-                        title = if (de) "Verarbeitung" else "Processing",
-                        selectedValue = activeMode,
-                        options = modeOptions,
-                        onSelect = { selected ->
-                            when (selected) {
-                                WritingAidMode.LOCAL_LLM -> {
-                                    val llmId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId
-                                    onUpdatePrefs {
-                                        it.copy(
-                                            aiProvider = AiProviderType.LOCAL_LLM,
-                                            aiModel = llmId,
-                                            cleanupProvider = AiProviderType.LOCAL_LLM,
-                                            cleanupModel = llmId,
-                                            selectedLlmModelId = llmId
-                                        )
-                                    }
-                                }
-                                WritingAidMode.CLOUD -> {
-                                    val targetCloud = secureKeyStorage.configuredCloudProviders().firstOrNull()
-                                        ?: AiProviderType.GEMINI_API
-                                    val defaultModel = AiModelCatalog.defaultTextModelFor(targetCloud)
-                                    onUpdatePrefs {
-                                        it.copy(
-                                            aiProvider = targetCloud,
-                                            aiModel = defaultModel,
-                                            cleanupProvider = targetCloud,
-                                            cleanupModel = defaultModel
-                                        )
-                                    }
-                                }
-                                WritingAidMode.RULES -> {
-                                    onUpdatePrefs {
-                                        it.copy(
-                                            aiProvider = AiProviderType.LOCAL_RULES,
-                                            aiModel = "",
-                                            cleanupProvider = AiProviderType.LOCAL_RULES,
-                                            cleanupModel = ""
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    )
-                    val installedLlmSpecs = LocalModelCatalog.llmModels.filter {
-                        modelStates[it.id] is ModelInstallState.Installed
-                    }
-                    if (activeMode == WritingAidMode.LOCAL_LLM && installedLlmSpecs.size >= 2) {
-                        AppleHairlineDivider(startIndent = 16.dp)
-                        val activeLlmId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId
-                        MinimalDropdownRow(
-                            title = if (de) "Aktives Lokal-LLM" else "Active local LLM",
-                            selectedValue = activeLlmId,
-                            options = installedLlmSpecs.map { spec ->
-                                DropdownOption(
-                                    value = spec.id,
-                                    label = spec.shortEngineLabel,
-                                    subtitle = if (de) spec.speedBadgeDe else spec.speedBadgeEn
-                                )
-                            },
-                            onSelect = { id ->
-                                onUpdatePrefs {
-                                    it.copy(
-                                        selectedLlmModelId = id,
-                                        aiProvider = AiProviderType.LOCAL_LLM,
-                                        aiModel = id,
-                                        cleanupProvider = AiProviderType.LOCAL_LLM,
-                                        cleanupModel = id
-                                    )
-                                }
-                            }
-                        )
-                    }
+                ) { enabled ->
+                    onUpdatePrefs { it.copy(aiWritingToolsEnabled = enabled) }
                 }
             }
         }
 
-        // 3. Contextual card for the selected mode
-        when (activeMode) {
-            WritingAidMode.LOCAL_LLM -> {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        LocalModelCatalogSection(
-                            title = if (de) "Lokale KI-Modelle (Handy-optimiert)" else "On-device LLMs (Phone-optimized)",
-                            recommendationNote = if (de) {
-                                "Empfohlen: LFM 2.5 1.2B (731 MB) für bestes Tempo/Qualitäts-Verhältnis auf jedem Smartphone, oder Qwen 3.5 0.8B (533 MB) für sofortige Antwort."
-                            } else {
-                                "Recommended: LFM 2.5 1.2B (731 MB) for the best mobile speed/quality balance, or Qwen 3.5 0.8B (533 MB) for instant replies."
-                            },
-                            models = fastLlmModels,
-                            selectedModelId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId,
-                            states = modelStates,
-                            de = de,
-                            onSelectModel = { spec ->
-                                onUpdatePrefs {
-                                    it.copy(
-                                        selectedLlmModelId = spec.id,
-                                        aiProvider = AiProviderType.LOCAL_LLM,
-                                        aiModel = spec.id,
-                                        cleanupProvider = AiProviderType.LOCAL_LLM,
-                                        cleanupModel = spec.id
-                                    )
-                                }
-                            },
-                            onDownloadModel = { spec ->
-                                onUpdatePrefs {
-                                    it.copy(
-                                        selectedLlmModelId = spec.id,
-                                        aiProvider = AiProviderType.LOCAL_LLM,
-                                        aiModel = spec.id,
-                                        cleanupProvider = AiProviderType.LOCAL_LLM,
-                                        cleanupModel = spec.id
-                                    )
-                                }
-                                modelManager.startDownload(spec)
-                            },
-                            onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
-                            onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
-                            onImportModel = { spec ->
-                                pendingImportSpec = spec
-                                importLlmLauncher.launch(arrayOf("application/octet-stream", "*/*"))
-                            },
-                            onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
-                            showTechnicalDetails = false
+        if (prefs.aiWritingToolsEnabled) {
+            // 2. Simple, crystal-clear 3-option mode selector
+            item {
+                Column {
+                    AppleSectionHeader(if (de) "Modus" else "Mode")
+                    AppleGroupedSurface {
+                        val options = listOf(
+                            Triple(
+                                WritingAidMode.RULES,
+                                if (de) "Sofort (Offline)" else "Instant (Offline)",
+                                if (de) "0 ms · kein Download" else "0 ms · no download"
+                            ),
+                            Triple(
+                                WritingAidMode.LOCAL_LLM,
+                                if (de) "Lokal-KI (Offline)" else "Local AI (Offline)",
+                                bestInstalledLlm?.first?.shortEngineLabel
+                                    ?: (if (de) "Direkt auf dem Handy" else "Runs on your phone")
+                            ),
+                            Triple(
+                                WritingAidMode.CLOUD,
+                                if (de) "Cloud-KI" else "Cloud AI",
+                                if (savedCloudCount > 0) AiModelCatalog.displayName(prefs.aiProvider, de)
+                                else (if (de) "Mit eigenem API-Key" else "With your own API key")
+                            )
                         )
-
-                        AppleGroupedSurface {
-                            SettingsDisclosure(
-                                title = if (de) "Flaggschiff-Modelle (ab 6–8 GB RAM)" else "Flagship models (6–8+ GB RAM)",
-                                expanded = flagshipExpanded
+                        options.forEachIndexed { idx, (mode, title, subtitle) ->
+                            if (idx > 0) AppleHairlineDivider(startIndent = 16.dp)
+                            val selected = activeMode == mode
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectMode(mode) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                flagshipExpanded = !flagshipExpanded
-                            }
-                            AnimatedVisibility(
-                                visible = flagshipExpanded,
-                                enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
-                                exit = fadeOut(tween(140)) + shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium))
-                            ) {
-                                Column {
-                                    AppleHairlineDivider(startIndent = 16.dp)
-                                    LocalModelCatalogListContent(
-                                        models = flagshipLlmModels,
-                                        selectedModelId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId,
-                                        states = modelStates,
-                                        de = de,
-                                        onSelectModel = { spec ->
-                                            onUpdatePrefs {
-                                                it.copy(
-                                                    selectedLlmModelId = spec.id,
-                                                    aiProvider = AiProviderType.LOCAL_LLM,
-                                                    aiModel = spec.id,
-                                                    cleanupProvider = AiProviderType.LOCAL_LLM,
-                                                    cleanupModel = spec.id
-                                                )
-                                            }
-                                        },
-                                        onDownloadModel = { spec ->
-                                            onUpdatePrefs { it.copy(selectedLlmModelId = spec.id) }
-                                            modelManager.startDownload(spec)
-                                        },
-                                        onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
-                                        onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
-                                        onImportModel = { spec ->
-                                            pendingImportSpec = spec
-                                            importLlmLauncher.launch(arrayOf("application/octet-stream", "*/*"))
-                                        },
-                                        onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
-                                        showTechnicalDetails = false
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = title,
+                                        fontSize = 15.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = subtitle,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
                         }
+                    }
+                }
+            }
 
-                        if (bestInstalledLlm != null) {
+            // 3. Minimal contextual card for the active mode
+            when (activeMode) {
+                WritingAidMode.RULES -> {
+                    if (nanoStatus == NanoAvailability.AVAILABLE || nanoStatus == NanoAvailability.DOWNLOADABLE) {
+                        item {
                             AppleGroupedSurface {
-                                Column(
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                MinimalToggleRow(
+                                    title = if (de) "Google Gemini Nano nutzen" else "Use Google Gemini Nano",
+                                    checked = prefs.aiProvider == AiProviderType.GEMINI_NANO
+                                ) { enabled ->
+                                    val next = if (enabled) AiProviderType.GEMINI_NANO else AiProviderType.LOCAL_RULES
+                                    onUpdatePrefs { it.copy(aiProvider = next, cleanupProvider = next) }
+                                }
+                                if (nanoStatus == NanoAvailability.DOWNLOADABLE) {
+                                    AppleHairlineDivider(startIndent = 16.dp)
+                                    MinimalActionRow(
+                                        title = if (nanoDownloading) (if (de) "Wird geladen…" else "Downloading…")
+                                        else (if (de) "Gemini Nano laden" else "Download Gemini Nano"),
+                                        textColor = MaterialTheme.colorScheme.primary
                                     ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = if (de) "Lokalen KI-Kurztest ausführen" else "Run local LLM quick test",
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Text(
-                                                text = bestInstalledLlm.first.shortEngineLabel,
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                        if (nanoDownloading) return@MinimalActionRow
+                                        nanoDownloading = true
+                                        scope.launch {
+                                            GeminiNanoClient.requestDownload(context, prefs.activeLocale)
+                                            nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
+                                            nanoDownloading = false
                                         }
-                                        FilledTonalButton(
-                                            enabled = !llmTestRunning,
-                                            shape = CircleShape,
-                                            onClick = {
-                                                llmTestRunning = true
-                                                llmTestOutput = if (de) "Bereinige Beispielsatz lokal …" else "Polishing sample locally…"
-                                                scope.launch {
-                                                    val sample = if (de) {
-                                                        "ähm wir brauchen für das release noch einkaufsliste: design review, sprint planning und deployment"
-                                                    } else {
-                                                        "um shopping list: milk, eggs, coffee and oat milk"
-                                                    }
-                                                    val t0 = System.currentTimeMillis()
-                                                    val res = LocalLlmEngine.processText(
-                                                        text = sample,
-                                                        action = WritingAction.VOICE_CLEANUP,
-                                                        locale = prefs.activeLocale,
-                                                        spec = bestInstalledLlm.first,
-                                                        modelFile = bestInstalledLlm.second,
-                                                        autoBulletLists = prefs.voiceAutoBulletLists
-                                                    )
-                                                    val ms = System.currentTimeMillis() - t0
-                                                    llmTestRunning = false
-                                                    llmTestOutput = res.fold(
-                                                        onSuccess = { out -> "${bestInstalledLlm.first.shortEngineLabel} · ${ms} ms\n$out" },
-                                                        onFailure = { err ->
-                                                            if (de) "Fehler (${ms} ms): ${err.localizedMessage}"
-                                                            else "Error (${ms} ms): ${err.localizedMessage}"
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                        ) {
-                                            Text(if (de) "Testen" else "Test", fontSize = 13.sp)
-                                        }
-                                    }
-                                    if (!llmTestOutput.isNullOrBlank()) {
-                                        Text(
-                                            text = llmTestOutput!!,
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
                                     }
                                 }
                             }
                         }
+                    } else {
+                        item {
+                            AppleSectionFooter(
+                                if (de) "Sofort einsatzbereit — korrigiert, kürzt und formatiert komplett offline ohne Speicherbedarf."
+                                else "Ready instantly — fixes, shortens, and formats completely offline with zero storage."
+                            )
+                        }
                     }
                 }
-            }
 
-            WritingAidMode.CLOUD -> {
-                item {
-                    Column {
-                        AppleSectionHeader(if (de) "Cloud-Anbieter & Modell" else "Cloud provider & model")
-                        AppleGroupedSurface {
-                            val providerOptions = cloudProviders.map { prov ->
-                                val hasKey = secureKeyStorage.hasKey(prov)
-                                DropdownOption(
-                                    value = prov,
-                                    label = if (hasKey) AiModelCatalog.displayName(prov, de)
-                                    else "${AiModelCatalog.displayName(prov, de)} · 🔑"
-                                )
-                            }
-                            MinimalDropdownRow(
-                                title = if (de) "Cloud-Anbieter" else "Cloud provider",
-                                selectedValue = prefs.aiProvider,
-                                options = providerOptions,
-                                onSelect = { prov ->
-                                    val defModel = AiModelCatalog.defaultTextModelFor(prov)
+                WritingAidMode.LOCAL_LLM -> {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            LocalModelCatalogSection(
+                                title = if (de) "Lokales Modell" else "Local model",
+                                recommendationNote = if (de) "Tipp: LFM 2.5 1.2B für beste Qualität oder Qwen 3.5 0.8B für maximales Tempo."
+                                else "Tip: LFM 2.5 1.2B for best quality or Qwen 3.5 0.8B for fastest replies.",
+                                models = fastLlmModels,
+                                selectedModelId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId,
+                                states = modelStates,
+                                de = de,
+                                onSelectModel = { spec ->
                                     onUpdatePrefs {
                                         it.copy(
-                                            aiProvider = prov,
-                                            aiModel = defModel,
-                                            cleanupProvider = prov,
-                                            cleanupModel = defModel
+                                            selectedLlmModelId = spec.id,
+                                            aiProvider = AiProviderType.LOCAL_LLM,
+                                            aiModel = spec.id,
+                                            cleanupProvider = AiProviderType.LOCAL_LLM,
+                                            cleanupModel = spec.id
                                         )
                                     }
-                                }
+                                },
+                                onDownloadModel = { spec ->
+                                    onUpdatePrefs {
+                                        it.copy(
+                                            selectedLlmModelId = spec.id,
+                                            aiProvider = AiProviderType.LOCAL_LLM,
+                                            aiModel = spec.id,
+                                            cleanupProvider = AiProviderType.LOCAL_LLM,
+                                            cleanupModel = spec.id
+                                        )
+                                    }
+                                    modelManager.startDownload(spec)
+                                },
+                                onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
+                                onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
+                                onImportModel = { spec ->
+                                    pendingImportSpec = spec
+                                    importLlmLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                                },
+                                onOpenUrl = { url -> context.openSettingsLink(url) },
+                                showTechnicalDetails = false
                             )
-                            val presets = AiModelCatalog.textModelsFor(prefs.aiProvider)
-                            if (presets.isNotEmpty()) {
-                                AppleHairlineDivider(startIndent = 16.dp)
-                                val modelOptions = presets.map { spec ->
-                                    val tag = if (spec.isFreeTier) "FREE · " else ""
-                                    DropdownOption(
-                                        value = spec.id,
-                                        label = "$tag${spec.label}",
-                                        subtitle = if (de) spec.noteDe else spec.noteEn
-                                    )
+
+                            if (flagshipLlmModels.isNotEmpty()) {
+                                AppleGroupedSurface {
+                                    SettingsDisclosure(
+                                        title = if (de) "Weitere Modelle (6+ GB RAM)" else "More models (6+ GB RAM)",
+                                        expanded = moreModelsExpanded
+                                    ) { moreModelsExpanded = !moreModelsExpanded }
+                                    AnimatedVisibility(visible = moreModelsExpanded) {
+                                        Column {
+                                            AppleHairlineDivider(startIndent = 16.dp)
+                                            LocalModelCatalogListContent(
+                                                models = flagshipLlmModels,
+                                                selectedModelId = bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId,
+                                                states = modelStates,
+                                                de = de,
+                                                onSelectModel = { spec ->
+                                                    onUpdatePrefs {
+                                                        it.copy(
+                                                            selectedLlmModelId = spec.id,
+                                                            aiProvider = AiProviderType.LOCAL_LLM,
+                                                            aiModel = spec.id,
+                                                            cleanupProvider = AiProviderType.LOCAL_LLM,
+                                                            cleanupModel = spec.id
+                                                        )
+                                                    }
+                                                },
+                                                onDownloadModel = { spec ->
+                                                    onUpdatePrefs { it.copy(selectedLlmModelId = spec.id) }
+                                                    modelManager.startDownload(spec)
+                                                },
+                                                onCancelDownload = { spec -> modelManager.cancelDownload(spec.id) },
+                                                onDeleteModel = { spec -> modelManager.deleteModel(spec.id) },
+                                                onImportModel = { spec ->
+                                                    pendingImportSpec = spec
+                                                    importLlmLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                                                },
+                                                onOpenUrl = { url -> context.openSettingsLink(url) },
+                                                showTechnicalDetails = false
+                                            )
+                                        }
+                                    }
                                 }
-                                val currentModel = prefs.aiModel.trim().ifBlank { presets.first().id }
-                                val optionsWithCustom = if (modelOptions.any { it.value == currentModel }) {
-                                    modelOptions
-                                } else {
-                                    modelOptions + DropdownOption(currentModel, currentModel)
-                                }
+                            }
+                        }
+                    }
+                }
+
+                WritingAidMode.CLOUD -> {
+                    item {
+                        Column {
+                            AppleSectionHeader(if (de) "Cloud-Konfiguration" else "Cloud setup")
+                            AppleGroupedSurface {
                                 MinimalDropdownRow(
-                                    title = if (de) "Modell" else "Model",
-                                    selectedValue = currentModel,
-                                    options = optionsWithCustom,
-                                    onSelect = { id ->
+                                    title = if (de) "Anbieter" else "Provider",
+                                    selectedValue = prefs.aiProvider,
+                                    options = cloudProviders.map { prov ->
+                                        val hasKey = secureKeyStorage.hasKey(prov)
+                                        DropdownOption(
+                                            value = prov,
+                                            label = if (hasKey) AiModelCatalog.displayName(prov, de)
+                                            else "${AiModelCatalog.displayName(prov, de)} · 🔑"
+                                        )
+                                    },
+                                    onSelect = { prov ->
+                                        val defModel = AiModelCatalog.defaultTextModelFor(prov)
                                         onUpdatePrefs {
-                                            it.copy(aiModel = id, cleanupModel = id)
+                                            it.copy(
+                                                aiProvider = prov,
+                                                aiModel = defModel,
+                                                cleanupProvider = prov,
+                                                cleanupModel = defModel
+                                            )
                                         }
                                     }
                                 )
-                            }
-                            AppleHairlineDivider(startIndent = 16.dp)
-                            MinimalNavRow(
-                                icon = Icons.Rounded.Key,
-                                badgeColor = Color(0xFFFF375F),
-                                title = if (de) "API-Schlüssel-Tresor" else "API Keys Vault",
-                                value = if (savedCount > 0) (if (de) "$savedCount aktiv" else "$savedCount active")
-                                else (if (de) "Einrichten" else "Set up"),
-                                onClick = onOpenApiKeys
-                            )
-                        }
-                    }
-                }
-            }
-
-            WritingAidMode.RULES -> {
-                if (nanoStatus == NanoAvailability.AVAILABLE || nanoStatus == NanoAvailability.DOWNLOADABLE) {
-                    item {
-                        AppleGroupedSurface {
-                            MinimalToggleRow(
-                                title = if (de) "Google Gemini Nano (AICore) mitnutzen" else "Use Google Gemini Nano (AICore)",
-                                checked = prefs.aiProvider == AiProviderType.GEMINI_NANO
-                            ) { enabled ->
-                                val nextProv = if (enabled) AiProviderType.GEMINI_NANO else AiProviderType.LOCAL_RULES
-                                onUpdatePrefs {
-                                    it.copy(aiProvider = nextProv, cleanupProvider = nextProv)
-                                }
-                            }
-                            if (nanoStatus == NanoAvailability.DOWNLOADABLE) {
-                                AppleHairlineDivider(startIndent = 16.dp)
-                                MinimalActionRow(
-                                    title = if (nanoDownloading) (if (de) "Starte Download…" else "Starting download…")
-                                    else (if (de) "Gemini Nano über AICore laden" else "Download Gemini Nano via AICore"),
-                                    textColor = MaterialTheme.colorScheme.primary
-                                ) {
-                                    if (nanoDownloading) return@MinimalActionRow
-                                    nanoDownloading = true
-                                    scope.launch {
-                                        GeminiNanoClient.requestDownload(context, prefs.activeLocale)
-                                        nanoStatus = GeminiNanoClient.checkAvailability(context, prefs.activeLocale)
-                                        nanoDownloading = false
+                                val presets = AiModelCatalog.textModelsFor(prefs.aiProvider)
+                                if (presets.isNotEmpty()) {
+                                    AppleHairlineDivider(startIndent = 16.dp)
+                                    val currentModel = prefs.aiModel.trim().ifBlank { presets.first().id }
+                                    val modelOptions = presets.map { spec ->
+                                        val tag = if (spec.isFreeTier) "FREE · " else ""
+                                        DropdownOption(spec.id, "$tag${spec.label}")
+                                    }.let { list ->
+                                        if (list.any { it.value == currentModel }) list else list + DropdownOption(currentModel, currentModel)
                                     }
+                                    MinimalDropdownRow(
+                                        title = if (de) "Modell" else "Model",
+                                        selectedValue = currentModel,
+                                        options = modelOptions,
+                                        onSelect = { id -> onUpdatePrefs { it.copy(aiModel = id, cleanupModel = id) } }
+                                    )
                                 }
+                                AppleHairlineDivider(startIndent = 16.dp)
+                                MinimalNavRow(
+                                    icon = Icons.Rounded.Key,
+                                    badgeColor = Color(0xFFFF375F),
+                                    title = if (de) "API-Schlüssel" else "API Keys",
+                                    value = if (savedCloudCount > 0) (if (de) "$savedCloudCount aktiv" else "$savedCloudCount active")
+                                    else (if (de) "Einrichten" else "Set up"),
+                                    onClick = onOpenApiKeys
+                                )
                             }
                         }
                     }
                 }
             }
-        }
 
-        // 4. Single collapsed "Advanced" disclosure for power-user per-task routing & options
-        item {
-            AppleGroupedSurface {
-                SettingsDisclosure(if (de) "Erweitert (Experten-Routing)" else "Advanced (per-task routing)", advanced) {
-                    advanced = !advanced
-                }
-                AnimatedVisibility(
-                    visible = advanced,
-                    enter = fadeIn(tween(180)) + expandVertically(spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
-                    exit = fadeOut(tween(140)) + shrinkVertically(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMedium))
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AppleHairlineDivider(startIndent = 16.dp)
-                        MinimalToggleRow(
-                            if (de) "Alle Tastaturen unterstützen" else "Support all keyboards",
-                            prefs.aiSupportAllKeyboards
-                        ) { enabled -> onUpdatePrefs { it.copy(aiSupportAllKeyboards = enabled) } }
-                        AppleHairlineDivider(startIndent = 16.dp)
-                        MinimalNavRow(
-                            icon = Icons.Rounded.Key,
-                            badgeColor = Color(0xFFFF375F),
-                            title = if (de) "API-Schlüssel-Tresor" else "API Keys Vault",
-                            value = if (savedCount > 0) (if (de) "$savedCount aktiv" else "$savedCount active")
-                            else (if (de) "Einrichten" else "Set up"),
-                            onClick = onOpenApiKeys
-                        )
-                        Column(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            TaskRoutingSection(
-                                title = if (de) "Schreibhilfe (Text-Aktionen)" else "Writing Assistant",
-                                footer = if (de) "Separater Anbieter & Fallback für Umformulieren, Korrigieren & Übersetzen."
-                                else "Independent provider & fallback for rewriting and proofreading.",
-                                de = de,
-                                isAudioTask = false,
-                                primaryProvider = prefs.aiProvider,
-                                primaryModel = prefs.aiModel,
-                                fallbackProvider = prefs.aiFallbackProvider,
-                                fallbackModel = prefs.aiFallbackModel,
-                                primaryOptions = allTextProviders,
-                                fallbackOptions = allTextProviders,
-                                secureKeyStorage = secureKeyStorage,
-                                onSelectPrimaryProvider = { prov ->
-                                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
-                                    onUpdatePrefs { it.copy(aiProvider = prov, aiModel = defaultModel) }
-                                },
-                                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(aiModel = m) } },
-                                onSelectFallbackProvider = { prov ->
-                                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
-                                    onUpdatePrefs { it.copy(aiFallbackProvider = prov, aiFallbackModel = defaultModel) }
-                                },
-                                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(aiFallbackModel = m) } },
-                                onOpenApiKeys = onOpenApiKeys
-                            )
-                            TaskRoutingSection(
-                                title = if (de) "Diktat-Bereinigung" else "Dictation Cleanup",
-                                footer = if (de) "Unabhängiger Anbieter für die Bereinigung nach dem Diktieren."
-                                else "Independent provider for post-dictation cleanup.",
-                                de = de,
-                                isAudioTask = false,
-                                primaryProvider = prefs.cleanupProvider,
-                                primaryModel = prefs.cleanupModel,
-                                fallbackProvider = prefs.cleanupFallbackProvider,
-                                fallbackModel = prefs.cleanupFallbackModel,
-                                primaryOptions = allTextProviders,
-                                fallbackOptions = allTextProviders,
-                                secureKeyStorage = secureKeyStorage,
-                                onSelectPrimaryProvider = { prov ->
-                                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
-                                    onUpdatePrefs { it.copy(cleanupProvider = prov, cleanupModel = defaultModel) }
-                                },
-                                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(cleanupModel = m) } },
-                                onSelectFallbackProvider = { prov ->
-                                    val defaultModel = AiModelCatalog.defaultTextModelFor(prov)
-                                    onUpdatePrefs { it.copy(cleanupFallbackProvider = prov, cleanupFallbackModel = defaultModel) }
-                                },
-                                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(cleanupFallbackModel = m) } },
-                                onOpenApiKeys = onOpenApiKeys
-                            )
-                            TaskRoutingSection(
-                                title = if (de) "Cloud-Diktat (Audio → Text)" else "Cloud Dictation (Audio → Text)",
-                                footer = if (de) "Greift in den Diktat-Modi „Cloud“ & „Gemini Live“."
-                                else "Used by Cloud & Gemini Live dictation modes.",
-                                de = de,
-                                isAudioTask = true,
-                                primaryProvider = prefs.dictationProvider,
-                                primaryModel = prefs.dictationModel,
-                                fallbackProvider = prefs.dictationFallbackProvider,
-                                fallbackModel = prefs.dictationFallbackModel,
-                                primaryOptions = allAudioProviders,
-                                fallbackOptions = audioFallbackProviders,
-                                secureKeyStorage = secureKeyStorage,
-                                onSelectPrimaryProvider = { prov ->
-                                    val defaultModel = AiModelCatalog.defaultAudioModelFor(prov)
-                                    onUpdatePrefs { it.copy(dictationProvider = prov, dictationModel = defaultModel) }
-                                },
-                                onPrimaryModelChange = { m -> onUpdatePrefs { it.copy(dictationModel = m) } },
-                                onSelectFallbackProvider = { prov ->
-                                    val defaultModel = AiModelCatalog.defaultAudioModelFor(prov)
-                                    onUpdatePrefs { it.copy(dictationFallbackProvider = prov, dictationFallbackModel = defaultModel) }
-                                },
-                                onFallbackModelChange = { m -> onUpdatePrefs { it.copy(dictationFallbackModel = m) } },
-                                onOpenApiKeys = onOpenApiKeys
-                            )
-                        }
+            // 4. Tiny, uncluttered Advanced disclosure
+            item {
+                AppleGroupedSurface {
+                    SettingsDisclosure(if (de) "Erweitert" else "Advanced", advancedExpanded) {
+                        advancedExpanded = !advancedExpanded
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TaskRoutingSection(
-    title: String,
-    footer: String,
-    de: Boolean,
-    isAudioTask: Boolean,
-    primaryProvider: AiProviderType,
-    primaryModel: String,
-    fallbackProvider: AiProviderType,
-    fallbackModel: String,
-    primaryOptions: List<AiProviderType>,
-    fallbackOptions: List<AiProviderType>,
-    secureKeyStorage: SecureKeyStorage,
-    onSelectPrimaryProvider: (AiProviderType) -> Unit,
-    onPrimaryModelChange: (String) -> Unit,
-    onSelectFallbackProvider: (AiProviderType) -> Unit,
-    onFallbackModelChange: (String) -> Unit,
-    onOpenApiKeys: () -> Unit
-) {
-    val primaryPresets = if (isAudioTask) {
-        AiModelCatalog.audioModelsFor(primaryProvider)
-    } else {
-        AiModelCatalog.textModelsFor(primaryProvider)
-    }
-    val fallbackPresets = if (isAudioTask) {
-        AiModelCatalog.audioModelsFor(fallbackProvider)
-    } else {
-        AiModelCatalog.textModelsFor(fallbackProvider)
-    }
-    var showFallback by rememberSaveable(title) {
-        mutableStateOf(fallbackProvider != AiProviderType.LOCAL_RULES)
-    }
-
-    Column {
-        AppleSectionHeader(title)
-        AppleGroupedSurface {
-            val primaryProviderOptions = primaryOptions.map { prov ->
-                val hasKey = prov == AiProviderType.LOCAL_RULES ||
-                    prov == AiProviderType.LOCAL_LLM ||
-                    prov == AiProviderType.GEMINI_NANO ||
-                    secureKeyStorage.hasKey(prov)
-                DropdownOption(
-                    value = prov,
-                    label = if (hasKey) AiModelCatalog.displayName(prov, de)
-                    else "${AiModelCatalog.displayName(prov, de)} · 🔑"
-                )
-            }
-            MinimalDropdownRow(
-                title = if (de) "Primärer Anbieter" else "Primary provider",
-                selectedValue = primaryProvider,
-                options = primaryProviderOptions,
-                onSelect = onSelectPrimaryProvider
-            )
-
-            if (primaryPresets.isNotEmpty()) {
-                AppleHairlineDivider(startIndent = 16.dp)
-                val presetOptions = primaryPresets.map { spec ->
-                    val tag = if (spec.isFreeTier) "FREE · " else ""
-                    DropdownOption(
-                        value = spec.id,
-                        label = "$tag${spec.label}",
-                        subtitle = if (de) spec.noteDe else spec.noteEn
-                    )
-                }
-                val currentTrimmed = primaryModel.trim()
-                val optionsWithCustom = if (presetOptions.any { it.value == currentTrimmed } || currentTrimmed.isBlank()) {
-                    presetOptions
-                } else {
-                    presetOptions + DropdownOption(currentTrimmed, currentTrimmed)
-                }
-                MinimalDropdownRow(
-                    title = if (de) "Modell" else "Model",
-                    selectedValue = currentTrimmed.ifBlank { primaryPresets.first().id },
-                    options = optionsWithCustom,
-                    onSelect = onPrimaryModelChange
-                )
-            }
-
-            Column(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                if (primaryProvider in SecureKeyStorage.CLOUD_PROVIDERS && !secureKeyStorage.hasKey(primaryProvider)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f))
-                            .clickable(onClick = onOpenApiKeys)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = if (de) "Noch kein API-Key für ${AiModelCatalog.displayName(primaryProvider, true)} gespeichert"
-                            else "No API key saved for ${AiModelCatalog.displayName(primaryProvider, false)}",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = if (de) "Tresor →" else "Vault →",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-
-                if (primaryPresets.isNotEmpty() || primaryProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
-                    AiModelReference(provider = primaryProvider, model = primaryModel)
-                    AppleInlineField(
-                        value = primaryModel,
-                        onValueChange = onPrimaryModelChange,
-                        placeholder = if (de) "Eigene Modell-ID eingeben" else "Enter custom model ID"
-                    )
-                }
-
-                if (primaryProvider == AiProviderType.GEMINI_NANO) AiModelReference(primaryProvider)
-                AppleHairlineDivider(startIndent = 0.dp)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showFallback = !showFallback }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = if (de) {
-                            "Fallback: ${AiModelCatalog.displayName(fallbackProvider, true)}"
-                        } else {
-                            "Fallback: ${AiModelCatalog.displayName(fallbackProvider, false)}"
-                        },
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Icon(
-                        imageVector = if (showFallback) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                AnimatedVisibility(visible = showFallback) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val fallbackProviderOptions = fallbackOptions.map { prov ->
-                            DropdownOption(prov, AiModelCatalog.displayName(prov, de))
-                        }
-                        MinimalDropdownRow(
-                            title = if (de) "Fallback-Anbieter" else "Fallback provider",
-                            selectedValue = fallbackProvider,
-                            options = fallbackProviderOptions,
-                            onSelect = onSelectFallbackProvider
-                        )
-                        if (fallbackPresets.isNotEmpty()) {
-                            val fbOptions = fallbackPresets.map { spec ->
-                                DropdownOption(spec.id, spec.label, if (de) spec.noteDe else spec.noteEn)
-                            }
-                            val fbTrimmed = fallbackModel.trim()
-                            val fbOptionsWithCustom = if (fbOptions.any { it.value == fbTrimmed } || fbTrimmed.isBlank()) {
-                                fbOptions
-                            } else {
-                                fbOptions + DropdownOption(fbTrimmed, fbTrimmed)
+                    AnimatedVisibility(visible = advancedExpanded) {
+                        Column {
+                            AppleHairlineDivider(startIndent = 16.dp)
+                            MinimalToggleRow(
+                                title = if (de) "Alle Tastaturen unterstützen" else "Support all keyboards",
+                                checked = prefs.aiSupportAllKeyboards
+                            ) { enabled -> onUpdatePrefs { it.copy(aiSupportAllKeyboards = enabled) } }
+                            AppleHairlineDivider(startIndent = 16.dp)
+                            val cleanupOptions = listOf(
+                                DropdownOption(AiProviderType.LOCAL_RULES, if (de) "Sofort (Offline)" else "Instant (Offline)"),
+                                DropdownOption(AiProviderType.LOCAL_LLM, if (de) "Lokal-KI (Offline)" else "Local AI (Offline)")
+                            ) + cloudProviders.filter { secureKeyStorage.hasKey(it) || it == prefs.cleanupProvider }.map {
+                                DropdownOption(it, AiModelCatalog.displayName(it, de))
                             }
                             MinimalDropdownRow(
-                                title = if (de) "Fallback-Modell" else "Fallback model",
-                                selectedValue = fbTrimmed.ifBlank { fallbackPresets.first().id },
-                                options = fbOptionsWithCustom,
-                                onSelect = onFallbackModelChange
+                                title = if (de) "Diktat-Bereinigung" else "Dictation cleanup",
+                                selectedValue = prefs.cleanupProvider,
+                                options = cleanupOptions.distinctBy { it.value },
+                                onSelect = { prov ->
+                                    val defModel = if (prov == AiProviderType.LOCAL_LLM) {
+                                        bestInstalledLlm?.first?.id ?: prefs.selectedLlmModelId
+                                    } else {
+                                        AiModelCatalog.defaultTextModelFor(prov)
+                                    }
+                                    onUpdatePrefs { it.copy(cleanupProvider = prov, cleanupModel = defModel) }
+                                }
                             )
-                        }
-                        if (fallbackProvider == AiProviderType.GEMINI_NANO) AiModelReference(fallbackProvider)
-                        if (fallbackProvider in SecureKeyStorage.CLOUD_PROVIDERS) {
-                            AiModelReference(provider = fallbackProvider, model = fallbackModel)
-                            AppleInlineField(
-                                value = fallbackModel,
-                                onValueChange = onFallbackModelChange,
-                                placeholder = if (de) "Fallback-Modell-ID (optional)" else "Fallback model ID (optional)"
-                            )
+                            if (activeMode == WritingAidMode.CLOUD) {
+                                AppleHairlineDivider(startIndent = 16.dp)
+                                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                    Text(
+                                        text = if (de) "Eigene Modell-ID (optional)" else "Custom model ID (optional)",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 4.dp)
+                                    )
+                                    AppleInlineField(
+                                        value = prefs.aiModel,
+                                        onValueChange = { m -> onUpdatePrefs { it.copy(aiModel = m, cleanupModel = m) } },
+                                        placeholder = AiModelCatalog.defaultTextModelFor(prefs.aiProvider)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        AppleSectionFooter(footer)
     }
 }
 

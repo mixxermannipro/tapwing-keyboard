@@ -88,7 +88,7 @@ internal object SettingsCatalog {
         SettingsRoute.WRITING_TOOLS to "writing tools schreibhilfe ai ki proofread korrigieren rewrite umformulieren summarize zusammenfassen bullet stichpunkte translate übersetzen tone tonfall local model llm gguf lfm qwen gemma",
         SettingsRoute.API_KEYS to "api keys schlüssel vault tresor provider anbieter openai groq gemini grok openrouter anthropic claude",
         SettingsRoute.QUICK_SEARCH to "quick search schnellsuche web browser google duckduckgo bing startpage brave ecosia",
-        SettingsRoute.AUTOFILL to "autofill passwords passwörter bitwarden login anmelden credentials 2fa otp inline",
+        SettingsRoute.AUTOFILL to "autofill passwords passwörter bitwarden login anmelden credentials 2fa otp inline profil profile vorname nachname name first last telefon telefonnummer handy phone email mail adresse address strasse street plz zip stadt city geburtsdatum birthday alter age firma company website smart fill",
         SettingsRoute.STATS to "statistics statistik stats wpm speed tempo words wörter saved gespart keystrokes",
         SettingsRoute.ABOUT to "about über tapwing version license lizenz privacy datenschutz local lokal system enable aktivieren"
     )

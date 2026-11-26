@@ -1279,13 +1279,14 @@ fun SnippetsPanel(
                     .weight(1f)
             ) {
                 items(snippets, key = { it.id }) { snippet ->
-                    val resolved = remember(snippet, prefs.activeLocale, latestClipboardText, prefs.snippetUserName, prefs.snippetUserEmail) {
+                    val resolved = remember(snippet, prefs.activeLocale, latestClipboardText, prefs.snippetUserName, prefs.snippetUserEmail, prefs.personalProfile) {
                         SnippetPlaceholderResolver.resolve(
                             template = snippet.body,
                             locale = prefs.activeLocale,
                             latestClipboardText = latestClipboardText,
                             userName = prefs.snippetUserName,
-                            userEmail = prefs.snippetUserEmail
+                            userEmail = prefs.snippetUserEmail,
+                            profile = prefs.personalProfile
                         )
                     }
                     Surface(
