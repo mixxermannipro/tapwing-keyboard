@@ -38,7 +38,10 @@ class LoadedDictionaryPack(
     val langCode: String,
     val wordFreq: Map<String, Int>,
     val wordsByPrefix2: Map<String, List<Pair<String, Int>>>,
-    val topSwipePool: List<String>
+    val topSwipePool: List<String>,
+    val symSpell1Deletes: Map<String, List<String>> = emptyMap(),
+    val foldedPrefix2: Map<String, List<String>> = emptyMap(),
+    val swipeBuckets: Map<Int, List<String>> = emptyMap()
 ) {
     fun contains(word: String): Boolean = wordFreq.containsKey(word.lowercase())
 
@@ -53,12 +56,45 @@ class LoadedDictionaryPack(
                 .toList()
         }
         val bucket = wordsByPrefix2[lower.take(2)] ?: return emptyList()
-        return bucket
-            .asSequence()
-            .filter { (w, _) -> w.startsWith(lower) && w != lower }
-            .take(limit)
-            .map { it.first }
-            .toList()
+        val out = ArrayList<String>(limit)
+        for ((w, _) in bucket) {
+            if (w.length > lower.length && w.startsWith(lower)) {
+                out += w
+                if (out.size >= limit) break
+            }
+        }
+        return out
+    }
+
+    fun foldedPrefixMatches(foldedPrefix: String, limit: Int = 4): List<String> {
+        if (foldedPrefix.length < 2 || foldedPrefix2.isEmpty()) return emptyList()
+        val bucket = foldedPrefix2[foldedPrefix.substring(0, 2)] ?: return emptyList()
+        val isGerman = langCode == "de"
+        val out = ArrayList<String>(limit)
+        for (w in bucket) {
+            if (LanguageVocabularies.foldDiacritics(w, isGerman).startsWith(foldedPrefix)) {
+                out += w
+                if (out.size >= limit) break
+            }
+        }
+        return out
+    }
+
+    fun symSpellCandidates(lowerQuery: String, limit: Int = 48): List<String> {
+        if (symSpell1Deletes.isEmpty() || lowerQuery.length < 3) return emptyList()
+        val out = LinkedHashSet<String>(limit)
+        symSpell1Deletes[lowerQuery]?.forEach { if (out.size < limit) out += it }
+        val sb = StringBuilder(lowerQuery.length - 1)
+        for (i in lowerQuery.indices) {
+            if (out.size >= limit) break
+            sb.setLength(0)
+            sb.append(lowerQuery, 0, i)
+            sb.append(lowerQuery, i + 1, lowerQuery.length)
+            val del = sb.toString()
+            if (wordFreq.containsKey(del) && out.size < limit) out += del
+            symSpell1Deletes[del]?.forEach { if (out.size < limit) out += it }
+        }
+        return out.toList()
     }
 }
 
@@ -78,7 +114,22 @@ class OfflineDictionaryPackManager(context: Context) {
     val states: StateFlow<Map<String, PackInstallState>> = _states.asStateFlow()
 
     init {
-        refreshStates()
+        refreshStatesAsync()
+    }
+
+    fun refreshStatesAsync() {
+        scope.launch { refreshStates() }
+    }
+
+    fun close() {
+        activeJobs.values.forEach { it.cancel() }
+        activeJobs.clear()
+        loadedCache.clear()
+        scope.coroutineContext[Job]?.cancel()
+    }
+
+    fun clearMemoryCache() {
+        loadedCache.clear()
     }
 
     fun refreshStates() {
@@ -289,9 +340,15 @@ class OfflineDictionaryPackManager(context: Context) {
         )
 
         fun parseFrequencyWordList(langCode: String, lines: Sequence<String>): LoadedDictionaryPack {
+            val baseLang = KeyboardLocales.baseLang(langCode)
+            val isGerman = baseLang == "de"
             val wordFreq = HashMap<String, Int>(52_000)
             val buckets = HashMap<String, ArrayList<Pair<String, Int>>>(1_200)
             val topPool = ArrayList<String>(10_000)
+            val symSpell = HashMap<String, ArrayList<String>>(24_000)
+            val foldedPrefix2 = HashMap<String, ArrayList<String>>(512)
+            val swipeBuckets = HashMap<Int, ArrayList<String>>(512)
+            val sb = StringBuilder(24)
 
             for (rawLine in lines) {
                 val trimmed = rawLine.trim()
@@ -305,8 +362,34 @@ class OfflineDictionaryPackManager(context: Context) {
                 val lower = clean.lowercase()
                 if (!wordFreq.containsKey(lower)) {
                     wordFreq[lower] = freq
-                    if (topPool.size < 10_000) {
+                    val rank = topPool.size
+                    if (rank < 10_000) {
                         topPool += lower
+                        val fChar = LanguageVocabularies.foldCharBase(lower[0])
+                        val lChar = LanguageVocabularies.foldCharBase(lower[lower.length - 1])
+                        val sKey = (fChar.code shl 16) or lChar.code
+                        swipeBuckets.getOrPut(sKey) { ArrayList(16) }.add(lower)
+
+                        // Build O(1) SymSpell 1-delete index for top 6,000 most frequent words
+                        if (rank < 6_000 && lower.length in 3..18) {
+                            for (i in lower.indices) {
+                                sb.setLength(0)
+                                sb.append(lower, 0, i)
+                                sb.append(lower, i + 1, lower.length)
+                                val del = sb.toString()
+                                val list = symSpell.getOrPut(del) { ArrayList(2) }
+                                if (list.size < 6) list += lower
+                            }
+                        }
+
+                        // Index words with umlauts/diacritics for O(1) ASCII-to-diacritic restoration
+                        if (rank < 8_000 && LanguageVocabularies.hasSpecialDiacritic(lower)) {
+                            val folded = LanguageVocabularies.foldDiacritics(lower, isGerman)
+                            if (folded.length >= 2) {
+                                val fp = foldedPrefix2.getOrPut(folded.substring(0, 2)) { ArrayList(8) }
+                                if (fp.size < 60) fp += lower
+                            }
+                        }
                     }
                     if (lower.length >= 2) {
                         val p2 = lower.take(2)
@@ -318,10 +401,13 @@ class OfflineDictionaryPackManager(context: Context) {
                 }
             }
             return LoadedDictionaryPack(
-                langCode = langCode,
+                langCode = baseLang,
                 wordFreq = wordFreq,
                 wordsByPrefix2 = buckets,
-                topSwipePool = topPool
+                topSwipePool = topPool,
+                symSpell1Deletes = symSpell,
+                foldedPrefix2 = foldedPrefix2,
+                swipeBuckets = swipeBuckets
             )
         }
     }

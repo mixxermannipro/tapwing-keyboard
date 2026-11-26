@@ -614,6 +614,10 @@ enum class KeyActionLabel {
     GO
 }
 
+private val CAPSULE_KEY_SHAPE = RoundedCornerShape(percent = 50)
+private val RECT_KEY_SHAPE = RoundedCornerShape(5.dp)
+private val NUMPAD_KEY_SHAPE = RoundedCornerShape(18.dp)
+
 private val MODIFIER_KEY_TYPES = setOf(
     KeyActionType.SHIFT,
     KeyActionType.BACKSPACE,
@@ -745,9 +749,9 @@ private fun ExpressiveKeyCap(
     val isModifierKey = key.type in MODIFIER_KEY_TYPES
 
     val cornerShape: Shape = when {
-        isNumpadKey -> RoundedCornerShape(18.dp)
-        kbColors.appleLiquidGlass || prefs.roundedExpressiveKeys -> RoundedCornerShape(percent = 50)
-        else -> RoundedCornerShape(5.dp)
+        isNumpadKey -> NUMPAD_KEY_SHAPE
+        kbColors.appleLiquidGlass || prefs.roundedExpressiveKeys -> CAPSULE_KEY_SHAPE
+        else -> RECT_KEY_SHAPE
     }
 
     val bgTarget = when {
@@ -772,16 +776,28 @@ private fun ExpressiveKeyCap(
         else -> kbColors.keyText
     }
 
-    val border: BorderStroke? = when {
-        prefs.highContrastKeys -> BorderStroke(1.25.dp, kbColors.keyBorder)
-        kbColors.appleLiquidGlass -> BorderStroke(
-            width = 0.75.dp,
-            brush = Brush.verticalGradient(
-                listOf(kbColors.keyGlassHighlight, kbColors.keyBorder)
+    val border: BorderStroke? = remember(prefs.highContrastKeys, kbColors.appleLiquidGlass, kbColors.keyGlassHighlight, kbColors.keyBorder, prefs.showKeyBorders, isActionKey) {
+        when {
+            prefs.highContrastKeys -> BorderStroke(1.25.dp, kbColors.keyBorder)
+            kbColors.appleLiquidGlass -> BorderStroke(
+                width = 0.75.dp,
+                brush = Brush.verticalGradient(
+                    listOf(kbColors.keyGlassHighlight, kbColors.keyBorder)
+                )
             )
-        )
-        prefs.showKeyBorders && !isActionKey -> BorderStroke(0.5.dp, kbColors.keyBorder)
-        else -> null
+            prefs.showKeyBorders && !isActionKey -> BorderStroke(0.5.dp, kbColors.keyBorder)
+            else -> null
+        }
+    }
+    val glassOverlayBrush = remember(kbColors.appleLiquidGlass, kbColors.isDark) {
+        if (kbColors.appleLiquidGlass) {
+            Brush.verticalGradient(
+                listOf(
+                    Color.White.copy(alpha = if (kbColors.isDark) 0.08f else 0.25f),
+                    Color.Transparent
+                )
+            )
+        } else null
     }
 
     val displayText = if (key.type == KeyActionType.CHAR) {
@@ -1066,15 +1082,8 @@ private fun ExpressiveKeyCap(
             Box(
                 modifier = Modifier
                     .then(
-                        if (kbColors.appleLiquidGlass) {
-                            Modifier.background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        Color.White.copy(alpha = if (kbColors.isDark) 0.08f else 0.25f),
-                                        Color.Transparent
-                                    )
-                                )
-                            )
+                        if (glassOverlayBrush != null) {
+                            Modifier.background(glassOverlayBrush)
                         } else Modifier
                     )
                     .padding(horizontal = 2.dp),

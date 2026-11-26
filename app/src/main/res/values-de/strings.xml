@@ -82,7 +82,7 @@
     <string name="tools_edit_bar">Leiste</string>
 
     <!-- Einstellungen -->
-    <string name="settings_subtitle">Datenschutz-KI-Tastatur · v2.6</string>
+    <string name="settings_subtitle">Datenschutz-KI-Tastatur · v2.8</string>
     <string name="settings_search_placeholder">Einstellungen suchen</string>
     <string name="settings_test_placeholder">Hier Tastatur testen…</string>
     <string name="nav_appearance">Design &amp; Größe</string>
@@ -123,7 +123,7 @@
     <string name="settings_tip_voice">Lade Sherpa-ONNX oder Whisper herunter, um blitzschnell und ohne Internet zu diktieren.</string>
     <string name="settings_tip_search">Lege fest, wo Tapwing deine Websuchen öffnet.</string>
     <string name="nav_quick_search">Schnellsuche</string>
-    <string name="nav_autofill">Passwörter und Autofill</string>
+    <string name="nav_autofill">Profil &amp; Autofill</string>
     <string name="nav_typing_stats">Schreibstatistik</string>
     <string name="search_query_label">Mit %1$s suchen</string>
     <string name="search_insert_link">Link einfügen</string>

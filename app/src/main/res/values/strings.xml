@@ -82,7 +82,7 @@
     <string name="tools_edit_bar">Edit bar</string>
 
     <!-- Settings Titles & Sections -->
-    <string name="settings_subtitle">Privacy-first AI keyboard · v2.6</string>
+    <string name="settings_subtitle">Privacy-first AI keyboard · v2.8</string>
     <string name="settings_search_placeholder">Search settings</string>
     <string name="settings_test_placeholder">Test keyboard here…</string>
     <string name="nav_appearance">Theme &amp; Size</string>
@@ -123,7 +123,7 @@
     <string name="settings_tip_voice">Download Sherpa-ONNX or Whisper to dictate fast and privately without internet.</string>
     <string name="settings_tip_search">Choose where web searches from Tapwing open.</string>
     <string name="nav_quick_search">Quick search</string>
-    <string name="nav_autofill">Passwords and autofill</string>
+    <string name="nav_autofill">Profile &amp; autofill</string>
     <string name="nav_typing_stats">Typing statistics</string>
     <string name="search_query_label">Search with %1$s</string>
     <string name="search_insert_link">Insert link</string>

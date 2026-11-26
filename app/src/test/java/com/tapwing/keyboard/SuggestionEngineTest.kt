@@ -91,7 +91,7 @@ class SuggestionEngineTest {
     @Test
     fun keepsNextWordsOutOfAddressesAndPartialWordCompletions() {
         assertTrue(SuggestionEngine.suggestionsFor("mail ", "en", isEmailField = true).none { it.isNextWord })
-        assertTrue(SuggestionEngine.suggestionsFor("I am ", "en", isUrlField = true).none { it.isNextWord })
+        assertTrue(SuggestionEngine.suggestionsFor("https://example.com ", "en", isUrlField = true).none { it.isNextWord })
         assertTrue(SuggestionEngine.suggestionsFor("Ich bi", "de").none { it.isNextWord })
         assertTrue(SuggestionEngine.suggestionsFor("Ich bin. ", "de").none { it.text == "gleich" })
     }
@@ -173,13 +173,23 @@ class SuggestionEngineTest {
     }
 
     @Test
-    fun urlFieldOffersContextualTldAndSlashChips() {
+    fun urlFieldOffersContextualTldAndSlashChipsOnlyForExplicitUrls() {
+        // Normal browser search bar queries must NOT spam https://, www., .de, or .com!
         val initial = SuggestionEngine.suggestionsFor("", "de", isUrlField = true)
-        assertTrue(initial.any { it.text == "https://" })
+        assertTrue("Initial omnibox must not spam https:// or www.: $initial", initial.none { it.text in setOf("https://", "www.", ".de", ".com") })
 
-        val typingHost = SuggestionEngine.suggestionsFor("tapwing", "de", isUrlField = true)
-        assertTrue("Expected .de TLD chip in $typingHost", typingHost.any { it.text == ".de" && !it.appendSpace })
-        assertTrue("Expected .com TLD chip in $typingHost", typingHost.any { it.text == ".com" && !it.appendSpace })
+        val normalSearchWord = SuggestionEngine.suggestionsFor("wett", "de", isUrlField = true)
+        assertTrue("Normal search word must not spam .de/.com: $normalSearchWord", normalSearchWord.none { it.text in setOf(".de", ".com", "www.", "https://") })
+        assertTrue("Normal search word should still get regular completions: $normalSearchWord", normalSearchWord.any { it.text.equals("Wetter", ignoreCase = true) })
+
+        val multiWordSearch = SuggestionEngine.suggestionsFor("bestes wetter mor", "de", isUrlField = true)
+        assertTrue("Multi-word browser search must not suggest TLDs: $multiWordSearch", multiWordSearch.none { it.text in setOf(".de", ".com", ".org", "www.") })
+        assertTrue("Multi-word browser search should suggest normal words: $multiWordSearch", multiWordSearch.any { it.text.equals("morgen", ignoreCase = true) })
+
+        // Explicit URL input (dot, www., or ://) DOES offer contextual TLD and '/' chips
+        val hostWithDot = SuggestionEngine.suggestionsFor("tapwing.", "de", isUrlField = true)
+        assertTrue("Expected 'de' TLD completion after dot in $hostWithDot", hostWithDot.any { it.text == "de" && !it.appendSpace })
+        assertTrue("Expected 'com' TLD completion after dot in $hostWithDot", hostWithDot.any { it.text == "com" && !it.appendSpace })
 
         val partialTld = SuggestionEngine.suggestionsFor("tapwing.d", "de", isUrlField = true)
         assertEquals(".de", partialTld.single().text)
@@ -187,5 +197,8 @@ class SuggestionEngineTest {
 
         val fullHost = SuggestionEngine.suggestionsFor("tapwing.de", "de", isUrlField = true)
         assertEquals("/", fullHost.single().text)
+
+        val explicitScheme = SuggestionEngine.suggestionsFor("https://tapwing", "de", isUrlField = true)
+        assertTrue("Expected .de TLD for https:// host in $explicitScheme", explicitScheme.any { it.text == ".de" && !it.appendSpace })
     }
 }

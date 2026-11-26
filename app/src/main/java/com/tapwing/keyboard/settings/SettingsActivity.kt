@@ -23,6 +23,9 @@ import kotlinx.coroutines.launch
 
 class SettingsActivity : ComponentActivity() {
 
+    private lateinit var modelManager: LocalModelManager
+    private lateinit var packManager: OfflineDictionaryPackManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -30,8 +33,8 @@ class SettingsActivity : ComponentActivity() {
         val prefsRepo = TapwingPreferencesRepository(this)
         val secureKeyStorage = SecureKeyStorage(this)
         val dictionaryStore = AdaptiveDictionaryStore.createForContext(this)
-        val modelManager = LocalModelManager(this)
-        val packManager = OfflineDictionaryPackManager(this)
+        modelManager = LocalModelManager(this)
+        packManager = OfflineDictionaryPackManager(this)
         val statsStore = TypingStatsStore.createForContext(this)
 
         setContent {
@@ -65,5 +68,11 @@ class SettingsActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        if (::modelManager.isInitialized) modelManager.close()
+        if (::packManager.isInitialized) packManager.close()
+        super.onDestroy()
     }
 }

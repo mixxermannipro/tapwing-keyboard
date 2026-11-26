@@ -118,6 +118,9 @@ data class TapwingPrefs(
     val learningEnabled: Boolean = true,
     val perAppLearningEnabled: Boolean = true,
     val inlineAutofillEnabled: Boolean = true,
+    val smartFillEnabled: Boolean = true,
+    val smartProfileAutoLearn: Boolean = true,
+    val personalProfile: PersonalProfile = PersonalProfile(),
     val incognitoMode: Boolean = false,
     val snippetUserName: String = "",
     val snippetUserEmail: String = "",
@@ -222,6 +225,9 @@ class TapwingPreferencesRepository(context: Context) {
         val LEARNING_ENABLED = booleanPreferencesKey("learning_enabled")
         val PER_APP_LEARNING_ENABLED = booleanPreferencesKey("per_app_learning_enabled")
         val INLINE_AUTOFILL_ENABLED = booleanPreferencesKey("inline_autofill_enabled")
+        val SMART_FILL_ENABLED = booleanPreferencesKey("smart_fill_enabled")
+        val SMART_PROFILE_AUTO_LEARN = booleanPreferencesKey("smart_profile_auto_learn")
+        val PERSONAL_PROFILE_JSON = stringPreferencesKey("personal_profile_json")
         val INCOGNITO_MODE = booleanPreferencesKey("incognito_mode")
         val SNIPPET_USER_NAME = stringPreferencesKey("snippet_user_name")
         val SNIPPET_USER_EMAIL = stringPreferencesKey("snippet_user_email")
@@ -343,6 +349,13 @@ class TapwingPreferencesRepository(context: Context) {
             learningEnabled = p[Keys.LEARNING_ENABLED] ?: true,
             perAppLearningEnabled = p[Keys.PER_APP_LEARNING_ENABLED] ?: true,
             inlineAutofillEnabled = p[Keys.INLINE_AUTOFILL_ENABLED] ?: true,
+            smartFillEnabled = p[Keys.SMART_FILL_ENABLED] ?: true,
+            smartProfileAutoLearn = p[Keys.SMART_PROFILE_AUTO_LEARN] ?: true,
+            personalProfile = PersonalProfile.fromJson(
+                rawJson = p[Keys.PERSONAL_PROFILE_JSON],
+                legacyUserName = p[Keys.SNIPPET_USER_NAME] ?: "",
+                legacyUserEmail = p[Keys.SNIPPET_USER_EMAIL] ?: ""
+            ),
             incognitoMode = p[Keys.INCOGNITO_MODE] ?: false,
             snippetUserName = p[Keys.SNIPPET_USER_NAME] ?: "",
             snippetUserEmail = p[Keys.SNIPPET_USER_EMAIL] ?: "",
@@ -448,9 +461,12 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.LEARNING_ENABLED] = next.learningEnabled
         mutable[Keys.PER_APP_LEARNING_ENABLED] = next.perAppLearningEnabled
         mutable[Keys.INLINE_AUTOFILL_ENABLED] = next.inlineAutofillEnabled
+        mutable[Keys.SMART_FILL_ENABLED] = next.smartFillEnabled
+        mutable[Keys.SMART_PROFILE_AUTO_LEARN] = next.smartProfileAutoLearn
+        mutable[Keys.PERSONAL_PROFILE_JSON] = next.personalProfile.toJson()
         mutable[Keys.INCOGNITO_MODE] = next.incognitoMode
-        mutable[Keys.SNIPPET_USER_NAME] = next.snippetUserName
-        mutable[Keys.SNIPPET_USER_EMAIL] = next.snippetUserEmail
+        mutable[Keys.SNIPPET_USER_NAME] = next.personalProfile.fullName.ifBlank { next.snippetUserName }
+        mutable[Keys.SNIPPET_USER_EMAIL] = next.personalProfile.primaryEmail.ifBlank { next.snippetUserEmail }
         mutable[Keys.INLINE_MATH_ENABLED] = next.inlineMathEnabled
         mutable[Keys.SWIPE_BACKSPACE_WORD] = next.swipeBackspaceDeleteWord
         mutable[Keys.QUICK_SEARCH_ENGINE] = next.quickSearchEngine.name

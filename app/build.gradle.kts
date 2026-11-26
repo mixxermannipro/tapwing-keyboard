@@ -40,13 +40,18 @@ android {
         applicationId = "com.tapwing.keyboard"
         minSdk = 29
         targetSdk = 36
-        versionCode = 15
-        versionName = "2.7.0"
+        versionCode = 16
+        versionName = "2.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
+    }
+
+    androidResources {
+        // Keep only Tapwing's 9 supported keyboard/UI locales and strip 75+ unused AndroidX/GMS locales
+        localeFilters += listOf("en", "de", "es", "fr", "it", "nl", "pl", "pt", "tr")
     }
 
     signingConfigs {
@@ -97,7 +102,16 @@ android {
 
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "/META-INF/*.version",
+                "/META-INF/proguard/**",
+                "/META-INF/maven/**",
+                "/META-INF/LICENSE*",
+                "/META-INF/NOTICE*",
+                "DebugProbesKt.bin",
+                "kotlin-tooling-metadata.json"
+            )
         }
     }
 
@@ -122,16 +136,16 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.02.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
     implementation("androidx.datastore:datastore-preferences:1.1.3")
     implementation("androidx.autofill:autofill:1.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
-    implementation("com.google.android.material:material:1.12.0")
 
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Play Services dynamically delivered ML Kit OCR (~260 KB vs ~13.5 MB bundled native library)
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
     implementation("androidx.camera:camera-core:1.4.1")
     implementation("androidx.camera:camera-camera2:1.4.1")
     implementation("androidx.camera:camera-lifecycle:1.4.1")

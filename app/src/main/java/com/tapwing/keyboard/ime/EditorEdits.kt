@@ -8,7 +8,13 @@ import com.tapwing.keyboard.undo.UndoAnchor
 private const val ANCHOR_WINDOW = 24
 private const val WRITING_LIMIT = 8_000
 
-internal fun InputConnection.readUndoAnchor(): UndoAnchor? {
+internal fun InputConnection.safeGetTextBeforeCursor(n: Int): String =
+    runCatching { getTextBeforeCursor(n, 0)?.toString().orEmpty() }.getOrDefault("")
+
+internal fun InputConnection.safeGetSelectedText(): String =
+    runCatching { getSelectedText(0)?.toString().orEmpty() }.getOrDefault("")
+
+internal fun InputConnection.readUndoAnchor(): UndoAnchor? = runCatching {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         getSurroundingText(ANCHOR_WINDOW, ANCHOR_WINDOW, 0)?.let { surrounding ->
             val start = surrounding.selectionStart
@@ -24,8 +30,8 @@ internal fun InputConnection.readUndoAnchor(): UndoAnchor? {
     }
     val before = getTextBeforeCursor(ANCHOR_WINDOW, 0)?.toString() ?: return null
     val after = getTextAfterCursor(ANCHOR_WINDOW, 0)?.toString() ?: return null
-    return UndoAnchor(before, getSelectedText(0)?.toString().orEmpty(), after, null)
-}
+    UndoAnchor(before, getSelectedText(0)?.toString().orEmpty(), after, null)
+}.getOrNull()
 
 /** A write target is specific to the original selection or the original complete field. */
 internal data class WritingTarget(
@@ -40,7 +46,7 @@ internal data class WritingTarget(
     }
 }
 
-internal fun InputConnection.readWritingTarget(useSelection: Boolean = true): WritingTarget? {
+internal fun InputConnection.readWritingTarget(useSelection: Boolean = true): WritingTarget? = runCatching {
     val anchor = readUndoAnchor() ?: return null
     if (anchor.selected.isNotEmpty()) {
         return if (useSelection && anchor.selected.length <= WRITING_LIMIT) {
@@ -55,15 +61,15 @@ internal fun InputConnection.readWritingTarget(useSelection: Boolean = true): Wr
     if (extracted != null && (extracted.startOffset != 0 || extracted.text?.toString() != before + after)) {
         return null
     }
-    return WritingTarget(before + after, before.length, after.length, anchor)
-}
+    WritingTarget(before + after, before.length, after.length, anchor)
+}.getOrNull()
 
 internal fun InputConnection.replaceEditorText(
     beforeLength: Int,
     afterLength: Int,
     original: String,
     replacement: String
-): Boolean {
+): Boolean = runCatching {
     beginBatchEdit()
     try {
         if ((beforeLength > 0 || afterLength > 0) && !deleteSurroundingText(beforeLength, afterLength)) return false
@@ -72,6 +78,6 @@ internal fun InputConnection.replaceEditorText(
         if (beforeLength > 0 || afterLength > 0) commitText(original, 1)
         return false
     } finally {
-        endBatchEdit()
+        runCatching { endBatchEdit() }
     }
-}
+}.getOrDefault(false)
