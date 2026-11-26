@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload Kover Coverage Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kover-coverage-report
           path: app/build/reports/kover/report.xml
@@ -47,7 +47,7 @@ jobs:
 
       - name: Upload Android Lint Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-lint-report
           path: app/build/reports/lint-results-debug.html
@@ -123,7 +123,7 @@ jobs:
           PY
 
       - name: Upload Unsigned Release AAB Size Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-aab-unsigned
           path: app/build/outputs/bundle/release/app-release.aab
