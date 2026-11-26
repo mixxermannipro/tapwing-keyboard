@@ -1,0 +1,1232 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.13.0" type="baseline" client="gradle" dependencies="false" name="AGP (8.13.0)" variant="all" version="8.13.0">
+
+    <issue
+        id="UnknownIssueId"
+        message="Unknown issue id &quot;ExportedActivity&quot;"
+        errorLine1="            &quot;ExportedActivity&quot;,"
+        errorLine2="             ~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="131"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="UnknownIssueId"
+        message="Unknown issue id &quot;CleartextTrafficPermitted&quot;"
+        errorLine1="            &quot;CleartextTrafficPermitted&quot;"
+        errorLine2="             ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="137"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="OldTargetApi"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the `android.os.Build.VERSION_CODES` javadoc for details."
+        errorLine1="        targetSdk = 36"
+        errorLine2="        ~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="43"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `enableOnBackInvokedCallback` is only used in API level 33 and higher (current min is 29)"
+        errorLine1="        android:enableOnBackInvokedCallback=&quot;true&quot;"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="34"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `supportsInlineSuggestions` is only used in API level 30 and higher (current min is 29)"
+        errorLine1="    android:supportsInlineSuggestions=&quot;true&quot;>"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/method.xml"
+            line="5"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="AppBundleLocaleChanges"
+        message="Found dynamic locale changes, but did not find corresponding Play Core library calls for downloading languages and splitting by language is not disabled in the `bundle` configuration"
+        errorLine1="        config.setLocale(locale)"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/KeyboardLocales.kt"
+            line="196"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="NonObservableLocale"
+        message="Reading locale in a non-observable way in a composable function"
+        errorLine1="                        Locale.getDefault().language == &quot;de&quot;,"
+        errorLine2="                        ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/ocr/ScanTextActivity.kt"
+            line="95"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="NonObservableLocale"
+        message="Reading locale in a non-observable way in a composable function"
+        errorLine1="        KeyboardLocales.baseLang(java.util.Locale.getDefault().language)"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/SettingsScreens.kt"
+            line="241"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="RedundantLabel"
+        message="Redundant label can be removed"
+        errorLine1="            android:label=&quot;@string/app_name&quot;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="64"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of Gradle than 8.14.3 is available: 8.14.8"
+        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-8.14.3-bin.zip"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/wrapper/gradle-wrapper.properties"
+            line="3"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.13.0 is available: 9.5.3. (There is also a newer version of 8.13.𝑥 available, if upgrading to 9.5.3 is difficult: 8.13.2)"
+        errorLine1="agp = &quot;8.13.0&quot;"
+        errorLine2="      ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="2"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.17.0 is available: 1.19.1"
+        errorLine1="coreKtx = &quot;1.17.0&quot;"
+        errorLine2="          ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="6"
+            column="11"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.9.4 is available: 2.11.1"
+        errorLine1="lifecycle = &quot;2.9.4&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="7"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-ktx than 2.9.4 is available: 2.11.1"
+        errorLine1="lifecycle = &quot;2.9.4&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="7"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.11.0 is available: 1.13.0"
+        errorLine1="activityCompose = &quot;1.11.0&quot;"
+        errorLine2="                  ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="8"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.savedstate:savedstate-ktx than 1.3.3 is available: 1.5.0"
+        errorLine1="savedstateKtx = &quot;1.3.3&quot;"
+        errorLine2="                ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="9"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose:compose-bom than 2026.05.01 is available: 2026.11.01"
+        errorLine1="composeBom = &quot;2026.05.01&quot;"
+        errorLine2="             ~~~~~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="10"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.datastore:datastore-preferences than 1.2.1 is available: 1.3.0"
+        errorLine1="datastorePreferences = &quot;1.2.1&quot;"
+        errorLine2="                       ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="11"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of com.google.android.gms:play-services-mlkit-text-recognition than 19.0.1 is available: 19.0.2"
+        errorLine1="mlkitTextRecognition = &quot;19.0.1&quot;"
+        errorLine2="                       ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="14"
+            column="24"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-camera2 than 1.5.3 is available: 1.7.0"
+        errorLine1="camera = &quot;1.5.3&quot;"
+        errorLine2="         ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="15"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-core than 1.5.3 is available: 1.7.0"
+        errorLine1="camera = &quot;1.5.3&quot;"
+        errorLine2="         ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="15"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-lifecycle than 1.5.3 is available: 1.7.0"
+        errorLine1="camera = &quot;1.5.3&quot;"
+        errorLine2="         ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="15"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.camera:camera-view than 1.5.3 is available: 1.7.0"
+        errorLine1="camera = &quot;1.5.3&quot;"
+        errorLine2="         ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="15"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlin.android than 2.2.20 is available: 2.4.21"
+        errorLine1="kotlin = &quot;2.2.20&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="3"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlin.plugin.compose than 2.2.20 is available: 2.4.21"
+        errorLine1="kotlin = &quot;2.2.20&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="3"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-android than 1.10.2 is available: 1.11.0"
+        errorLine1="coroutines = &quot;1.10.2&quot;"
+        errorLine2="             ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="13"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-guava than 1.10.2 is available: 1.11.0"
+        errorLine1="coroutines = &quot;1.10.2&quot;"
+        errorLine2="             ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="13"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlinx:kotlinx-coroutines-test than 1.10.2 is available: 1.11.0"
+        errorLine1="coroutines = &quot;1.10.2&quot;"
+        errorLine2="             ~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="13"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of com.squareup.okhttp3:okhttp than 5.3.2 is available: 5.5.1"
+        errorLine1="okhttp = &quot;5.3.2&quot;"
+        errorLine2="         ~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="19"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.json:json than 20240303 is available: 20260814"
+        errorLine1="json = &quot;20240303&quot;"
+        errorLine2="       ~~~~~~~~~~">
+        <location
+            file="$HOME/Documents/Codex/Tapwing/gradle/libs.versions.toml"
+            line="23"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="ConfigurationScreenWidthHeight"
+        message="Using Configuration.screenWidthDp instead of LocalWindowInfo.current.containerSize"
+        errorLine1="    val screenWidthDp = LocalConfiguration.current.screenWidthDp"
+        errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/ui/keyboard/KeyboardGrid.kt"
+            line="194"
+            column="25"/>
+    </issue>
+
+    <issue
+        id="LocalContextGetResourceValueCall"
+        message="Querying resource values using LocalContext.current"
+        errorLine1="        else SettingsCatalog.search(search) { r -> context.getString(r.label()) }"
+        errorLine2="                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/SettingsScreens.kt"
+            line="622"
+            column="52"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier.fillMaxWidth()"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/AppleSettingsComponents.kt"
+            line="359"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Optional Modifier parameter should have a default value of `Modifier`"
+        errorLine1="    modifier: Modifier = Modifier.fillMaxWidth()"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/AppleSettingsComponents.kt"
+            line="359"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;cd_voice_pause&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;cd_voice_pause&quot;>Pause voice typing&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="26"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;cd_voice_resume&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;cd_voice_resume&quot;>Resume voice typing&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="27"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;voice_paused&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;voice_paused&quot;>Paused — tap ▶ to continue&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="39"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;action_bullet_list&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;action_bullet_list&quot;>Bullet list&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="64"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_languages_short&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_languages_short&quot;>Languages&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="156"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_preferences&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_preferences&quot;>Preferences&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="157"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_theme_short&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_theme_short&quot;>Theme&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="158"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_text_correction&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_text_correction&quot;>Text correction&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="159"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_glide_typing&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_glide_typing&quot;>Glide typing&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="160"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_voice_typing&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_voice_typing&quot;>Voice typing&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="161"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_dictionary_short&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_dictionary_short&quot;>Dictionary&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="162"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_clipboard_short&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_clipboard_short&quot;>Clipboard&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="163"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;nav_emojis_short&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;nav_emojis_short&quot;>Emojis&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="164"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;settings_section_basics&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;settings_section_basics&quot;>Keyboard&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="165"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;settings_section_typing&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;settings_section_typing&quot;>Typing &amp;amp; input&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="166"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;settings_section_content&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;settings_section_content&quot;>Content &amp;amp; toolbar&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="167"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;settings_section_ai&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;settings_section_ai&quot;>AI &amp;amp; smart services&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="168"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;settings_section_system&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;settings_section_system&quot;>Insights &amp;amp; system&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="169"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;cd_close&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;cd_close&quot;>Close&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="170"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;cd_pin&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;cd_pin&quot;>Pin&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="171"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;cd_unpin&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;cd_unpin&quot;>Unpin&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="172"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="MissingTranslation"
+        message="&quot;cd_delete&quot; is not translated in &quot;pt&quot; (Portuguese), &quot;it&quot; (Italian), &quot;fr&quot; (French), &quot;pl&quot; (Polish), &quot;es&quot; (Spanish), &quot;nl&quot; (Dutch), &quot;tr&quot; (Turkish)"
+        errorLine1="    &lt;string name=&quot;cd_delete&quot;>Delete&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="173"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="ChromeOsAbiSupport"
+        message="Missing x86_64 ABI support for ChromeOS"
+        errorLine1="                abiFilters += listOf(&quot;arm64-v8a&quot;)"
+        errorLine2="                              ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="82"
+            column="31"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:allowBackup` is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute `android:dataExtractionRules` specifying an `@xml` resource which configures cloud backups and device transfers on Android 12 and higher."
+        errorLine1="        android:allowBackup=&quot;false&quot;"
+        errorLine2="                             ~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="33"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="Unnecessary; `Build.VERSION.SDK_INT &lt; Build.VERSION_CODES.R` is never true here"
+        errorLine1="        if (!currentPrefs.inlineAutofillEnabled || Build.VERSION.SDK_INT &lt; Build.VERSION_CODES.R) {"
+        errorLine2="                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/ime/TapwingInputMethodService.kt"
+            line="862"
+            column="52"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 29. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="AutoboxingStateCreation"
+        message="Prefer `mutableIntStateOf` instead of `mutableStateOf`"
+        errorLine1="    var filterMode by remember { mutableStateOf(0) }"
+        errorLine2="                                 ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/ui/keyboard/ClipboardPanel.kt"
+            line="80"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.cd_writing_tools` appears to be unused"
+        errorLine1="    &lt;string name=&quot;cd_writing_tools&quot;>Open AI Writing Tools&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="19"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.cd_scan_text` appears to be unused"
+        errorLine1="    &lt;string name=&quot;cd_scan_text&quot;>Scan text with camera&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="21"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.cd_settings` appears to be unused"
+        errorLine1="    &lt;string name=&quot;cd_settings&quot;>Open Tapwing settings&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="22"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.cd_shift` appears to be unused"
+        errorLine1="    &lt;string name=&quot;cd_shift&quot;>Shift&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="30"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.cd_emoji` appears to be unused"
+        errorLine1="    &lt;string name=&quot;cd_emoji&quot;>Emoji panel&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="31"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.voice_listening` appears to be unused"
+        errorLine1="    &lt;string name=&quot;voice_listening&quot;>Listening… tap again to stop&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="38"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.clipboard_paste_image` appears to be unused"
+        errorLine1="    &lt;string name=&quot;clipboard_paste_image&quot;>Paste image&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="79"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.clipboard_paste_ocr` appears to be unused"
+        errorLine1="    &lt;string name=&quot;clipboard_paste_ocr&quot;>OCR text&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="80"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_subtitle` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_subtitle&quot;>Privacy-first AI keyboard · v2.8&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="85"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.nav_appearance` appears to be unused"
+        errorLine1="    &lt;string name=&quot;nav_appearance&quot;>Theme &amp;amp; Size&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="88"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.nav_languages` appears to be unused"
+        errorLine1="    &lt;string name=&quot;nav_languages&quot;>Languages &amp;amp; Countries&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="90"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.nav_dictionary` appears to be unused"
+        errorLine1="    &lt;string name=&quot;nav_dictionary&quot;>Dictionary &amp;amp; Learning&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="91"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.nav_corrections` appears to be unused"
+        errorLine1="    &lt;string name=&quot;nav_corrections&quot;>Typing &amp;amp; Autocorrect&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="92"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.nav_voice` appears to be unused"
+        errorLine1="    &lt;string name=&quot;nav_voice&quot;>Dictation&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="93"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.nav_clipboard` appears to be unused"
+        errorLine1="    &lt;string name=&quot;nav_clipboard&quot;>Clipboard &amp;amp; Screenshots&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="96"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.nav_emoji` appears to be unused"
+        errorLine1="    &lt;string name=&quot;nav_emoji&quot;>Emoji&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="97"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.section_setup` appears to be unused"
+        errorLine1="    &lt;string name=&quot;section_setup&quot;>Setup&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="101"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.section_keyboard` appears to be unused"
+        errorLine1="    &lt;string name=&quot;section_keyboard&quot;>Keyboard&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="102"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.section_smart_ai` appears to be unused"
+        errorLine1="    &lt;string name=&quot;section_smart_ai&quot;>Intelligence &amp;amp; Voice&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="103"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.section_privacy` appears to be unused"
+        errorLine1="    &lt;string name=&quot;section_privacy&quot;>Clipboard &amp;amp; System&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="104"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.setup_ready` appears to be unused"
+        errorLine1="    &lt;string name=&quot;setup_ready&quot;>Tapwing active ✓&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="107"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_group_typing` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_group_typing&quot;>Typing&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="115"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_group_tools` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_group_tools&quot;>Tools&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="116"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_group_keyboard` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_group_keyboard&quot;>Keyboard and app&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="117"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_recommendation` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_recommendation&quot;>For you&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="122"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_tip_learning` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_tip_learning&quot;>Teach Tapwing the words you use. Learning stays on this device.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="123"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_tip_autofill` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_tip_autofill&quot;>Show logins from your password manager above the keys.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="124"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_tip_voice` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_tip_voice&quot;>Download Sherpa-ONNX or Whisper to dictate fast and privately without internet.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="125"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_tip_search` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_tip_search&quot;>Choose where web searches from Tapwing open.&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="126"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_tab_start` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_tab_start&quot;>Home&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="152"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_tab_writing` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_tab_writing&quot;>Writing&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="153"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_tab_keyboard` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_tab_keyboard&quot;>Keyboard&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="154"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.settings_tab_tools` appears to be unused"
+        errorLine1="    &lt;string name=&quot;settings_tab_tools&quot;>Tools&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="155"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="        if (!hasEnoughStorageForDownload(modelsRoot.usableSpace, spec)) {"
+        errorLine2="                                                    ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/ai/LocalModelManager.kt"
+            line="202"
+            column="53"/>
+    </issue>
+
+    <issue
+        id="UseOfNonLambdaOffsetOverload"
+        message="State backed values should use the lambda overload of Modifier.offset"
+        errorLine1="                .offset(x = thumbOffset)"
+        errorLine2="                 ~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/AppleSettingsComponents.kt"
+            line="146"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="MonochromeLauncherIcon"
+        message="The application adaptive icon is missing a monochrome tag"
+        errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
+        errorLine2="^">
+        <location
+            file="src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="MonochromeLauncherIcon"
+        message="The application adaptive roundIcon is missing a monochrome tag"
+        errorLine1="&lt;adaptive-icon xmlns:android=&quot;http://schemas.android.com/apk/res/android&quot;>"
+        errorLine2="^">
+        <location
+            file="src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml"
+            line="2"
+            column="1"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            val editor = prefs.edit()"
+        errorLine2="                         ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/PersonalProfileStorage.kt"
+            line="135"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            prefs.edit().clear().apply()"
+        errorLine2="            ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/PersonalProfileStorage.kt"
+            line="144"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        val intent = candidate.searchIntent(&quot;Tapwing&quot;, Uri.parse(urlPrefix + &quot;Tapwing&quot;))"
+        errorLine2="                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/QuickSearch.kt"
+            line="36"
+            column="56"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="    val web = browserIntent(Uri.parse(&quot;https://example.com&quot;))"
+        errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/QuickSearch.kt"
+            line="58"
+            column="29"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="        return Bitmap.createScaledBitmap("
+        errorLine2="               ^">
+        <location
+            file="src/main/java/com/tapwing/keyboard/clipboard/ScreenshotMonitor.kt"
+            line="135"
+            column="16"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            val editor = prefs.edit().remove(cipherField).remove(ivField)"
+        errorLine2="                         ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/SecureKeyStorage.kt"
+            line="30"
+            column="26"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/SecureKeyStorage.kt"
+            line="39"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            prefs.edit().remove(KEY_CIPHER).remove(KEY_IV).remove(DICTATION_PROVIDER).apply()"
+        errorLine2="            ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/SecureKeyStorage.kt"
+            line="87"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/data/SecureKeyStorage.kt"
+            line="92"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                            { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(signupUrl))) } }"
+        errorLine2="                                                                                             ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/SettingsApiKeysScreen.kt"
+            line="147"
+            column="94"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                        onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },"
+        errorLine2="                                                                                                            ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/SettingsDictationScreen.kt"
+            line="460"
+            column="109"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                                    onOpenUrl = { url -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },"
+        errorLine2="                                                                                                                        ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/SettingsDictationScreen.kt"
+            line="494"
+            column="121"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                            Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE, Uri.parse(&quot;package:${context.packageName}&quot;)),"
+        errorLine2="                                                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/SettingsProfileScreen.kt"
+            line="619"
+            column="82"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="    if (runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.isFailure) {"
+        errorLine2="                                                               ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/tapwing/keyboard/settings/SettingsSharedComponents.kt"
+            line="82"
+            column="64"/>
+    </issue>
+
+</issues>

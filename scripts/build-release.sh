@@ -4,9 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-# Keep an explicitly configured JDK and otherwise use the standard JDK 21 installation.
+# Keep an explicitly configured JDK and otherwise fall back across installed JDK 21 / 17 toolchains.
 if [ -z "${JAVA_HOME:-}" ] && [ -d "/usr/lib/jvm/java-21-openjdk" ]; then
     export JAVA_HOME="/usr/lib/jvm/java-21-openjdk"
+elif [ -z "${JAVA_HOME:-}" ] && [ -d "/usr/lib/jvm/java-17-openjdk" ]; then
+    export JAVA_HOME="/usr/lib/jvm/java-17-openjdk"
+elif [ -z "${JAVA_HOME:-}" ] && [ -d "$HOME/.gradle/jdks" ]; then
+    ADOPTIUM_JDK="$(find "$HOME/.gradle/jdks" -maxdepth 1 -type d -name '*17*' | sort -V | tail -n 1 || true)"
+    if [ -n "$ADOPTIUM_JDK" ]; then
+        export JAVA_HOME="$ADOPTIUM_JDK"
+    fi
 fi
 if [ -n "${JAVA_HOME:-}" ]; then
     export PATH="$JAVA_HOME/bin:$PATH"
@@ -19,7 +26,8 @@ fi
 VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | cut -d'"' -f2)
 VERSION_NAME="${VERSION_NAME:-1.0.0}"
 
-echo "=== 1. Running Tapwing Unit Tests ==="
+echo "=== 1. Running Tapwing Unit Tests & Docs Version Check ==="
+./scripts/check-docs-version.sh
 ./gradlew testDebugUnitTest --no-daemon
 
 echo "=== 2. Building Signed Release APK & AAB ==="
@@ -44,23 +52,29 @@ if [ -n "${ANDROID_HOME:-}" ]; then
     APKSIGNER=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -name apksigner | sort -V | tail -n 1 || true)
 fi
 
-echo "=== 3. Verifying Release Signatures & Play Store 16 KB Alignment ==="
+echo "=== 3. Verifying Release Signatures, Play Store 16 KB Alignment & AAB ABI Sizes ==="
 if [ -n "$APKSIGNER" ]; then
     "$APKSIGNER" verify --verbose --print-certs "$APK_DST"
 fi
 jarsigner -verify -verbose -certs "$AAB_DST" | tail -n 20
 
 python3 - "$AAB_DST" <<'PY'
-import struct, sys, zipfile
+import os, struct, sys, zipfile
+from collections import defaultdict
 
 aab = sys.argv[1]
+total_bytes = os.path.getsize(aab)
+abi_sizes = defaultdict(int)
 bad = []
 checked = 0
 with zipfile.ZipFile(aab) as zf:
-    for name in zf.namelist():
-        if not name.endswith(".so"):
+    for info in zf.infolist():
+        if not info.filename.endswith(".so"):
             continue
-        data = zf.read(name)
+        parts = info.filename.split("/")
+        abi = parts[-2] if len(parts) >= 2 else "unknown"
+        abi_sizes[abi] += info.file_size
+        data = zf.read(info.filename)
         if len(data) < 64 or data[:4] != b"\x7fELF":
             continue
         if data[4] != 2:  # Only 64-bit ELF requires 16 KB alignment on Google Play
@@ -75,8 +89,11 @@ with zipfile.ZipFile(aab) as zf:
             if p_type == 1:
                 aligns.append(p_align)
         if not aligns or any(a < 16384 for a in aligns):
-            bad.append((name, aligns))
+            bad.append((info.filename, aligns))
 
+print(f"AAB total size: {total_bytes / (1024 * 1024):.2f} MiB ({total_bytes} bytes)")
+for abi, sz in sorted(abi_sizes.items()):
+    print(f"  ABI {abi} uncompressed native libs: {sz / (1024 * 1024):.2f} MiB")
 print(f"Verified {checked} 64-bit .so libraries in {aab}: 16KB_ALIGN_OK={len(bad) == 0}")
 if bad:
     for name, aligns in bad:
