@@ -64,7 +64,7 @@ val LocalTapwingKeyboardColors = staticCompositionLocalOf {
     )
 }
 
-private val PixelSlateLightScheme = lightColorScheme(
+private val SlateLightScheme = lightColorScheme(
     primary = Color(0xFF3B5998),
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFD9E3F8),
@@ -79,7 +79,7 @@ private val PixelSlateLightScheme = lightColorScheme(
     onSurfaceVariant = Color(0xFF555E6F)
 )
 
-private val PixelSlateDarkScheme = darkColorScheme(
+private val SlateDarkScheme = darkColorScheme(
     primary = Color(0xFFA9C0EE),
     onPrimary = Color(0xFF162747),
     primaryContainer = Color(0xFF38445C),
@@ -158,7 +158,7 @@ private val LavenderDarkScheme = darkColorScheme(
     onSurfaceVariant = Color(0xFFCAC4D0)
 )
 
-private val PixelBlueLightScheme = lightColorScheme(
+private val CobaltLightScheme = lightColorScheme(
     primary = Color(0xFF1A73E8),
     onPrimary = Color(0xFFFFFFFF),
     primaryContainer = Color(0xFFD3E3FD),
@@ -173,7 +173,7 @@ private val PixelBlueLightScheme = lightColorScheme(
     onSurfaceVariant = Color(0xFF444F5E)
 )
 
-private val PixelBlueDarkScheme = darkColorScheme(
+private val CobaltDarkScheme = darkColorScheme(
     primary = Color(0xFF8AB4F8),
     onPrimary = Color(0xFF002D6B),
     primaryContainer = Color(0xFF174EA6),
@@ -203,7 +203,7 @@ private val AmoledDarkScheme = darkColorScheme(
 
 @Composable
 fun TapwingTheme(
-    themeMode: ThemeMode = ThemeMode.PIXEL_SLATE,
+    themeMode: ThemeMode = ThemeMode.SLATE,
     darkModePreference: DarkModePreference = DarkModePreference.SYSTEM,
     appleModeEnabled: Boolean = false,
     highContrast: Boolean = false,
@@ -225,12 +225,12 @@ fun TapwingTheme(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     if (useDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
                 } else {
-                    if (useDark) PixelSlateDarkScheme else PixelSlateLightScheme
+                    if (useDark) SlateDarkScheme else SlateLightScheme
                 }
             }
-            ThemeMode.PIXEL_SLATE -> if (useDark) PixelSlateDarkScheme else PixelSlateLightScheme
+            ThemeMode.SLATE -> if (useDark) SlateDarkScheme else SlateLightScheme
             ThemeMode.EXPRESSIVE_LAVENDER -> if (useDark) LavenderDarkScheme else LavenderLightScheme
-            ThemeMode.PIXEL_BLUE -> if (useDark) PixelBlueDarkScheme else PixelBlueLightScheme
+            ThemeMode.COBALT -> if (useDark) CobaltDarkScheme else CobaltLightScheme
             ThemeMode.AMOLED_DARK -> AmoledDarkScheme
         }
     }
@@ -341,7 +341,7 @@ private fun buildKeyboardColors(
     }
 
     return when {
-        themeMode == ThemeMode.PIXEL_SLATE && useDark -> TapwingKeyboardColors(
+        themeMode == ThemeMode.SLATE && useDark -> TapwingKeyboardColors(
             isDark = true,
             appleLiquidGlass = false,
             boardBackground = Color(0xFF131314),
@@ -362,7 +362,7 @@ private fun buildKeyboardColors(
             cardSurface = Color(0xFF1E1F22),
             cardAltSurface = Color(0xFF2B2C2F)
         )
-        themeMode == ThemeMode.PIXEL_SLATE -> TapwingKeyboardColors(
+        themeMode == ThemeMode.SLATE -> TapwingKeyboardColors(
             isDark = false,
             appleLiquidGlass = false,
             boardBackground = Color(0xFFEEF0F4),
@@ -404,7 +404,7 @@ private fun buildKeyboardColors(
             cardSurface = Color(0xFF111116),
             cardAltSurface = Color(0xFF1B1923)
         )
-        themeMode == ThemeMode.PIXEL_BLUE && useDark -> TapwingKeyboardColors(
+        themeMode == ThemeMode.COBALT && useDark -> TapwingKeyboardColors(
             isDark = true,
             appleLiquidGlass = false,
             boardBackground = Color(0xFF11151C),
@@ -425,7 +425,7 @@ private fun buildKeyboardColors(
             cardSurface = Color(0xFF171D26),
             cardAltSurface = Color(0xFF202A38)
         )
-        themeMode == ThemeMode.PIXEL_BLUE -> TapwingKeyboardColors(
+        themeMode == ThemeMode.COBALT -> TapwingKeyboardColors(
             isDark = false,
             appleLiquidGlass = false,
             boardBackground = Color(0xFFEDF2FA),

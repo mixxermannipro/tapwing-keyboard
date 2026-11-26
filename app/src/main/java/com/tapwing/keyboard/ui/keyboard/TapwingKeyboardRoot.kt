@@ -89,6 +89,7 @@ fun TapwingKeyboardRoot(
     writingOutput: WritingToolsOutput?,
     writingLoading: Boolean,
     writingAction: WritingAction?,
+    activeCloudLabel: String? = null,
     clips: List<ClipboardClip>,
     textEditSelectionActive: Boolean,
     quickSearchInitial: String,
@@ -249,6 +250,7 @@ fun TapwingKeyboardRoot(
                                     output = writingOutput,
                                     isLoading = writingLoading,
                                     selectedAction = writingAction,
+                                    activeCloudLabel = activeCloudLabel,
                                     onBack = onCloseSubPanel,
                                     onRunAction = onRunWritingAction,
                                     onApplyResult = onApplyWritingResult,
@@ -362,6 +364,7 @@ fun TapwingKeyboardRoot(
                                         suggestions = suggestions,
                                         proactiveUndo = proactiveUndo,
                                         recentScreenshot = recentScreenshot,
+                                        activeCloudLabel = activeCloudLabel,
 
                                         clipboardPreview = clipboardPreview,
                                         clipboardTimestamp = clipboardTimestamp,

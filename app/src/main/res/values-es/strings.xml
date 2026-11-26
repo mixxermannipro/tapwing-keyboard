@@ -81,6 +81,8 @@
     <string name="nav_clipboard">Portapapeles y capturas</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Acerca de Tapwing</string>
+    <string name="nav_privacy">Privacidad y consentimiento en la nube</string>
+    <string name="nav_licenses">Licencias de código abierto y modelos</string>
     <string name="section_setup">Configuración</string>
     <string name="section_keyboard">Teclado</string>
     <string name="section_smart_ai">IA y voz</string>

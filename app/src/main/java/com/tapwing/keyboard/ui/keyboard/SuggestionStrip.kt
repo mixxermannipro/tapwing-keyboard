@@ -49,6 +49,7 @@ import androidx.compose.material.icons.rounded.Business
 import androidx.compose.material.icons.rounded.Cake
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.Email
@@ -130,6 +131,7 @@ fun SuggestionStrip(
     suggestions: List<SuggestionChip>,
     proactiveUndo: UndoSnapshot?,
     recentScreenshot: RecentScreenshot?,
+    activeCloudLabel: String? = null,
 
     clipboardPreview: String?,
     clipboardTimestamp: Long?,
@@ -165,18 +167,19 @@ fun SuggestionStrip(
 
     val voiceActive = voiceState.isListening || voiceState.isProcessing
     val showAutofill = inlineAutofillViews.isNotEmpty()
+    val showCloudStatus = !activeCloudLabel.isNullOrBlank() && !voiceActive && !showAutofill
     val showVoiceError = !showAutofill && !voiceActive && !voiceState.errorMessage.isNullOrBlank()
     val hasSmartFill = suggestions.any { it.isSmartFill }
     val showNextWords = suggestions.any { it.isNextWord }
     val undoAvailable = proactiveUndo != null && prefs.proactiveUndo
-    val showUndo = !showVoiceError && !showAutofill && undoAvailable && !showNextWords && !hasSmartFill
-    val showClipboard = !showVoiceError && !showAutofill && !undoAvailable && !hasSmartFill && !clipboardPreview.isNullOrBlank()
-    val showShot = !showClipboard && !showVoiceError && !undoAvailable && !showAutofill && !hasSmartFill &&
+    val showUndo = !showCloudStatus && !showVoiceError && !showAutofill && undoAvailable && !showNextWords && !hasSmartFill
+    val showClipboard = !showCloudStatus && !showVoiceError && !showAutofill && !undoAvailable && !hasSmartFill && !clipboardPreview.isNullOrBlank()
+    val showShot = !showCloudStatus && !showClipboard && !showVoiceError && !undoAvailable && !showAutofill && !hasSmartFill &&
         recentScreenshot != null && prefs.screenshotSuggestionChip && !isTyping
-    val showSuggestions = !showVoiceError && !showUndo && !showShot && !showAutofill && suggestions.isNotEmpty() &&
+    val showSuggestions = !showCloudStatus && !showVoiceError && !showUndo && !showShot && !showAutofill && suggestions.isNotEmpty() &&
         (isTyping || showNextWords || hasSmartFill || suggestions.any { it.isMath || it.isShortcut || it.isGrammarFix })
     val middleKind = when {
-        showVoiceError || showUndo || showShot -> 1
+        showCloudStatus || showVoiceError || showUndo || showShot -> 1
         showClipboard -> 4
         showAutofill -> 3
         showSuggestions -> 2
@@ -198,6 +201,7 @@ fun SuggestionStrip(
             VoiceToolbarRow(
                 prefs = prefs,
                 voiceState = voiceState,
+                activeCloudLabel = activeCloudLabel,
                 onFinishVoice = onFinishVoice,
                 onCancelVoice = onCancelVoice,
                 onToggleMinimize = onToggleVoiceMinimize,
@@ -322,6 +326,32 @@ fun SuggestionStrip(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            if (showCloudStatus && !activeCloudLabel.isNullOrBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = kbColors.actionSurface.copy(alpha = 0.28f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.CloudUpload,
+                                            contentDescription = null,
+                                            tint = kbColors.keyText,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = activeCloudLabel,
+                                            color = kbColors.keyText,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
                             if (showVoiceError && !voiceState.errorMessage.isNullOrBlank()) {
                                 Surface(
                                     shape = RoundedCornerShape(18.dp),
@@ -621,7 +651,7 @@ private fun SmartFillKind.icon() = when (this) {
     SmartFillKind.WEBSITE -> Icons.Rounded.Language
 }
 
-/** 1:1 Gboard suggestion strip cells with subtle vertical dividers, Smart-Fill badges, and long-press forget. */
+/** Suggestion strip cells with subtle vertical dividers, Smart-Fill badges, and long-press forget. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SuggestionCells(
@@ -830,6 +860,7 @@ private fun RamblerWaveform(
 private fun VoiceToolbarRow(
     prefs: TapwingPrefs,
     voiceState: VoiceUiState,
+    activeCloudLabel: String? = null,
     onFinishVoice: () -> Unit,
     onCancelVoice: () -> Unit,
     onToggleMinimize: () -> Unit,
@@ -922,19 +953,37 @@ private fun VoiceToolbarRow(
             isListening = voiceState.isListening && !voiceState.isPaused
         )
 
-        if (voiceState.isLocalWhisper || voiceState.isCloud || voiceState.isAndroidOffline || !voiceState.engineLabel.isNullOrBlank()) {
+        if (voiceState.isLocalWhisper || voiceState.isCloud || voiceState.isAndroidOffline || !voiceState.engineLabel.isNullOrBlank() || !activeCloudLabel.isNullOrBlank()) {
+            val resolvedBadge = if (!activeCloudLabel.isNullOrBlank() && voiceState.isCloud) {
+                activeCloudLabel
+            } else {
+                badgeText
+            }
             Surface(
                 shape = RoundedCornerShape(10.dp),
                 color = kbColors.actionSurface.copy(alpha = 0.22f)
             ) {
-                Text(
-                    text = badgeText,
-                    color = kbColors.keyText,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    if (voiceState.isCloud || !activeCloudLabel.isNullOrBlank()) {
+                        Icon(
+                            imageVector = Icons.Rounded.CloudUpload,
+                            contentDescription = null,
+                            tint = kbColors.keyText,
+                            modifier = Modifier.size(11.dp)
+                        )
+                    }
+                    Text(
+                        text = resolvedBadge,
+                        color = kbColors.keyText,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
             }
         }
 

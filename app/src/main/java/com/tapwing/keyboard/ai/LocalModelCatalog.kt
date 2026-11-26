@@ -43,7 +43,13 @@ data class LocalModelSpec(
     val streamingModelType: String = "zipformer2",
     val supportsNoThinkTag: Boolean = false,
     val isFlagshipTier: Boolean = false,
-    val shortEngineLabel: String = "Whisper"
+    val shortEngineLabel: String = "Whisper",
+    val exactSizeBytes: Long = 0L,
+    val sha256: String = "",
+    val licenseName: String = "",
+    val licenseUrl: String = "",
+    val attributionNotice: String = "",
+    val commercialUseNote: String = ""
 ) {
     fun supportsLocale(locale: String): Boolean {
         if (supportedLanguages.isEmpty()) return true
@@ -86,7 +92,13 @@ object LocalModelCatalog {
             highlightTagEn = "Fast · German",
             nativePunctuation = true,
             supportsStreaming = false,
-            shortEngineLabel = "FastConformer"
+            shortEngineLabel = "FastConformer",
+            exactSizeBytes = 108_124_747L,
+            sha256 = "73b3cce9f94a19fc04bc54b55abd576b622e3925a84ddd554a95e5984bc11677",
+            licenseName = "CC-BY-4.0",
+            licenseUrl = "https://creativecommons.org/licenses/by/4.0/",
+            attributionNotice = "NVIDIA NeMo FastConformer / k2-fsa Sherpa-ONNX",
+            commercialUseNote = "Permitted with attribution (CC-BY-4.0)"
         ),
         LocalModelSpec(
             id = "sherpa-nemotron-3.5-streaming-multilingual-int8",
@@ -109,7 +121,13 @@ object LocalModelCatalog {
             supportsStreaming = true,
             supportsMultilingualCodeSwitching = true,
             streamingModelType = "",
-            shortEngineLabel = "Nemotron Live"
+            shortEngineLabel = "Nemotron Live",
+            exactSizeBytes = 475_271_763L,
+            sha256 = "c6bf5e0df765f9d5b43bc9e0536d4b4b3e7d40bdf5ecf13e45f134c51c05ae3a",
+            licenseName = "NVIDIA Open Model License",
+            licenseUrl = "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+            attributionNotice = "NVIDIA Nemotron ASR / k2-fsa Sherpa-ONNX",
+            commercialUseNote = "Permitted under NVIDIA Open Model License"
         ),
         LocalModelSpec(
             id = "sherpa-streaming-zipformer-de",
@@ -131,7 +149,13 @@ object LocalModelCatalog {
             nativePunctuation = false,
             supportsStreaming = true,
             streamingModelType = "zipformer2",
-            shortEngineLabel = "Live"
+            shortEngineLabel = "Live",
+            exactSizeBytes = 57_565_698L,
+            sha256 = "9e27b783c20e67b0d0f13a258c1861fce199917c969d9176a438bee38df64962",
+            licenseName = "CC-BY-SA-4.0 (Kroko Community)",
+            licenseUrl = "https://huggingface.co/Banafo/Kroko-ASR/blob/main/LICENSE",
+            attributionNotice = "Banafo Kroko ASR / k2-fsa Sherpa-ONNX",
+            commercialUseNote = "Community model under CC-BY-SA-4.0 (downloaded directly by user)"
         ),
         LocalModelSpec(
             id = "sherpa-parakeet-ultra-0.6b-int8",
@@ -153,7 +177,13 @@ object LocalModelCatalog {
             nativePunctuation = true,
             supportsStreaming = false,
             supportsMultilingualCodeSwitching = true,
-            shortEngineLabel = "Parakeet"
+            shortEngineLabel = "Parakeet",
+            exactSizeBytes = 487_134_290L,
+            sha256 = "d216b71d7f628b3f2f2a20ee7ead39ff0b075984959eb4bf6ddf8dc8da737c09",
+            licenseName = "CC-BY-4.0",
+            licenseUrl = "https://creativecommons.org/licenses/by/4.0/",
+            attributionNotice = "NVIDIA NeMo Parakeet / k2-fsa Sherpa-ONNX",
+            commercialUseNote = "Permitted with attribution (CC-BY-4.0)"
         ),
         LocalModelSpec(
             id = "sherpa-parakeet-v3-0.6b-int8",
@@ -175,7 +205,13 @@ object LocalModelCatalog {
             nativePunctuation = true,
             supportsStreaming = false,
             supportsMultilingualCodeSwitching = true,
-            shortEngineLabel = "Parakeet v3"
+            shortEngineLabel = "Parakeet v3",
+            exactSizeBytes = 487_211_443L,
+            sha256 = "1495e91b59d7fc53ddca91f3431758ec99f8fa253fdb0e1e851be0f72b14b0f9",
+            licenseName = "CC-BY-4.0",
+            licenseUrl = "https://creativecommons.org/licenses/by/4.0/",
+            attributionNotice = "NVIDIA NeMo Parakeet v3 / k2-fsa Sherpa-ONNX",
+            commercialUseNote = "Permitted with attribution (CC-BY-4.0)"
         ),
         LocalModelSpec(
             id = "sherpa-parakeet-v2-en-int8",
@@ -196,7 +232,13 @@ object LocalModelCatalog {
             highlightTagEn = "Best English accuracy · NVIDIA",
             nativePunctuation = true,
             supportsStreaming = false,
-            shortEngineLabel = "Parakeet v2"
+            shortEngineLabel = "Parakeet v2",
+            exactSizeBytes = 482_440_461L,
+            sha256 = "6fc4426b54aa549a0019b8a75b8dea59164e71790a37ac56a045ad57f915f714",
+            licenseName = "CC-BY-4.0",
+            licenseUrl = "https://creativecommons.org/licenses/by/4.0/",
+            attributionNotice = "NVIDIA NeMo Parakeet v2 / k2-fsa Sherpa-ONNX",
+            commercialUseNote = "Permitted with attribution (CC-BY-4.0)"
         ),
         LocalModelSpec(
             id = "sherpa-canary-180m-flash-int8",
@@ -217,7 +259,13 @@ object LocalModelCatalog {
             highlightTagEn = "Compact · DE/EN/FR/ES",
             nativePunctuation = true,
             supportsStreaming = false,
-            shortEngineLabel = "Canary"
+            shortEngineLabel = "Canary",
+            exactSizeBytes = 153_692_328L,
+            sha256 = "7a38ed8b13f014ad632b09ff8d22e0c6f1359dd046af9235d281dfae841b9ab9",
+            licenseName = "CC-BY-4.0",
+            licenseUrl = "https://creativecommons.org/licenses/by/4.0/",
+            attributionNotice = "NVIDIA Canary 180M Flash / k2-fsa Sherpa-ONNX",
+            commercialUseNote = "Permitted with attribution (CC-BY-4.0)"
         )
     )
 
@@ -229,7 +277,7 @@ object LocalModelCatalog {
             fileName = "ggml-base-q5_1.bin",
             approxSizeMb = 60,
             minRamGb = 3,
-            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
+            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base-q5_1.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
             isRecommended = true,
             summaryDe = "Schnell und kompakt für alle 99 Sprachen & gemischtes Sprechen auf älteren Geräten.",
@@ -240,7 +288,13 @@ object LocalModelCatalog {
             highlightTagEn = "99 languages · 60 MB",
             nativePunctuation = true,
             supportsMultilingualCodeSwitching = true,
-            shortEngineLabel = "Whisper"
+            shortEngineLabel = "Whisper",
+            exactSizeBytes = 59_707_625L,
+            sha256 = "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
+            licenseName = "MIT",
+            licenseUrl = "https://huggingface.co/ggerganov/whisper.cpp",
+            attributionNotice = "OpenAI Whisper / Georgi Gerganov whisper.cpp",
+            commercialUseNote = "Permitted (MIT)"
         ),
         LocalModelSpec(
             id = "whisper-tiny-q5_1",
@@ -249,7 +303,7 @@ object LocalModelCatalog {
             fileName = "ggml-tiny-q5_1.bin",
             approxSizeMb = 32,
             minRamGb = 2,
-            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin",
+            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny-q5_1.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
             summaryDe = "Minimaler Speicherbedarf (~32 MB), schnelle Fallback-Option für alle Sprachen.",
             summaryEn = "Ultra-compact (~32 MB), fast universal fallback.",
@@ -259,7 +313,13 @@ object LocalModelCatalog {
             highlightTagEn = "Ultra-compact · 32 MB",
             nativePunctuation = true,
             supportsMultilingualCodeSwitching = true,
-            shortEngineLabel = "Whisper"
+            shortEngineLabel = "Whisper",
+            exactSizeBytes = 32_152_673L,
+            sha256 = "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7",
+            licenseName = "MIT",
+            licenseUrl = "https://huggingface.co/ggerganov/whisper.cpp",
+            attributionNotice = "OpenAI Whisper / Georgi Gerganov whisper.cpp",
+            commercialUseNote = "Permitted (MIT)"
         ),
         LocalModelSpec(
             id = "whisper-small-q5_1",
@@ -268,7 +328,7 @@ object LocalModelCatalog {
             fileName = "ggml-small-q5_1.bin",
             approxSizeMb = 190,
             minRamGb = 4,
-            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
             summaryDe = "Stark bei Fachbegriffen, Namen & mehrsprachigem Diktat (DE+EN gemischt).",
             summaryEn = "Strong for names, technical terms & bilingual dictation across 99 languages.",
@@ -278,7 +338,13 @@ object LocalModelCatalog {
             highlightTagEn = "99 languages · 190 MB",
             nativePunctuation = true,
             supportsMultilingualCodeSwitching = true,
-            shortEngineLabel = "Whisper"
+            shortEngineLabel = "Whisper",
+            exactSizeBytes = 190_085_487L,
+            sha256 = "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+            licenseName = "MIT",
+            licenseUrl = "https://huggingface.co/ggerganov/whisper.cpp",
+            attributionNotice = "OpenAI Whisper / Georgi Gerganov whisper.cpp",
+            commercialUseNote = "Permitted (MIT)"
         ),
         LocalModelSpec(
             id = "whisper-large-v3-turbo-q5_0",
@@ -287,7 +353,7 @@ object LocalModelCatalog {
             fileName = "ggml-large-v3-turbo-q5_0.bin",
             approxSizeMb = 574,
             minRamGb = 8,
-            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+            downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
             repoUrl = "https://huggingface.co/ggerganov/whisper.cpp",
             summaryDe = "Maximale Whisper-Genauigkeit für 99 Sprachen & Mischsprache (Geräte mit 8+ GB RAM).",
             summaryEn = "Maximum Whisper accuracy across 99 languages & code-switching (8+ GB RAM).",
@@ -297,7 +363,13 @@ object LocalModelCatalog {
             highlightTagEn = "Flagship · 574 MB",
             nativePunctuation = true,
             supportsMultilingualCodeSwitching = true,
-            shortEngineLabel = "Whisper"
+            shortEngineLabel = "Whisper",
+            exactSizeBytes = 574_041_195L,
+            sha256 = "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+            licenseName = "MIT",
+            licenseUrl = "https://huggingface.co/ggerganov/whisper.cpp",
+            attributionNotice = "OpenAI Whisper / Georgi Gerganov whisper.cpp",
+            commercialUseNote = "Permitted (MIT)"
         )
     )
 
@@ -313,7 +385,7 @@ object LocalModelCatalog {
             fileName = "LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
             approxSizeMb = 731,
             minRamGb = 4,
-            downloadUrl = "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
+            downloadUrl = "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/8ed288026e23958ad9dfa92d53ed773a8eee7125/LFM2.5-1.2B-Instruct-Q4_K_M.gguf",
             repoUrl = "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF",
             isRecommended = true,
             summaryDe = "Hybrid-Architektur (Conv+Attention) speziell für Smartphones: extrem schnell (~40–60 tok/s) mit erstklassigem Deutsch & Englisch für Textbereinigung & Schreibhilfe.",
@@ -323,7 +395,13 @@ object LocalModelCatalog {
             highlightTagDe = "Empfohlen · Ultra-Schnell",
             highlightTagEn = "Recommended · Ultra-Fast",
             supportsMultilingualCodeSwitching = true,
-            shortEngineLabel = "LFM2.5 1.2B"
+            shortEngineLabel = "LFM2.5 1.2B",
+            exactSizeBytes = 730_895_168L,
+            sha256 = "b1b3de114215d9507409a662a501a631095a479a419584e8a2ded6304b19b4f5",
+            licenseName = "LFM Open License v1.0",
+            licenseUrl = "https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/blob/8ed288026e23958ad9dfa92d53ed773a8eee7125/LICENSE",
+            attributionNotice = "Liquid AI LFM2.5",
+            commercialUseNote = "Free commercial use under LFM 1.0 terms"
         ),
         LocalModelSpec(
             id = "llm-qwen3.5-0.8b-q4km",
@@ -332,7 +410,7 @@ object LocalModelCatalog {
             fileName = "Qwen3.5-0.8B-Q4_K_M.gguf",
             approxSizeMb = 533,
             minRamGb = 3,
-            downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf",
+            downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/6ab461498e2023f6e3c1baea90a8f0fe38ab64d0/Qwen3.5-0.8B-Q4_K_M.gguf",
             repoUrl = "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF",
             summaryDe = "Kompaktes 2026-Modell (533 MB) für jedes Smartphone. Blitzschnell im Direktmodus für Korrektur, Stichpunkte & Diktat-Glättung in 200+ Sprachen.",
             summaryEn = "Compact 2026 model (533 MB) for any phone. Blazing fast non-thinking cleanup, bullet lists & rewrites in 200+ languages.",
@@ -342,7 +420,13 @@ object LocalModelCatalog {
             highlightTagEn = "Compact · 533 MB",
             supportsMultilingualCodeSwitching = true,
             supportsNoThinkTag = true,
-            shortEngineLabel = "Qwen 3.5 0.8B"
+            shortEngineLabel = "Qwen 3.5 0.8B",
+            exactSizeBytes = 532_517_120L,
+            sha256 = "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",
+            licenseName = "Apache-2.0",
+            licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
+            attributionNotice = "Alibaba Qwen Team / Unsloth GGUF",
+            commercialUseNote = "Permitted (Apache-2.0)"
         ),
         LocalModelSpec(
             id = "llm-qwen3.5-2b-q4km",
@@ -351,7 +435,7 @@ object LocalModelCatalog {
             fileName = "Qwen3.5-2B-Q4_K_M.gguf",
             approxSizeMb = 1280,
             minRamGb = 6,
-            downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",
+            downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/f6d5376be1edb4d416d56da11e5397a961aca8ae/Qwen3.5-2B-Q4_K_M.gguf",
             repoUrl = "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF",
             summaryDe = "Cloud-Niveau direkt auf dem Handy: überragende Grammatik, Tonfall-Wechsel, Stichpunkte & DE+EN Mischsprache (Apache-2.0).",
             summaryEn = "Cloud-grade quality on device: outstanding grammar, tone shifts, bullet lists & multilingual code-switching (Apache-2.0).",
@@ -361,7 +445,13 @@ object LocalModelCatalog {
             highlightTagEn = "Best Balance · Cloud-Grade",
             supportsMultilingualCodeSwitching = true,
             supportsNoThinkTag = true,
-            shortEngineLabel = "Qwen 3.5 2B"
+            shortEngineLabel = "Qwen 3.5 2B",
+            exactSizeBytes = 1_280_835_840L,
+            sha256 = "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+            licenseName = "Apache-2.0",
+            licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
+            attributionNotice = "Alibaba Qwen Team / Unsloth GGUF",
+            commercialUseNote = "Permitted (Apache-2.0)"
         ),
         LocalModelSpec(
             id = "llm-gemma3-1b-q4km",
@@ -370,7 +460,7 @@ object LocalModelCatalog {
             fileName = "gemma-3-1b-it-Q4_K_M.gguf",
             approxSizeMb = 806,
             minRamGb = 4,
-            downloadUrl = "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf",
+            downloadUrl = "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/f0b45be0aac41bd6a100a4b5734cad5f67255bfb/gemma-3-1b-it-Q4_K_M.gguf",
             repoUrl = "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF",
             summaryDe = "Leichtes Google-Modell mit sehr natürlichem Stil beim Umformulieren, Korrigieren & Zusammenfassen (140+ Sprachen).",
             summaryEn = "Lightweight Google model delivering natural phrasing for proofreading, rephrasing & summarizing across 140+ languages.",
@@ -379,7 +469,13 @@ object LocalModelCatalog {
             highlightTagDe = "Google · 806 MB",
             highlightTagEn = "Google · 806 MB",
             supportsMultilingualCodeSwitching = true,
-            shortEngineLabel = "Gemma 3 1B"
+            shortEngineLabel = "Gemma 3 1B",
+            exactSizeBytes = 806_058_272L,
+            sha256 = "8270790f3ab69fdfe860b7b64008d9a19986d8df7e407bb018184caa08798ebd",
+            licenseName = "Gemma Terms of Use",
+            licenseUrl = "https://ai.google.dev/gemma/terms",
+            attributionNotice = "Google Gemma 3 / Unsloth GGUF",
+            commercialUseNote = "Permitted under Gemma Terms of Use"
         ),
         LocalModelSpec(
             id = "llm-lfm2.5-2.6b-q4km",
@@ -388,7 +484,7 @@ object LocalModelCatalog {
             fileName = "LFM2.5-2.6B-Q4_K_M.gguf",
             approxSizeMb = 1670,
             minRamGb = 6,
-            downloadUrl = "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/main/LFM2.5-2.6B-Q4_K_M.gguf",
+            downloadUrl = "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/e7caca5d835a3901a8e0d63e94009429bafafdfc/LFM2.5-2.6B-Q4_K_M.gguf",
             repoUrl = "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF",
             summaryDe = "Flaggschiff-Hybridmodell (Aug. 2026): spielt auf dem Niveau großer Cloud-Modelle bei ~30 tok/s auf modernen Smartphones.",
             summaryEn = "Flagship 2026 hybrid model rivaling much larger cloud models at ~30 tok/s on modern smartphone CPUs.",
@@ -398,7 +494,13 @@ object LocalModelCatalog {
             highlightTagEn = "Flagship · Fast",
             supportsMultilingualCodeSwitching = true,
             isFlagshipTier = true,
-            shortEngineLabel = "LFM2.5 2.6B"
+            shortEngineLabel = "LFM2.5 2.6B",
+            exactSizeBytes = 1_674_455_040L,
+            sha256 = "02a8b7e17487d326e46d68ce0ba24211e1b80a14c4cd0597fa73c1cd697f52ed",
+            licenseName = "LFM Open License v1.0",
+            licenseUrl = "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/blob/e7caca5d835a3901a8e0d63e94009429bafafdfc/LICENSE",
+            attributionNotice = "Liquid AI LFM2.5",
+            commercialUseNote = "Free commercial use under LFM 1.0 terms"
         ),
         LocalModelSpec(
             id = "llm-qwen3.5-4b-q4km",
@@ -407,7 +509,7 @@ object LocalModelCatalog {
             fileName = "Qwen3.5-4B-Q4_K_M.gguf",
             approxSizeMb = 2740,
             minRamGb = 8,
-            downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
+            downloadUrl = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/e87f176479d0855a907a41277aca2f8ee7a09523/Qwen3.5-4B-Q4_K_M.gguf",
             repoUrl = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF",
             summaryDe = "Maximale Offline-Intelligenz für Flaggschiff-Smartphones (8+ GB RAM) – professionelle E-Mails, komplexe Texte & perfekte Übersetzungen.",
             summaryEn = "Maximum offline intelligence for flagship phones (8+ GB RAM) — executive rewrites, complex cleanup & top translations.",
@@ -418,7 +520,13 @@ object LocalModelCatalog {
             supportsMultilingualCodeSwitching = true,
             supportsNoThinkTag = true,
             isFlagshipTier = true,
-            shortEngineLabel = "Qwen 3.5 4B"
+            shortEngineLabel = "Qwen 3.5 4B",
+            exactSizeBytes = 2_740_937_888L,
+            sha256 = "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+            licenseName = "Apache-2.0",
+            licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
+            attributionNotice = "Alibaba Qwen Team / Unsloth GGUF",
+            commercialUseNote = "Permitted (Apache-2.0)"
         )
     )
 

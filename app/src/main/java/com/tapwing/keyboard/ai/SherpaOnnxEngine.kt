@@ -1,5 +1,6 @@
 package com.tapwing.keyboard.ai
 
+import android.os.Looper
 import android.util.Log
 import com.k2fsa.sherpa.onnx.EndpointConfig
 import com.k2fsa.sherpa.onnx.EndpointRule
@@ -198,6 +199,7 @@ object SherpaOnnxEngine {
         modelDir: File,
         languageCode: String?
     ): OfflineRecognizer {
+        ensureOffMainThread()
         val canaryLang = resolveCanaryLanguage(languageCode)
         val cacheKey = if (spec.kind == LocalModelKind.SHERPA_CANARY) "${spec.id}:$canaryLang" else spec.id
         offlineRecognizer?.let { existing ->
@@ -254,6 +256,7 @@ object SherpaOnnxEngine {
     }
 
     private fun ensureOnlineLocked(spec: LocalModelSpec, modelDir: File): OnlineRecognizer {
+        ensureOffMainThread()
         onlineRecognizer?.let { existing ->
             if (loadedOnlineKey == spec.id) return existing
         }
@@ -298,6 +301,12 @@ object SherpaOnnxEngine {
         loadedOnlineKey = spec.id
         Log.i(TAG, "Loaded streaming Sherpa model ${spec.id} in ${(System.nanoTime() - t0) / 1_000_000} ms (threads=$threads)")
         return created
+    }
+
+    private fun ensureOffMainThread() {
+        check(Looper.myLooper() != Looper.getMainLooper()) {
+            "Sherpa-ONNX model loading must execute on a background dispatcher"
+        }
     }
 
     private fun releaseOfflineLocked() {

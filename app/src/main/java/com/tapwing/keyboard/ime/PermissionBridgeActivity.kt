@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: LicenseRef-Tapwing-Source-Available
+
 package com.tapwing.keyboard.ime
 
 import android.Manifest
@@ -6,11 +8,10 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import com.tapwing.keyboard.clipboard.ScreenshotMonitor
 
 /**
  * Translucent helper Activity used by TapwingInputMethodService to request runtime
- * permissions (microphone or media images) since Services cannot call requestPermissions().
+ * permissions (microphone or camera) since Services cannot call requestPermissions().
  */
 class PermissionBridgeActivity : ComponentActivity() {
 
@@ -34,17 +35,11 @@ class PermissionBridgeActivity : ComponentActivity() {
         private const val EXTRA_PERMISSION = "permission"
         internal val ALLOWED_PERMISSIONS: Set<String> = setOf(
             Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.CAMERA,
-            Manifest.permission.READ_MEDIA_IMAGES,
-            Manifest.permission.READ_EXTERNAL_STORAGE
+            Manifest.permission.CAMERA
         )
 
         fun requestRecordAudio(context: Context) {
             launch(context, Manifest.permission.RECORD_AUDIO)
-        }
-
-        fun requestMediaImages(context: Context) {
-            launch(context, ScreenshotMonitor.requiredMediaPermission())
         }
 
         fun launch(context: Context, permission: String) {

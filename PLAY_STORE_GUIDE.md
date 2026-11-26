@@ -1,50 +1,34 @@
-# Google Play Store Readiness Guide — Tapwing
+# Tapwing Google Play Store Guide
 
-Tapwing (`com.tapwing.keyboard`) is a clean-room **Apache-2.0** Android keyboard built on official Android APIs (`InputMethodService`, `SpeechRecognizer`, CameraX + ML Kit Text Recognition, System Photo Picker, AndroidX DataStore, hardware `AndroidKeyStore`) with original Jetpack Compose UI.
-
----
-
-## 1. Ready-to-Use Play Console Release Package (`v1.2.0`)
-
-Running `./scripts/build-release.sh` produces everything required for Google Play Console in `dist/` (gitignored):
-
-- **Signed Android App Bundle (`.aab`)**: `dist/Tapwing-v1.2.0-release.aab` (upload to *Internal Testing* / *Closed Testing* / *Production*)
-- **Signed Release APK (`.apk`)**: `dist/Tapwing-v1.2.0-release.apk` (for direct sideload testing)
-- **R8 / ProGuard Deobfuscation Mapping**: `dist/Tapwing-v1.2.0-mapping.txt` (included automatically or uploadable in Play Console for readable crash stack traces)
-- **Native Debug Symbols (`SYMBOL_TABLE`)**: embedded inside the `.aab` via `ndk { debugSymbolLevel = "SYMBOL_TABLE" }` in [app/build.gradle.kts](app/build.gradle.kts)
-- **16 KB Page-Size Verification**: automatically checked on every 64-bit `.so` (`arm64-v8a`, `x86_64`) inside the `.aab`
-- **Checksums**: `dist/SHA256SUMS.txt`
-- **Store Graphics & Screenshots**: `dist/play-store-assets/` (`tapwing-icon-512.png`, `tapwing-feature-1024x500.png`, `screenshots/`)
+Tapwing (`com.tapwing.keyboard`) is an Android keyboard built on official Android APIs (`InputMethodService`, `SpeechRecognizer`, `CameraX` + `ML Kit`, `PickVisualMedia`, `AndroidX DataStore`, `AndroidKeyStore` AES-256-GCM) with a Jetpack Compose UI. See [docs/licensing.md](docs/licensing.md) and [LICENSE](LICENSE) for **Tapwing Source Available** licensing terms (with Apache-2.0 baseline through commit `299dc28b80e791e750cff20ff10694b031d6604e`).
 
 ---
 
-## 2. Play Console Documentation Included in Repo
+## 1. Ready-to-Use Play Console Release Package (`v2.9.0`, `versionCode = 17`)
 
-- [PRIVACY_POLICY.md](PRIVACY_POLICY.md) — Bilingual EN/DE privacy policy ready to host on a public HTTPS URL
-- [docs/play-store/STORE_LISTING_DE.md](docs/play-store/STORE_LISTING_DE.md) — German store title, short & full descriptions (trademark-clean), release notes, category & tags
-- [docs/play-store/STORE_LISTING_EN.md](docs/play-store/STORE_LISTING_EN.md) — English store title, short & full descriptions (trademark-clean), release notes
-- [docs/play-store/DATA_SAFETY_AND_REVIEW.md](docs/play-store/DATA_SAFETY_AND_REVIEW.md) — Exact answers for Play Console Data Safety, App Content, Permission Audit (`INTERNET`, `RECORD_AUDIO`, `CAMERA`, `VIBRATE` — zero broad storage permissions!), and reviewer instructions
-
----
-
-## 3. Signing & Upload Key Setup (`Play App Signing`)
-
-- Release artifacts are signed locally using an external private keystore (`~/.tapwing-signing/tapwing-release.jks`), never committed to Git.
-- In Google Play Console:
-  1. Enable **Play App Signing** (mandatory for new apps).
-  2. Upload `dist/Tapwing-v1.2.0-release.aab` — Google Play registers your local key as the **Upload Key** and signs distribution APKs with Google's managed App Signing Key.
-  3. Store encrypted offline backups of `~/.tapwing-signing/tapwing-release.jks` and `keystore.properties` in your password manager.
+Run `./scripts/build-release.sh` locally to verify docs, unit tests, 16 KB ELF page alignment, ABI size budgets, and generate the signed artifacts outside Git (`dist/`, gitignored):
+- **Signed Android App Bundle (`.aab`)**: `dist/Tapwing-v2.9.0-release.aab` (upload to *Internal Testing* / *Closed Testing* / *Production*)
+- **Signed Release APK (`.apk`)**: `dist/Tapwing-v2.9.0-release.apk` (for direct sideload testing)
+- **R8 / ProGuard Deobfuscation Mapping**: `dist/Tapwing-v2.9.0-mapping.txt`
+- **Target ABI & 16 KB Page Alignment**: `arm64-v8a` only (keeps native Sherpa-ONNX + llama.cpp binaries compact within Play limits), verified `PT_LOAD >= 16384`.
 
 ---
 
-## 4. Operational Steps Remaining in Google Play Console (Browser / Developer Account)
+## 2. Play App Signing Setup
 
-- **Live Hosted Privacy Policy URL (Cloudflare Workers):** `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`
-- **Live Website / Support URL:** `https://tapwing-keyboard.mixxermannipropvp.workers.dev`
-- **Support Email:** Use the address listed in the [Privacy Policy](PRIVACY_POLICY.md#5-contact).
+- Signing credentials live outside the repository at `~/.tapwing-signing/keystore.properties` and `~/.tapwing-signing/tapwing-release.jks`.
+- Do **not** commit keystores, `keystore.properties`, or API keys to Git.
 
-1. Verify `com.tapwing.keyboard` availability in your **Google Play Console** developer account.
-2. Enter the public Cloudflare Privacy Policy URL (`https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`) under *App Content > Privacy Policy*.
-3. Paste copy from [STORE_LISTING_DE.md](docs/play-store/STORE_LISTING_DE.md) / [STORE_LISTING_EN.md](docs/play-store/STORE_LISTING_EN.md) and upload assets from `dist/play-store-assets/`.
-4. Complete *Data Safety*, *Ads*, *Target Audience*, and *Content Rating* using [DATA_SAFETY_AND_REVIEW.md](docs/play-store/DATA_SAFETY_AND_REVIEW.md).
-5. Upload `dist/Tapwing-v1.2.0-release.aab` (+ `dist/Tapwing-v1.2.0-mapping.txt`) to **Production** (or **Closed Testing** if Google Play enforces the 12-tester closed-test gate for this developer account).
+---
+
+## 3. Store Console URLs & Submission Steps
+
+- **Hosted Privacy Policy URL (Cloudflare Workers):** `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`
+- **Website / Support URL:** `https://tapwing-keyboard.mixxermannipropvp.workers.dev`
+- **Pre-written Listing Texts (`de-DE` / `en-US`):** [docs/play-store/STORE_LISTING_DE.md](docs/play-store/STORE_LISTING_DE.md) and [docs/play-store/STORE_LISTING_EN.md](docs/play-store/STORE_LISTING_EN.md)
+- **Data Safety & Permission Declarations:** [docs/play-store/DATA_SAFETY_AND_REVIEW.md](docs/play-store/DATA_SAFETY_AND_REVIEW.md)
+
+### Upload Flow
+1. Run `./scripts/build-release.sh` cleanly (`0` errors, tests & docs checks green).
+2. Confirm *App Content > Privacy Policy* points to `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy` and *Data Safety* matches [DATA_SAFETY_AND_REVIEW.md](docs/play-store/DATA_SAFETY_AND_REVIEW.md) (no storage/media permissions, opt-in cloud consent).
+3. In Google Play Console (`com.tapwing.keyboard`), open your target track (*Production* / *Closed Testing*), click **Create new release**, upload `dist/Tapwing-v2.9.0-release.aab`, copy release notes (`<= 500` chars) for `de-DE` and `en-US`, review, and roll out.

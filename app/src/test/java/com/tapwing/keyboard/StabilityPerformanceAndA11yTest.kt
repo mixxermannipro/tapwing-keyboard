@@ -37,7 +37,8 @@ class StabilityPerformanceAndA11yTest {
     @Test
     fun cloudCustomEndpointUrlValidationRejectsUnsafeAndMalformedUrls() {
         assertTrue(CloudAiClient.isValidHttpUrl("https://api.openai.com/v1"))
-        assertTrue(CloudAiClient.isValidHttpUrl("http://192.168.1.50:11434/v1"))
+        assertTrue(CloudAiClient.isValidHttpUrl("http://127.0.0.1:11434/v1"))
+        assertFalse(CloudAiClient.isValidHttpUrl("http://192.168.1.50:11434/v1"))
         assertFalse(CloudAiClient.isValidHttpUrl(""))
         assertFalse(CloudAiClient.isValidHttpUrl("ftp://example.com/v1"))
         assertFalse(CloudAiClient.isValidHttpUrl("file:///etc/passwd"))

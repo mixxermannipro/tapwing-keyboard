@@ -81,6 +81,8 @@
     <string name="nav_clipboard">Klembord &amp; screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Over Tapwing</string>
+    <string name="nav_privacy">Privacy en cloudtoestemming</string>
+    <string name="nav_licenses">Open-source- en modellicenties</string>
     <string name="section_setup">Instellen</string>
     <string name="section_keyboard">Toetsenbord</string>
     <string name="section_smart_ai">AI &amp; Spraak</string>

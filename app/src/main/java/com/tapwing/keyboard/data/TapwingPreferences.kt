@@ -15,7 +15,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
 import java.io.IOException
 
 enum class KeyboardHeightMode(val rowHeightDp: Int, val defaultScalePercent: Int) {
@@ -25,10 +26,10 @@ enum class KeyboardHeightMode(val rowHeightDp: Int, val defaultScalePercent: Int
 }
 
 enum class ThemeMode {
-    PIXEL_SLATE,
+    SLATE,
     EXPRESSIVE_LAVENDER,
     DYNAMIC,
-    PIXEL_BLUE,
+    COBALT,
     AMOLED_DARK
 }
 
@@ -105,7 +106,7 @@ data class TapwingPrefs(
     val hapticFeedback: Boolean = true,
     val soundOnKeypress: Boolean = false,
 
-    val themeMode: ThemeMode = ThemeMode.PIXEL_SLATE,
+    val themeMode: ThemeMode = ThemeMode.SLATE,
     val darkMode: DarkModePreference = DarkModePreference.SYSTEM,
     val appleModeEnabled: Boolean = false,
 
@@ -119,7 +120,8 @@ data class TapwingPrefs(
     val perAppLearningEnabled: Boolean = true,
     val inlineAutofillEnabled: Boolean = true,
     val smartFillEnabled: Boolean = true,
-    val smartProfileAutoLearn: Boolean = true,
+    val smartProfileAutoLearn: Boolean = false,
+    val profileAutoLearnNoticeSeen: Boolean = false,
     val personalProfile: PersonalProfile = PersonalProfile(),
     val incognitoMode: Boolean = false,
     val snippetUserName: String = "",
@@ -164,13 +166,13 @@ data class TapwingPrefs(
     val cleanupModel: String = "",
     val cleanupFallbackProvider: AiProviderType = AiProviderType.LOCAL_RULES,
     val cleanupFallbackModel: String = "",
+    val consentedCloudProviders: Set<String> = emptySet(),
     val aiOnboardingSeen: Boolean = false,
 
     val clipboardEnabled: Boolean = true,
     val clipboardRetention: ClipboardRetention = ClipboardRetention.DAYS_7,
     val clipboardMaxItems: Int = 100,
     val screenshotSuggestionChip: Boolean = true,
-    val autoCopyScreenshots: Boolean = true,
 
     val emojiScale: Int = 26,
     val candidateEmojiSuggestions: Boolean = true,
@@ -185,10 +187,18 @@ private val Context.tapwingDataStore: DataStore<Preferences> by preferencesDataS
 
 class TapwingPreferencesRepository(context: Context) {
 
+    private val appContext: Context = context.applicationContext
+
     // Non-secret keyboard configuration lives in device-protected storage so Direct Boot IME works cleanly.
+    // Personal profile data lives strictly in Credential-Encrypted storage via PersonalProfileStorage.
     private val storageContext: Context =
-        ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
-            ?: context.applicationContext
+        ContextCompat.createDeviceProtectedStorageContext(appContext)
+            ?: appContext
+
+    private val profileStorage = PersonalProfileStorage(appContext)
+
+    @Volatile
+    private var legacyDeCleanedUp = false
 
     private object Keys {
         val ACTIVE_LOCALE = stringPreferencesKey("active_locale")
@@ -227,6 +237,7 @@ class TapwingPreferencesRepository(context: Context) {
         val INLINE_AUTOFILL_ENABLED = booleanPreferencesKey("inline_autofill_enabled")
         val SMART_FILL_ENABLED = booleanPreferencesKey("smart_fill_enabled")
         val SMART_PROFILE_AUTO_LEARN = booleanPreferencesKey("smart_profile_auto_learn")
+        val PROFILE_AUTO_LEARN_NOTICE_SEEN = booleanPreferencesKey("profile_auto_learn_notice_seen")
         val PERSONAL_PROFILE_JSON = stringPreferencesKey("personal_profile_json")
         val INCOGNITO_MODE = booleanPreferencesKey("incognito_mode")
         val SNIPPET_USER_NAME = stringPreferencesKey("snippet_user_name")
@@ -271,37 +282,80 @@ class TapwingPreferencesRepository(context: Context) {
         val CLEANUP_MODEL = stringPreferencesKey("cleanup_model")
         val CLEANUP_FALLBACK_PROVIDER = stringPreferencesKey("cleanup_fallback_provider")
         val CLEANUP_FALLBACK_MODEL = stringPreferencesKey("cleanup_fallback_model")
+        val CLOUD_CONSENTED_PROVIDERS = stringPreferencesKey("cloud_consented_providers")
         val AI_ONBOARDING_SEEN = booleanPreferencesKey("ai_onboarding_seen")
 
         val CLIPBOARD_ENABLED = booleanPreferencesKey("clipboard_enabled")
         val CLIPBOARD_RETENTION = stringPreferencesKey("clipboard_retention")
         val CLIPBOARD_MAX_ITEMS = intPreferencesKey("clipboard_max_items")
         val SCREENSHOT_SUGGESTION_CHIP = booleanPreferencesKey("screenshot_suggestion_chip")
-        val AUTO_COPY_SCREENSHOTS = booleanPreferencesKey("auto_copy_screenshots")
 
         val EMOJI_SCALE = intPreferencesKey("emoji_scale")
         val CANDIDATE_EMOJI_SUGGESTIONS = booleanPreferencesKey("candidate_emoji_suggestions")
     }
 
-    val prefsFlow: Flow<TapwingPrefs> = storageContext.tapwingDataStore.data
-        .catch { exception ->
-            if (exception is IOException) {
-                emit(emptyPreferences())
-            } else {
-                throw exception
+    fun reloadAfterUnlock() {
+        profileStorage.reloadAfterUnlock()
+    }
+
+    val prefsFlow: Flow<TapwingPrefs> = combine(
+        storageContext.tapwingDataStore.data
+            .catch { exception ->
+                if (exception is IOException) {
+                    emit(emptyPreferences())
+                } else {
+                    throw exception
+                }
             }
-        }
-        .map { fromPreferences(it) }
+            .onEach { p ->
+                if (!legacyDeCleanedUp && isUserUnlocked(appContext) && hasLegacyPersonalKeys(p)) {
+                    legacyDeCleanedUp = true
+                    storageContext.tapwingDataStore.edit { mutable ->
+                        migrateAndStripLegacyPersonalKeys(mutable)
+                    }
+                }
+            },
+        profileStorage.profileFlow
+    ) { prefs, ceProfile ->
+        val resolvedProfile = if (isUserUnlocked(appContext)) ceProfile else PersonalProfile()
+        fromPreferences(prefs, resolvedProfile)
+    }
 
     suspend fun update(transform: (TapwingPrefs) -> TapwingPrefs) {
         storageContext.tapwingDataStore.edit { mutable ->
-            val current = fromPreferences(mutable)
+            if (isUserUnlocked(appContext)) {
+                migrateAndStripLegacyPersonalKeys(mutable)
+            }
+            val activeProfile = if (isUserUnlocked(appContext)) profileStorage.load() else PersonalProfile()
+            val current = fromPreferences(mutable, activeProfile)
             val next = transform(current)
+            if (isUserUnlocked(appContext) && next.personalProfile != activeProfile) {
+                profileStorage.save(next.personalProfile)
+            }
             writePreferences(mutable, next)
         }
     }
 
-    private fun fromPreferences(p: Preferences): TapwingPrefs {
+    private fun hasLegacyPersonalKeys(p: Preferences): Boolean =
+        p.contains(Keys.PERSONAL_PROFILE_JSON) ||
+            p.contains(Keys.SNIPPET_USER_NAME) ||
+            p.contains(Keys.SNIPPET_USER_EMAIL)
+
+    private fun migrateAndStripLegacyPersonalKeys(mutable: MutablePreferences) {
+        val legacyJson = mutable[Keys.PERSONAL_PROFILE_JSON]
+        val legacyName = mutable[Keys.SNIPPET_USER_NAME].orEmpty()
+        val legacyEmail = mutable[Keys.SNIPPET_USER_EMAIL].orEmpty()
+        profileStorage.migrateFromLegacyIfNeeded(
+            legacyProfileJson = legacyJson,
+            legacyUserName = legacyName,
+            legacyUserEmail = legacyEmail
+        )
+        mutable.remove(Keys.PERSONAL_PROFILE_JSON)
+        mutable.remove(Keys.SNIPPET_USER_NAME)
+        mutable.remove(Keys.SNIPPET_USER_EMAIL)
+    }
+
+    private fun fromPreferences(p: Preferences, profile: PersonalProfile): TapwingPrefs {
         val showWritingLegacy = p[Keys.SHOW_WRITING_TOOLS_ICON] ?: true
         val showClipboardLegacy = p[Keys.SHOW_CLIPBOARD_ICON] ?: true
         val showScanLegacy = p[Keys.SHOW_SCAN_TEXT_ICON] ?: true
@@ -336,7 +390,7 @@ class TapwingPreferencesRepository(context: Context) {
             hapticFeedback = p[Keys.HAPTIC_FEEDBACK] ?: true,
             soundOnKeypress = p[Keys.SOUND_ON_KEYPRESS] ?: false,
 
-            themeMode = parseEnum(p[Keys.THEME_MODE], ThemeMode.PIXEL_SLATE),
+            themeMode = parseThemeMode(p[Keys.THEME_MODE]),
             darkMode = parseEnum(p[Keys.DARK_MODE], DarkModePreference.SYSTEM),
             appleModeEnabled = p[Keys.APPLE_MODE_ENABLED] ?: false,
 
@@ -350,15 +404,12 @@ class TapwingPreferencesRepository(context: Context) {
             perAppLearningEnabled = p[Keys.PER_APP_LEARNING_ENABLED] ?: true,
             inlineAutofillEnabled = p[Keys.INLINE_AUTOFILL_ENABLED] ?: true,
             smartFillEnabled = p[Keys.SMART_FILL_ENABLED] ?: true,
-            smartProfileAutoLearn = p[Keys.SMART_PROFILE_AUTO_LEARN] ?: true,
-            personalProfile = PersonalProfile.fromJson(
-                rawJson = p[Keys.PERSONAL_PROFILE_JSON],
-                legacyUserName = p[Keys.SNIPPET_USER_NAME] ?: "",
-                legacyUserEmail = p[Keys.SNIPPET_USER_EMAIL] ?: ""
-            ),
+            smartProfileAutoLearn = p[Keys.SMART_PROFILE_AUTO_LEARN] ?: false,
+            profileAutoLearnNoticeSeen = p[Keys.PROFILE_AUTO_LEARN_NOTICE_SEEN] ?: false,
+            personalProfile = profile,
             incognitoMode = p[Keys.INCOGNITO_MODE] ?: false,
-            snippetUserName = p[Keys.SNIPPET_USER_NAME] ?: "",
-            snippetUserEmail = p[Keys.SNIPPET_USER_EMAIL] ?: "",
+            snippetUserName = profile.fullName,
+            snippetUserEmail = profile.primaryEmail,
             inlineMathEnabled = p[Keys.INLINE_MATH_ENABLED] ?: true,
             swipeBackspaceDeleteWord = p[Keys.SWIPE_BACKSPACE_WORD] ?: true,
             showWritingToolsIcon = QuickBarAction.WRITING_TOOLS in resolvedQuickBar,
@@ -408,13 +459,13 @@ class TapwingPreferencesRepository(context: Context) {
             cleanupModel = p[Keys.CLEANUP_MODEL] ?: (p[Keys.AI_MODEL] ?: ""),
             cleanupFallbackProvider = parseEnum(p[Keys.CLEANUP_FALLBACK_PROVIDER], AiProviderType.LOCAL_RULES),
             cleanupFallbackModel = p[Keys.CLEANUP_FALLBACK_MODEL] ?: "",
+            consentedCloudProviders = parseStringSet(p[Keys.CLOUD_CONSENTED_PROVIDERS]),
             aiOnboardingSeen = p[Keys.AI_ONBOARDING_SEEN] ?: false,
 
             clipboardEnabled = p[Keys.CLIPBOARD_ENABLED] ?: true,
             clipboardRetention = parseEnum(p[Keys.CLIPBOARD_RETENTION], ClipboardRetention.DAYS_7),
             clipboardMaxItems = (p[Keys.CLIPBOARD_MAX_ITEMS] ?: 100).coerceIn(20, 200),
             screenshotSuggestionChip = p[Keys.SCREENSHOT_SUGGESTION_CHIP] ?: true,
-            autoCopyScreenshots = p[Keys.AUTO_COPY_SCREENSHOTS] ?: true,
 
             emojiScale = (p[Keys.EMOJI_SCALE] ?: 26).coerceIn(20, 34),
             candidateEmojiSuggestions = p[Keys.CANDIDATE_EMOJI_SUGGESTIONS] ?: true,
@@ -463,10 +514,11 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.INLINE_AUTOFILL_ENABLED] = next.inlineAutofillEnabled
         mutable[Keys.SMART_FILL_ENABLED] = next.smartFillEnabled
         mutable[Keys.SMART_PROFILE_AUTO_LEARN] = next.smartProfileAutoLearn
-        mutable[Keys.PERSONAL_PROFILE_JSON] = next.personalProfile.toJson()
+        mutable[Keys.PROFILE_AUTO_LEARN_NOTICE_SEEN] = next.profileAutoLearnNoticeSeen
+        mutable.remove(Keys.PERSONAL_PROFILE_JSON)
         mutable[Keys.INCOGNITO_MODE] = next.incognitoMode
-        mutable[Keys.SNIPPET_USER_NAME] = next.personalProfile.fullName.ifBlank { next.snippetUserName }
-        mutable[Keys.SNIPPET_USER_EMAIL] = next.personalProfile.primaryEmail.ifBlank { next.snippetUserEmail }
+        mutable.remove(Keys.SNIPPET_USER_NAME)
+        mutable.remove(Keys.SNIPPET_USER_EMAIL)
         mutable[Keys.INLINE_MATH_ENABLED] = next.inlineMathEnabled
         mutable[Keys.SWIPE_BACKSPACE_WORD] = next.swipeBackspaceDeleteWord
         mutable[Keys.QUICK_SEARCH_ENGINE] = next.quickSearchEngine.name
@@ -505,12 +557,17 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.CLEANUP_MODEL] = next.cleanupModel
         mutable[Keys.CLEANUP_FALLBACK_PROVIDER] = next.cleanupFallbackProvider.name
         mutable[Keys.CLEANUP_FALLBACK_MODEL] = next.cleanupFallbackModel
+        mutable[Keys.CLOUD_CONSENTED_PROVIDERS] = next.consentedCloudProviders
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .sorted()
+            .joinToString(",")
         mutable[Keys.AI_ONBOARDING_SEEN] = next.aiOnboardingSeen
         mutable[Keys.CLIPBOARD_ENABLED] = next.clipboardEnabled
         mutable[Keys.CLIPBOARD_RETENTION] = next.clipboardRetention.name
         mutable[Keys.CLIPBOARD_MAX_ITEMS] = next.clipboardMaxItems.coerceIn(20, 200)
         mutable[Keys.SCREENSHOT_SUGGESTION_CHIP] = next.screenshotSuggestionChip
-        mutable[Keys.AUTO_COPY_SCREENSHOTS] = next.autoCopyScreenshots
+        mutable.remove(booleanPreferencesKey("auto_copy_screenshots"))
         mutable[Keys.EMOJI_SCALE] = next.emojiScale.coerceIn(20, 34)
         mutable[Keys.CANDIDATE_EMOJI_SUGGESTIONS] = next.candidateEmojiSuggestions
     }
@@ -520,6 +577,20 @@ class TapwingPreferencesRepository(context: Context) {
             val um = context.getSystemService(UserManager::class.java)
             return um?.isUserUnlocked ?: true
         }
+
+        internal fun parseThemeMode(raw: String?): ThemeMode = when (raw?.trim()) {
+            null, "" -> ThemeMode.SLATE
+            "PIXEL_SLATE" -> ThemeMode.SLATE
+            "PIXEL_BLUE" -> ThemeMode.COBALT
+            else -> parseEnum(raw, ThemeMode.SLATE)
+        }
+
+        internal fun parseStringSet(raw: String?): Set<String> =
+            raw.orEmpty()
+                .split(',')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .toSet()
 
         private inline fun <reified T : Enum<T>> parseEnum(raw: String?, default: T): T {
             if (raw.isNullOrBlank()) return default

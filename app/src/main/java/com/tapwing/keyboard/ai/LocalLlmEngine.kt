@@ -1,9 +1,15 @@
 package com.tapwing.keyboard.ai
 
+import android.os.Looper
 import android.util.Log
 import com.llamatik.library.platform.LlamaBridge
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -20,11 +26,27 @@ object LocalLlmEngine {
     private const val CONTEXT_LENGTH = 2048
     private const val BATCH_SIZE = 256
     private const val INFER_TIMEOUT_MS = 22_000L
+    private const val IDLE_UNLOAD_MS = 120_000L
 
     private val llmMutex = Mutex()
+    private val watchdogScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var idleUnloadJob: Job? = null
 
     @Volatile
     private var loadedModelPath: String? = null
+
+    private fun scheduleIdleUnload() {
+        idleUnloadJob?.cancel()
+        idleUnloadJob = watchdogScope.launch {
+            delay(IDLE_UNLOAD_MS)
+            unloadAll()
+        }
+    }
+
+    private fun ensureOffMainThread() {
+        val onMain = runCatching { Looper.myLooper() != null && Looper.myLooper() == Looper.getMainLooper() }.getOrDefault(false)
+        check(!onMain) { "Local LLM model must never be loaded on the main UI thread" }
+    }
 
     private fun optimalThreads(): Int =
         (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4)
@@ -139,6 +161,8 @@ object LocalLlmEngine {
     }
 
     private fun ensureLoadedLocked(modelFile: File) {
+        ensureOffMainThread()
+        scheduleIdleUnload()
         if (loadedModelPath == modelFile.absolutePath) return
         check(modelFile.isFile && modelFile.length() > 1_000_000L) { "Local LLM model file missing or incomplete" }
         val t0 = System.nanoTime()

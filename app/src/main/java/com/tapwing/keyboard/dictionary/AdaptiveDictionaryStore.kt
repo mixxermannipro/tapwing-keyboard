@@ -1035,6 +1035,14 @@ class AdaptiveDictionaryStore(
     }
 
     @Synchronized
+    fun clearAllLearnedProfileValues() {
+        if (learnedProfileFields.isEmpty() && perAppProfileChoices.isEmpty()) return
+        learnedProfileFields.clear()
+        perAppProfileChoices.clear()
+        saveToDisk()
+    }
+
+    @Synchronized
     fun allKnownVocabularyWords(): Set<String> {
         val out = linkedSetOf<String>()
         out.addAll(customWords.keys)
@@ -1600,13 +1608,28 @@ class AdaptiveDictionaryStore(
         }
         private val stores = mutableMapOf<String, AdaptiveDictionaryStore>()
 
+        private const val DICT_FILE_NAME = "tapwing_dictionary_state.json"
+
         @Synchronized
         fun createForContext(context: Context): AdaptiveDictionaryStore {
-            val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
-                ?: context.applicationContext
-            val file = File(safeCtx.filesDir, "tapwing_dictionary_state.json")
-            return stores.getOrPut(file.absolutePath) {
-                AdaptiveDictionaryStore(file, synchronousPersistence = false)
+            val appCtx = context.applicationContext
+            // Learned words, bigrams, and profile values contain sensitive user text and MUST live
+            // in Credential-Encrypted storage (unavailable before device unlock / Direct Boot).
+            if (!com.tapwing.keyboard.data.TapwingPreferencesRepository.isUserUnlocked(appCtx)) {
+                return AdaptiveDictionaryStore(storageFile = null, synchronousPersistence = false)
+            }
+            val ceFile = File(appCtx.filesDir, DICT_FILE_NAME)
+            runCatching {
+                val deCtx = ContextCompat.createDeviceProtectedStorageContext(appCtx)
+                if (deCtx != null && deCtx.filesDir != appCtx.filesDir) {
+                    val legacyDeFile = File(deCtx.filesDir, DICT_FILE_NAME)
+                    if (legacyDeFile.isFile) {
+                        com.tapwing.keyboard.data.StorageMigration.migrateDeFileToCe(legacyDeFile, ceFile)
+                    }
+                }
+            }
+            return stores.getOrPut(ceFile.absolutePath) {
+                AdaptiveDictionaryStore(ceFile, synchronousPersistence = false)
             }
         }
     }

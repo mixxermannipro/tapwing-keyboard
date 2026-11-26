@@ -243,12 +243,25 @@ class TypingStatsStore(
 
         @Synchronized
         fun createForContext(context: Context): TypingStatsStore {
-            val safeCtx = ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
-                ?: context.applicationContext
-            val file = File(safeCtx.filesDir, "tapwing_typing_stats.json")
-            return stores.getOrPut(file.absolutePath) {
-                TypingStatsStore(file, synchronousPersistence = false)
+            val appCtx = context.applicationContext
+            if (!TapwingPreferencesRepository.isUserUnlocked(appCtx)) {
+                return TypingStatsStore(storageFile = null, synchronousPersistence = false)
+            }
+            val ceFile = File(appCtx.filesDir, STATS_FILE_NAME)
+            runCatching {
+                val deCtx = ContextCompat.createDeviceProtectedStorageContext(appCtx)
+                if (deCtx != null && deCtx.filesDir != appCtx.filesDir) {
+                    val legacyDeFile = File(deCtx.filesDir, STATS_FILE_NAME)
+                    if (legacyDeFile.isFile) {
+                        StorageMigration.migrateDeFileToCe(legacyDeFile, ceFile)
+                    }
+                }
+            }
+            return stores.getOrPut(ceFile.absolutePath) {
+                TypingStatsStore(ceFile, synchronousPersistence = false)
             }
         }
+
+        private const val STATS_FILE_NAME = "tapwing_typing_stats.json"
     }
 }

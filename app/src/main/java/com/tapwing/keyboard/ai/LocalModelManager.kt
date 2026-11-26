@@ -224,16 +224,24 @@ class LocalModelManager(context: Context) {
     private suspend fun downloadAndInstallSingleFile(spec: LocalModelSpec) {
         val target = modelFileFor(spec)
         val part = File(target.parentFile, "${spec.fileName}.part")
-        updateState(spec.id, ModelInstallState.Downloading(0f, 0L, spec.approxSizeMb * 1_000_000L))
+        val maxBytes = if (spec.exactSizeBytes > 0L) spec.exactSizeBytes else spec.approxSizeMb * 1_200_000L
+        updateState(spec.id, ModelInstallState.Downloading(0f, 0L, maxBytes))
         try {
-            downloadWithRedirects(spec.downloadUrl, part) { downloaded, total ->
-                val effectiveTotal = if (total > 0L) total else spec.approxSizeMb * 1_000_000L
+            val digest = downloadWithRedirects(spec.downloadUrl, part, maxBytes) { downloaded, total ->
+                val effectiveTotal = if (total > 0L) total else maxBytes
                 val progress = (downloaded.toFloat() / effectiveTotal.toFloat()).coerceIn(0f, 0.99f)
                 updateState(spec.id, ModelInstallState.Downloading(progress, downloaded, effectiveTotal))
             }
-            if (!part.isFile || part.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(part, spec.kind)) {
+            val integrity = DownloadIntegrityVerifier.verify(
+                file = part,
+                expectedSizeBytes = spec.exactSizeBytes,
+                expectedSha256 = spec.sha256,
+                precomputedSha256 = digest
+            )
+            if (integrity.isFailure || !part.isFile || part.length() <= MIN_VALID_MODEL_BYTES || !hasValidModelHeader(part, spec.kind)) {
                 part.delete()
-                updateState(spec.id, ModelInstallState.Error("Downloaded file was incomplete or invalid"))
+                val msg = integrity.exceptionOrNull()?.localizedMessage ?: "Downloaded file failed integrity verification"
+                updateState(spec.id, ModelInstallState.Error(msg))
                 return
             }
             if (spec.kind.isLlm) {
@@ -262,17 +270,24 @@ class LocalModelManager(context: Context) {
         val parentDir = targetDir.parentFile ?: modelsRoot
         val archivePart = File(parentDir, "${spec.id}.tar.bz2.part")
         val extractTmpDir = File(parentDir, "${spec.id}.tmp")
-        val estBytes = spec.approxSizeMb * 1_000_000L
+        val estBytes = if (spec.exactSizeBytes > 0L) spec.exactSizeBytes else spec.approxSizeMb * 1_000_000L
         updateState(spec.id, ModelInstallState.Downloading(0f, 0L, estBytes))
         try {
-            downloadWithRedirects(spec.downloadUrl, archivePart) { downloaded, total ->
+            val digest = downloadWithRedirects(spec.downloadUrl, archivePart, estBytes) { downloaded, total ->
                 val effectiveTotal = if (total > 0L) total else estBytes
                 val progress = ((downloaded.toFloat() / effectiveTotal.toFloat()) * 0.85f).coerceIn(0f, 0.85f)
                 updateState(spec.id, ModelInstallState.Downloading(progress, downloaded, effectiveTotal))
             }
-            if (!archivePart.isFile || archivePart.length() <= MIN_VALID_MODEL_BYTES) {
+            val integrity = DownloadIntegrityVerifier.verify(
+                file = archivePart,
+                expectedSizeBytes = spec.exactSizeBytes,
+                expectedSha256 = spec.sha256,
+                precomputedSha256 = digest
+            )
+            if (integrity.isFailure || !archivePart.isFile || archivePart.length() <= MIN_VALID_MODEL_BYTES) {
                 archivePart.delete()
-                updateState(spec.id, ModelInstallState.Error("Downloaded model archive was incomplete"))
+                val msg = integrity.exceptionOrNull()?.localizedMessage ?: "Downloaded archive failed integrity check"
+                updateState(spec.id, ModelInstallState.Error(msg))
                 return
             }
             updateState(spec.id, ModelInstallState.Extracting(0.86f))
@@ -442,8 +457,9 @@ class LocalModelManager(context: Context) {
     private suspend fun downloadWithRedirects(
         startUrl: String,
         dest: File,
+        maxBytes: Long,
         onProgress: (Long, Long) -> Unit
-    ) {
+    ): String {
         var currentUrl = startUrl
         var redirects = 0
         var conn: HttpURLConnection
@@ -455,7 +471,7 @@ class LocalModelManager(context: Context) {
                 instanceFollowRedirects = false
                 connectTimeout = 20_000
                 readTimeout = 30_000
-                setRequestProperty("User-Agent", "TapwingKeyboard/2.6 (Android)")
+                setRequestProperty("User-Agent", "TapwingKeyboard/2.9 (Android)")
             }
             val code = conn.responseCode
             if (code in 300..399) {
@@ -477,8 +493,12 @@ class LocalModelManager(context: Context) {
             break
         }
 
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
         try {
             val total = conn.contentLengthLong
+            if (maxBytes > 0L && total > maxBytes) {
+                throw SecurityException("Model download exceeds expected size ($total > $maxBytes)")
+            }
             conn.inputStream.use { input ->
                 FileOutputStream(dest).use { output ->
                     val buffer = ByteArray(32 * 1024)
@@ -487,8 +507,12 @@ class LocalModelManager(context: Context) {
                     while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                         val read = input.read(buffer)
                         if (read <= 0) break
-                        output.write(buffer, 0, read)
                         downloaded += read
+                        if (maxBytes > 0L && downloaded > maxBytes) {
+                            throw SecurityException("Downloaded stream exceeded expected size limit ($maxBytes bytes)")
+                        }
+                        digest.update(buffer, 0, read)
+                        output.write(buffer, 0, read)
                         val now = System.currentTimeMillis()
                         if (now - lastReportMs >= 160L) {
                             lastReportMs = now
@@ -503,6 +527,7 @@ class LocalModelManager(context: Context) {
         } finally {
             conn.disconnect()
         }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun updateState(id: String, state: ModelInstallState) {

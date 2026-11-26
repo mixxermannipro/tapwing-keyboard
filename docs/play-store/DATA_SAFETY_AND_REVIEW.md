@@ -1,8 +1,8 @@
 # Google Play Console — Data Safety, App Content & Review Guide
 
-Target release: **Tapwing v1.2.0 (`versionCode = 4`, `applicationId = com.tapwing.keyboard`)**
-SDK targets: `minSdk = 29`, `targetSdk = 36`, `compileSdk = 36`
-Native 16 KB page alignment: **Verified OK** (`arm64-v8a` & `x86_64` ELF `PT_LOAD` alignment `>= 16384`)
+Target release: **Tapwing 2.9.0 (`versionCode = 17`, `applicationId = com.tapwing.keyboard`)**
+SDK targets: `minSdk = 29`, `targetSdk = 36`, `compileSdk = 36`, ABI: `arm64-v8a`
+Native 16 KB page alignment: **Verified OK** (`arm64-v8a` ELF `PT_LOAD` alignment `>= 16384`)
 
 ---
 
@@ -10,24 +10,23 @@ Native 16 KB page alignment: **Verified OK** (`arm64-v8a` & `x86_64` ELF `PT_LOA
 
 | Section | Selection / Answer |
 | :--- | :--- |
-| **Privacy Policy URL** | `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy` (hosted live via Cloudflare Workers; website `https://tapwing-keyboard.mixxermannipropvp.workers.dev`, support via the contact listed in the [Privacy Policy](../../PRIVACY_POLICY.md#5-contact)). |
-| **App Access** | *All functionality is available without special access* (optional BYO API key is clearly optional; local rules work without any account or login). |
+| **Privacy Policy URL** | `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy` (hosted live via Cloudflare Workers; support via contact in [PRIVACY_POLICY.md](../../PRIVACY_POLICY.md)). |
+| **App Access** | *All functionality is available without special access* (all offline features and built-in rules require no login or account; cloud API keys are optional BYO-key). |
 | **Ads** | *No, my app does not contain ads.* |
-| **Content Rating (IARC)** | General Utilities / Tools -> **PEGI 3 / Everyone** (user-entered text only; no UGC feed, no violence, no gambling). |
-| **Target Audience** | **13–15, 16–17, 18 and over** (general productivity utility; not specifically designed for children under 13). |
+| **Content Rating (IARC)** | General Utilities / Tools -> **PEGI 3 / Everyone** (no UGC feed, no violence, no gambling). |
+| **Target Audience** | **13–15, 16–17, 18 and over** (general productivity keyboard; not directed at children under 13). |
 | **Government Apps / Financial / Health** | *No* to all. |
 
 ---
 
 ## 2. Permissions Audit (`AndroidManifest.xml`)
 
-Tapwing declares the permissions below. Photo OCR via the system picker needs no storage permission. The optional automatic screenshot features use media access.
+Tapwing declares only the runtime permissions listed below. Broad gallery/storage permissions (`READ_MEDIA_IMAGES`, `READ_EXTERNAL_STORAGE`) were completely removed.
 
 | Permission | Purpose | Play Policy Risk | Runtime Trigger |
 | :--- | :--- | :--- | :--- |
-| `INTERNET` | Model downloads and optional user-configured cloud AI requests | Provider receives text or audio for the selected action | Model download, cloud writing, or explicitly enabled cloud dictation |
-| `RECORD_AUDIO` | Android, Whisper, and optional cloud dictation | Standard voice permission | Requested to enable dictation |
-| `READ_MEDIA_IMAGES` / `READ_EXTERNAL_STORAGE` (through API 32) | Optional screenshot detection | Broad photo access | Only if the user enables screenshot access |
+| `INTERNET` | Verified SHA-256 downloads of optional offline models/dictionaries and explicitly consented cloud AI/dictation requests | User-initiated only | Model/dictionary download or explicit cloud action after opt-in consent |
+| `RECORD_AUDIO` | On-device Sherpa-ONNX / Android speech dictation and explicitly consented cloud dictation | Standard voice permission | Prompted only when tapping the mic / voice settings |
 | `CAMERA` | Live camera text scan (`ScanTextActivity` + on-device ML Kit) | Low | Prompted only on opening Scan Text |
 | `VIBRATE` | Keypress haptic feedback | Normal (no prompt) | User setting (*Haptic feedback*) |
 | Photo/Gallery OCR | Uses `ActivityResultContracts.PickVisualMedia` (System Photo Picker) | **None** (0 storage permissions declared) | User taps *Scan photo* |
@@ -36,9 +35,9 @@ Tapwing declares the permissions below. Photo OCR via the system picker needs no
 
 ## 3. Data Safety Questionnaire
 
-- **Audio files → Voice or sound recordings**: Collected for app functionality, optional. Tapwing sends audio over an encrypted connection after the user selects cloud dictation and saves a provider key. Gemini Live sends audio while the microphone is active. The separate cloud mode sends it after recording stops. Mark this as non-ephemeral because provider retention depends on the user's account and provider. The transfer is user-initiated and disclosed before Cloud is selected.
-- **Other user-generated content**: Optional text sent to the configured provider for cloud writing or transcript cleanup. Use the provider's actual retention terms for the applicable configuration.
-- On-device mode, clipboard suggestions, local typing, and adaptive learning keep their content on the device. Keep the published privacy policy consistent with the active release.
+- **Personal profile, clipboard, dictionary & stats**: Stored locally on-device in Credential-Encrypted (CE) storage protected by Android file-based encryption (with Android Keystore AES-256-GCM encryption for API keys and personal profile fields). Auto-learning of profile fields defaults to **Off** (explicit opt-in), and password/OTP/`IME_FLAG_NO_PERSONALIZED_LEARNING` editors are strictly excluded.
+- **Audio files → Voice or sound recordings**: Strictly **optional**, only transmitted if the user explicitly selects a Cloud voice engine (`CLOUD` or `GEMINI_LIVE`), grants explicit per-provider cloud consent in-app, and supplies their own API key. Default speech modes (`LOCAL_WHISPER`, `AUTO_LOCAL_FIRST`, `ON_DEVICE_SPEECH`) never transmit audio off-device.
+- **Other user-generated content**: Selected text is only transmitted over HTTPS if the user explicitly grants per-provider cloud consent, configures an API key, and invokes a cloud writing aid action.
 
 ---
 
@@ -46,12 +45,11 @@ Tapwing declares the permissions below. Photo OCR via the system picker needs no
 
 | Check | Status | Output / Evidence |
 | :--- | :--- | :--- |
-| Release signing outside Git | Verified | `~/.tapwing-signing/tapwing-release.jks` (`RSA 2048`, valid to `2054-04-06`) |
-| Play App Signing Upload AAB | Generated by `./scripts/build-release.sh` | `dist/Tapwing-v1.2.0-release.aab` (verified with `jarsigner`) |
-| R8 / ProGuard Mapping File | Generated & copied | `dist/Tapwing-v1.2.0-mapping.txt` (upload under Play Console *App Bundle Explorer > Downloads > ReTrace mapping file*) |
+| Release signing outside Git | Verified | `~/.tapwing-signing/tapwing-release.jks` (`RSA 2048`) |
+| Play App Signing Upload AAB | Generated by `./scripts/build-release.sh` | `dist/Tapwing-v2.9.0-release.aab` (verified with `apksigner` / `jarsigner`) |
+| R8 / ProGuard Mapping File | Generated & copied | `dist/Tapwing-v2.9.0-mapping.txt` |
 | Native Debug Symbols | Configured | `ndk { debugSymbolLevel = "SYMBOL_TABLE" }` in `app/build.gradle.kts` |
-| 16 KB Page-Size Compliance | Automated check in `build-release.sh` | Verified `PT_LOAD >= 16384` across all `arm64-v8a` & `x86_64` `.so` libraries |
-| Play Store Graphic Assets | Generated locally in `dist/play-store-assets/` | `512×512` Icon, `1024×500` Feature Graphic, phone screenshots |
+| 16 KB Page-Size Compliance | Automated check in `build-release.sh` & CI | Verified `PT_LOAD >= 16384` across all `.so` libraries |
 
 ---
 
@@ -60,6 +58,6 @@ Tapwing declares the permissions below. Photo OCR via the system picker needs no
 ```text
 1. Enable Tapwing in Android System Settings -> On-screen keyboard -> Tapwing, then switch active input method to Tapwing.
 2. Open the main Tapwing Settings app and tap "Test keyboard here..." to test typing, autocorrect, 1-tap Proactive Undo, inline calculator (e.g. 24*7=), and the customizable Quick Bar.
-3. Optional Voice Typing & Camera OCR prompt for RECORD_AUDIO / CAMERA only when activated.
-4. AI Writing Tools work offline out of the box via local rules without any login or API key. Cloud providers are strictly optional bring-your-own-key features.
+3. Optional Voice Typing & Camera OCR prompt for RECORD_AUDIO / CAMERA only when activated. Photo OCR uses the Android System Photo Picker with no media storage permissions.
+4. AI Writing Tools and local dictation work offline without any account or API key. Cloud AI/dictation features are strictly opt-in and require an explicit user consent dialog plus a user-provided API key.
 ```

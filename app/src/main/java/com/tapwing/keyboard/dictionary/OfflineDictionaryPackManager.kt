@@ -20,11 +20,17 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 
+import com.tapwing.keyboard.ai.DownloadIntegrityVerifier
+
 data class OfflinePackSpec(
     val langCode: String,
     val displayName: String,
     val approxSizeKb: Int,
-    val downloadUrl: String
+    val downloadUrl: String,
+    val exactSizeBytes: Long = 0L,
+    val sha256: String = "",
+    val licenseName: String = "MIT / CC-BY-SA-4.0",
+    val licenseUrl: String = "https://github.com/hermitdave/FrequencyWords"
 )
 
 sealed interface PackInstallState {
@@ -203,12 +209,19 @@ class OfflineDictionaryPackManager(context: Context) {
             val part = File(target.parentFile, "${target.name}.part")
             updateState(spec.langCode, PackInstallState.Downloading(0.05f))
             try {
-                downloadToFile(spec.downloadUrl, part) { progress ->
+                val digest = downloadToFile(spec.downloadUrl, part) { progress ->
                     updateState(spec.langCode, PackInstallState.Downloading(progress))
                 }
-                if (!part.isFile || part.length() <= 10_000L) {
+                val integrity = DownloadIntegrityVerifier.verify(
+                    file = part,
+                    expectedSizeBytes = spec.exactSizeBytes,
+                    expectedSha256 = spec.sha256,
+                    precomputedSha256 = digest
+                )
+                if (integrity.isFailure || !part.isFile || part.length() <= 10_000L) {
                     part.delete()
-                    updateState(spec.langCode, PackInstallState.Error("Incomplete dictionary pack"))
+                    val msg = integrity.exceptionOrNull()?.localizedMessage ?: "Dictionary integrity check failed"
+                    updateState(spec.langCode, PackInstallState.Error(msg))
                     return@launch
                 }
                 if (target.exists()) target.delete()
@@ -252,7 +265,7 @@ class OfflineDictionaryPackManager(context: Context) {
         refreshStates()
     }
 
-    private suspend fun downloadToFile(urlStr: String, dest: File, onProgress: (Float) -> Unit) {
+    private suspend fun downloadToFile(urlStr: String, dest: File, onProgress: (Float) -> Unit): String {
         var currentUrl = urlStr
         var redirects = 0
         var conn: HttpURLConnection
@@ -265,13 +278,17 @@ class OfflineDictionaryPackManager(context: Context) {
                 instanceFollowRedirects = false
                 connectTimeout = 15_000
                 readTimeout = 20_000
-                setRequestProperty("User-Agent", "TapwingKeyboard/2.6 (Android)")
+                setRequestProperty("User-Agent", "TapwingKeyboard/2.9 (Android)")
             }
             val code = conn.responseCode
             if (code in 300..399) {
                 val loc = conn.getHeaderField("Location") ?: error("Redirect without Location")
                 conn.disconnect()
-                currentUrl = URL(parsed, loc).toString()
+                val nextUrl = URL(parsed, loc).toString()
+                if (!URL(nextUrl).protocol.equals("https", ignoreCase = true)) {
+                    throw SecurityException("Blocked non-HTTPS redirect target")
+                }
+                currentUrl = nextUrl
                 redirects++
                 if (redirects > 5) error("Too many redirects")
                 continue
@@ -282,6 +299,7 @@ class OfflineDictionaryPackManager(context: Context) {
             }
             break
         }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
         try {
             val total = conn.contentLengthLong.takeIf { it > 0L } ?: 650_000L
             conn.inputStream.use { input ->
@@ -295,6 +313,7 @@ class OfflineDictionaryPackManager(context: Context) {
                         if (readTotal > MAX_PACK_BYTES) {
                             throw SecurityException("Dictionary pack exceeds ${MAX_PACK_BYTES / (1024 * 1024)} MB limit")
                         }
+                        digest.update(buf, 0, n)
                         output.write(buf, 0, n)
                         onProgress((readTotal.toFloat() / total.toFloat()).coerceIn(0.05f, 0.99f))
                     }
@@ -305,6 +324,7 @@ class OfflineDictionaryPackManager(context: Context) {
         } finally {
             conn.disconnect()
         }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun updateState(langCode: String, state: PackInstallState) {
@@ -327,16 +347,80 @@ class OfflineDictionaryPackManager(context: Context) {
 
     companion object {
         private const val MAX_PACK_BYTES = 10L * 1024L * 1024L
+        private const val FREQUENCY_WORDS_COMMIT = "525f9b560de45753a5ea01069454e72e9aa541c6"
         val availablePacks: List<OfflinePackSpec> = listOf(
-            OfflinePackSpec("de", "Deutsch (50.000 Wörter)", 620, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/de/de_50k.txt"),
-            OfflinePackSpec("en", "English (50,000 words)", 560, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt"),
-            OfflinePackSpec("fr", "Français (50 000 mots)", 600, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/fr/fr_50k.txt"),
-            OfflinePackSpec("es", "Español (50.000 palabras)", 590, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/es/es_50k.txt"),
-            OfflinePackSpec("it", "Italiano (50.000 parole)", 600, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/it/it_50k.txt"),
-            OfflinePackSpec("pt", "Português (50.000 palavras)", 590, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/pt/pt_50k.txt"),
-            OfflinePackSpec("nl", "Nederlands (50.000 woorden)", 580, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/nl/nl_50k.txt"),
-            OfflinePackSpec("pl", "Polski (50 000 słów)", 630, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/pl/pl_50k.txt"),
-            OfflinePackSpec("tr", "Türkçe (50.000 kelime)", 610, "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/tr/tr_50k.txt")
+            OfflinePackSpec(
+                langCode = "de",
+                displayName = "Deutsch (50.000 Wörter)",
+                approxSizeKb = 647,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/de/de_50k.txt",
+                exactSizeBytes = 662_497L,
+                sha256 = "d9e50546fd7e8b6fe6542a2b33c51d1331092b2a3916ec09f80d97856068705b"
+            ),
+            OfflinePackSpec(
+                langCode = "en",
+                displayName = "English (50,000 words)",
+                approxSizeKb = 608,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/en/en_50k.txt",
+                exactSizeBytes = 622_749L,
+                sha256 = "5351ff405b1126ef555791dd4d9798a48e3e9a501a9fc481a9da957752cfb458"
+            ),
+            OfflinePackSpec(
+                langCode = "fr",
+                displayName = "Français (50 000 mots)",
+                approxSizeKb = 638,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/fr/fr_50k.txt",
+                exactSizeBytes = 653_452L,
+                sha256 = "f81f7c570b6433764da99aa30f4dfb08d81c5926301377b709af23a13b1f9596"
+            ),
+            OfflinePackSpec(
+                langCode = "es",
+                displayName = "Español (50.000 palabras)",
+                approxSizeKb = 643,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/es/es_50k.txt",
+                exactSizeBytes = 658_626L,
+                sha256 = "dcff3ad4316192f4dc4ff7d26e637c6ff314ef1ca0f3f720c5649018a71056c0"
+            ),
+            OfflinePackSpec(
+                langCode = "it",
+                displayName = "Italiano (50.000 parole)",
+                approxSizeKb = 638,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/it/it_50k.txt",
+                exactSizeBytes = 653_205L,
+                sha256 = "bb96cdcb56d28342c1e909db6b2525448b7767136b7e86a2ccc649a1be66fc19"
+            ),
+            OfflinePackSpec(
+                langCode = "pt",
+                displayName = "Português (50.000 palavras)",
+                approxSizeKb = 637,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/pt/pt_50k.txt",
+                exactSizeBytes = 652_361L,
+                sha256 = "f97704382f97273ff59488b1885e7ac90d20f81fd92e5fbad3e3ce43633f495c"
+            ),
+            OfflinePackSpec(
+                langCode = "nl",
+                displayName = "Nederlands (50.000 woorden)",
+                approxSizeKb = 636,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/nl/nl_50k.txt",
+                exactSizeBytes = 650_762L,
+                sha256 = "099bd0c27b514d54284360ad9ce2b4ef7b6903b22e848b67ab10f6aa2adb4baa"
+            ),
+            OfflinePackSpec(
+                langCode = "pl",
+                displayName = "Polski (50 000 słów)",
+                approxSizeKb = 661,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/pl/pl_50k.txt",
+                exactSizeBytes = 676_499L,
+                sha256 = "50bf8d30d1ed4f5cedceb3e40e74d793ec6bec0f16d9f3dd0a2c9e313402e10f"
+            ),
+            OfflinePackSpec(
+                langCode = "tr",
+                displayName = "Türkçe (50.000 kelime)",
+                approxSizeKb = 695,
+                downloadUrl = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/$FREQUENCY_WORDS_COMMIT/content/2018/tr/tr_50k.txt",
+                exactSizeBytes = 711_935L,
+                sha256 = "480192844e7fdfe9591bbf0b9cfbb96ed5751cfbba7024fd45d8cb7508e07d5c"
+            )
         )
 
         fun parseFrequencyWordList(langCode: String, lines: Sequence<String>): LoadedDictionaryPack {
