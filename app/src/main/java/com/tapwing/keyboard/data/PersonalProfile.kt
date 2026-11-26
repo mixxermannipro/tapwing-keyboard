@@ -184,15 +184,28 @@ data class PersonalProfile(
                 val y = m.groupValues[1].toIntOrNull() ?: return null
                 val mo = m.groupValues[2].toIntOrNull() ?: return null
                 val d = m.groupValues[3].toIntOrNull() ?: return null
-                if (y in 1900..2100 && mo in 1..12 && d in 1..31) return Triple(y, mo, d)
+                if (isValidCalendarDate(y, mo, d)) return Triple(y, mo, d)
+                return null
             }
             DMY_DATE_REGEX.matchEntire(clean)?.let { m ->
                 val d = m.groupValues[1].toIntOrNull() ?: return null
                 val mo = m.groupValues[2].toIntOrNull() ?: return null
                 val y = m.groupValues[3].toIntOrNull() ?: return null
-                if (y in 1900..2100 && mo in 1..12 && d in 1..31) return Triple(y, mo, d)
+                if (isValidCalendarDate(y, mo, d)) return Triple(y, mo, d)
+                return null
             }
             return null
+        }
+
+        internal fun isValidCalendarDate(year: Int, month: Int, day: Int): Boolean {
+            if (year !in 1900..2100 || month !in 1..12 || day < 1) return false
+            val maxDay = when (month) {
+                1, 3, 5, 7, 8, 10, 12 -> 31
+                4, 6, 9, 11 -> 30
+                2 -> if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) 29 else 28
+                else -> return false
+            }
+            return day <= maxDay
         }
 
         fun fromJson(

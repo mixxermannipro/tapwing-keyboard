@@ -126,29 +126,15 @@ object CloudAiClient {
             if (host.isBlank()) return@runCatching false
             when (u.protocol.lowercase()) {
                 "https" -> true
-                "http" -> isPrivateOrLoopbackHost(host)
+                "http" -> isLoopbackHost(host)
                 else -> false
             }
         }.getOrDefault(false)
     }
 
-    internal fun isPrivateOrLoopbackHost(rawHost: String): Boolean {
+    internal fun isLoopbackHost(rawHost: String): Boolean {
         val host = rawHost.trim().lowercase().removePrefix("[").removeSuffix("]")
-        if (host == "localhost" || host == "127.0.0.1" || host == "::1" || host.endsWith(".local")) {
-            return true
-        }
-        val parts = host.split('.')
-        if (parts.size == 4) {
-            val a = parts[0].toIntOrNull() ?: return false
-            val b = parts[1].toIntOrNull() ?: return false
-            val c = parts[2].toIntOrNull() ?: return false
-            val d = parts[3].toIntOrNull() ?: return false
-            if (a !in 0..255 || b !in 0..255 || c !in 0..255 || d !in 0..255) return false
-            if (a == 10 || a == 127) return true
-            if (a == 192 && b == 168) return true
-            if (a == 172 && b in 16..31) return true
-        }
-        return false
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 
     private fun readStreamSafely(stream: java.io.InputStream?, maxBytes: Int = MAX_RESPONSE_BYTES): String {
@@ -297,7 +283,7 @@ object CloudAiClient {
         val cleanModel = model.trim().ifEmpty { "gpt-4.1-mini" }
         val base = customEndpoint.trim().ifEmpty { OPENAI_ENDPOINT }
         if (!isValidHttpUrl(base)) {
-            return CloudAiResult.Failure("Invalid custom endpoint URL (HTTPS required for public hosts)")
+            return CloudAiResult.Failure("Invalid custom endpoint URL (HTTPS required; HTTP only for localhost)")
         }
         return callOpenAiCompatible(
             apiKey = apiKey,

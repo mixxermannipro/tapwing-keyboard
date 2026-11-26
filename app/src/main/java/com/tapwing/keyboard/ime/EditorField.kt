@@ -34,17 +34,18 @@ internal enum class EditorField {
             if (inputType == InputType.TYPE_NULL) return UNKNOWN
             val type = inputType and InputType.TYPE_MASK_CLASS
             val variation = inputType and InputType.TYPE_MASK_VARIATION
-            if (type == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD) return PASSWORD
+            if (SensitiveEditorGuard.isSensitiveEditor(
+                    inputType = inputType,
+                    imeOptions = 0,
+                    fieldName = fieldName,
+                    hint = hint
+                )
+            ) return PASSWORD
             if (type != InputType.TYPE_CLASS_TEXT) return STRUCTURED
 
             val field = words(fieldName)
             val label = words(hint)
             val nameTokens = field.split(' ')
-            if (variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
-                variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
-                variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
-                nameTokens.any { it in passwords } || label in passwordHints
-            ) return PASSWORD
             if (variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS ||
                 variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS ||
                 nameTokens.contains("email") || label in emailHints

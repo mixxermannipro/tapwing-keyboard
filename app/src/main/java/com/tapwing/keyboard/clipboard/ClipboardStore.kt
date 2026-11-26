@@ -330,10 +330,7 @@ class ClipboardStore(
                 if (deCtx != null && deCtx.filesDir != appCtx.filesDir) {
                     val legacyDeFile = File(deCtx.filesDir, CLIPBOARD_FILE_NAME)
                     if (legacyDeFile.isFile) {
-                        if (!ceFile.isFile) {
-                            legacyDeFile.copyTo(ceFile, overwrite = false)
-                        }
-                        legacyDeFile.delete()
+                        com.tapwing.keyboard.data.StorageMigration.migrateDeFileToCe(legacyDeFile, ceFile)
                     }
                 }
             }
