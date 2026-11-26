@@ -21,7 +21,7 @@ Tapwing is a fast, clean-room Android keyboard (English QWERTY & German QWERTZ) 
 KEY FEATURES
 
 • Crisp Capsule Layout & Optional Translucent Glass Mode
-Clean keys with a dedicated 1–0 number row, centered secondary symbols, continuous live height resizing (75%–135%), plus an optional Liquid Glass visual style with spring keycap animations.
+Clean keys with a dedicated 1–0 number row, centered secondary symbols, continuous live height resizing (75%–135%), plus an optional translucent Glass visual mode with spring keycap animations.
 
 • Fully Customizable Top Quick-Actions Bar
 Choose which shortcuts sit above your keyboard and reorder them anytime—either directly via long-press on the keyboard strip or in the minimalist settings editor.
@@ -49,12 +49,12 @@ PRIVACY BY DESIGN
 Typing, dictionary learning, clipboard history, and camera OCR stay locally on your device. No ads, no analytics SDKs, no hidden uploads.
 ```
 
-## Release Notes (`v2.7.0` — max 500 chars)
+## Release Notes (`v2.9.0` — max 500 chars)
 ```text
-What's new in Tapwing 2.7.0:
-• On-device GGUF LLMs for offline writing assistance & supercharged multilingual dictation with auto bullet lists
-• Streamlined dropdown settings UI, WCAG-AAA accessibility improvements & faster hot-path typing performance
-• Security, concurrency & stability hardening across network, archives, clipboard and permissions
+What's new in Tapwing 2.9.0:
+• Stronger privacy & storage security: CE-encrypted storage for personal profile data, explicit per-provider cloud consent & revocation, and new Privacy & Licenses screens
+• Safer clipboard & zero media permissions: blocks password, card & OTP capture while keeping OCR strictly via Android's System Photo Picker
+• SHA-256 verified model & dictionary downloads plus automatic memory watchdog
 ```
 
 ## Category & Tags

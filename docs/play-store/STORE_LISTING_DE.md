@@ -20,8 +20,8 @@ Tapwing ist eine moderne, schnelle und datenschutzfreundliche Android-Tastatur (
 
 HIGHLIGHTS
 
-• Klassisches 1:1 Kapsel-Layout & Glas-Modus
-Klare Tasten mit eigener 1–0 Zahlenreihe, Zweitbelegungen direkt über den Buchstaben, anpassbarer Größe per Live-Schieberegler (75 %–135 %) sowie optionalem „Liquid Glass“-Modus mit transluzenten Tasten und geschmeidigen Feder-Animationen.
+• Klassisches Kapsel-Layout & Glas-Modus
+Klare Tasten mit eigener 1–0 Zahlenreihe, Zweitbelegungen direkt über den Buchstaben, anpassbarer Größe per Live-Schieberegler (75 %–135 %) sowie optionalem Glas-Modus mit durchscheinenden Tasten und geschmeidigen Feder-Animationen.
 
 • Frei anpassbare Schnellleiste
 Entscheide selbst, welche Kurzbefehle über deiner Tastatur erscheinen und in welcher Reihenfolge – wahlweise direkt per langem Druck in der Tastaturleiste oder minimalistisch in den Einstellungen.
@@ -49,12 +49,12 @@ DATENSCHUTZ IM FOKUS
 Tippen, Lernen, Wörterbücher, Zwischenablage und Kamera-OCR arbeiten direkt auf deinem Gerät. Keine Werbung, keine Analyse-Tracker, volle Kontrolle.
 ```
 
-## Versionshinweise (`v2.7.0` — max. 500 Zeichen)
+## Versionshinweise (`v2.9.0` — max. 500 Zeichen)
 ```text
-Neu in Tapwing 2.7.0:
-• Lokale GGUF-Sprachmodelle (KI-Schreibhilfe offline) & erweitertes mehrsprachiges Diktat mit automatischen Aufzählungen
-• Aufgeräumte Dropdown-Einstellungen, verbesserte Barrierefreiheit (WCAG-AAA) & spürbar schnellere Tasten-Reaktion
-• Sicherheits- und Stabilitäts-Updates für Netzwerk, Zwischenablage, Archive & Berechtigungen
+Neu in Tapwing 2.9.0:
+• Datenschutz & Speicher-Härtung: Verschlüsselter Gerätespeicher (CE-Storage) für Profildaten, Opt-in-Einwilligung für Cloud-KI und neuer Datenschutz- & Lizenzbereich
+• Noch sicherere Zwischenablage: Automatischer Schutz für Passwort-, Karten- und OTP-Felder sowie Entfernung aller Medien-Berechtigungen (OCR via System-Auswahl)
+• Verifizierte Modell- & Wörterbuch-Downloads per SHA-256-Prüfsumme sowie automatische Speicher-Entlastung
 ```
 
 ## Store-Kategorie & Tags

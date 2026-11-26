@@ -1,0 +1,16 @@
+version = 1
+SPDX-PackageName = "Tapwing"
+SPDX-PackageSupplier = "Manuel Blasaditsch"
+SPDX-PackageDownloadLocation = "https://github.com/mixxermannipro/Tapwing"
+
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "Copyright 2026 Manuel Blasaditsch"
+SPDX-License-Identifier = "LicenseRef-Tapwing-Source-Available"
+
+[[annotations]]
+path = ["LICENSE", "LICENSES/**", "docs/licensing.md"]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright 2026 Manuel Blasaditsch"
+SPDX-License-Identifier = "LicenseRef-Tapwing-Source-Available"

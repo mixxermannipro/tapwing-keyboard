@@ -1,27 +1,19 @@
-# Tapwing licensing
+# Tapwing Licensing
 
-The [root license](../LICENSE) defines the terms for new material
-expressly marked **Tapwing Source Available**. This file is covered
-by those terms. Contributors can inspect the source, test proposed
-changes locally, and submit pull requests under the
-[contribution policy](../CONTRIBUTING.md).
+Tapwing is published under a dual historical & source-available licensing model:
 
-## Apache-2.0 and third-party material
+1. **Tapwing Source Available License (current code, post-`299dc28b80e791e750cff20ff10694b031d6604e`)**:
+   All additions, refactoring, security hardening, AI/voice pipelines, and UI changes introduced after commit `299dc28b80e791e750cff20ff10694b031d6604e` are licensed exclusively under `LicenseRef-Tapwing-Source-Available` as defined in [LICENSE](../LICENSE).
+2. **Apache-2.0 Historical Baseline (through `299dc28b80e791e750cff20ff10694b031d6604e`)**:
+   The earlier codebase up to and including commit `299dc28b80e791e750cff20ff10694b031d6604e` remains available under the Apache License, Version 2.0.
+3. **REUSE / SPDX Metadata**:
+   Machine-readable license annotations live in [REUSE.toml](../REUSE.toml), with `SPDX-License-Identifier: LicenseRef-Tapwing-Source-Available` headers on new source files.
 
-The [Apache-licensed main baseline](https://github.com/mixxermannipro/tapwing-keyboard/tree/299dc28b80e791e750cff20ff10694b031d6604e)
-contains the existing keyboard implementation. Apache-2.0 applies to
-material already shared on those terms, including portions reused in
-later versions. The [Apache-2.0 text](../LICENSES/Apache-2.0.txt) is
-included here. Keep all applicable license texts, attribution and
-notices when redistributing Apache-licensed components.
+## Bundled Third-Party Libraries & Preserved Notices
+- Android release packaging explicitly preserves `META-INF/NOTICE*` and `META-INF/LICENSE*` notices for bundled libraries (AndroidX, Jetpack Compose, Kotlin Coroutines, Sherpa-ONNX, ONNX Runtime, Llamatik / llama.cpp, OkHttp, Apache Commons Compress, Google ML Kit).
+- Full attribution details are viewable inside the app under **Settings -> System -> Open-Source & Model Licenses**.
 
-[Gradle dependencies](../app/build.gradle.kts) and the
-[Gradle wrapper](../gradle/wrapper/) retain their respective terms.
-The models in the [local model catalog](../app/src/main/java/com/tapwing/keyboard/ai/LocalModelCatalog.kt)
-are downloaded separately. Their upstream terms apply to the model
-files. The project's source terms grant no rights in third-party
-brands, assets, SDKs or services.
-
-When accepting a new source-available contribution, record its scope in
-a file notice or in this document. For a modified Apache-2.0 file,
-identify the new portions and preserve its notices.
+## Downloadable On-Device Models & Dictionary Packs
+- Speech models (NVIDIA NeMo FastConformer / Nemotron / Parakeet, Sherpa-ONNX Whisper, Kroko, Canary), local GGUF LLMs (LiquidAI LFM2.5, Qwen3, Gemma-3n, Gemma-3), and FrequencyWords dictionaries are **not bundled** inside the APK/AAB.
+- Users optionally download them on demand from pinned upstream commits with strict SHA-256 and exact byte-size verification (`DownloadIntegrityVerifier`).
+- Each catalog item carries its upstream license (`CC-BY-4.0`, `Apache-2.0`, `MIT`, `Gemma Terms of Use`, `NSLCL`, `CC-BY-SA-4.0`, `Qwen`), attribution notice, and clickable license link inside the app.

@@ -32,16 +32,17 @@ class SecurityAndHardeningTest {
     val tempFolder = TemporaryFolder()
 
     @Test
-    fun cloudAiClientEnforcesHttpsOnPublicHostsAndAllowsPrivateLanHttp() {
+    fun cloudAiClientEnforcesHttpsAndLoopbackOnlyHttp() {
         assertTrue(CloudAiClient.isValidHttpUrl("https://api.openai.com/v1/chat/completions"))
         assertTrue(CloudAiClient.isValidHttpUrl("http://localhost:11434/v1/chat/completions"))
         assertTrue(CloudAiClient.isValidHttpUrl("http://127.0.0.1:8080/v1/chat/completions"))
-        assertTrue(CloudAiClient.isValidHttpUrl("http://192.168.1.42:11434/v1"))
-        assertTrue(CloudAiClient.isValidHttpUrl("http://10.0.0.12:8000/v1"))
-        assertTrue(CloudAiClient.isValidHttpUrl("http://172.16.4.1:8000/v1"))
-        assertTrue(CloudAiClient.isValidHttpUrl("http://ollama.local:11434/v1"))
+        assertTrue(CloudAiClient.isValidHttpUrl("http://[::1]:11434/v1"))
 
-        // Public cleartext HTTP MUST be blocked to prevent API key leakage in transit
+        // LAN/private HTTP hosts and public cleartext HTTP MUST be blocked to prevent key leakage / MITM
+        assertFalse(CloudAiClient.isValidHttpUrl("http://192.168.1.42:11434/v1"))
+        assertFalse(CloudAiClient.isValidHttpUrl("http://10.0.0.12:8000/v1"))
+        assertFalse(CloudAiClient.isValidHttpUrl("http://172.16.4.1:8000/v1"))
+        assertFalse(CloudAiClient.isValidHttpUrl("http://ollama.local:11434/v1"))
         assertFalse(CloudAiClient.isValidHttpUrl("http://api.openai.com/v1/chat/completions"))
         assertFalse(CloudAiClient.isValidHttpUrl("http://8.8.8.8/v1"))
         assertFalse(CloudAiClient.isValidHttpUrl("http://172.15.0.1/v1"))
@@ -149,6 +150,8 @@ class SecurityAndHardeningTest {
     fun permissionBridgeWhitelistsOnlyDeclaredRuntimePermissions() {
         assertTrue(Manifest.permission.RECORD_AUDIO in PermissionBridgeActivity.ALLOWED_PERMISSIONS)
         assertTrue(Manifest.permission.CAMERA in PermissionBridgeActivity.ALLOWED_PERMISSIONS)
+        assertFalse(Manifest.permission.READ_MEDIA_IMAGES in PermissionBridgeActivity.ALLOWED_PERMISSIONS)
+        assertFalse(Manifest.permission.READ_EXTERNAL_STORAGE in PermissionBridgeActivity.ALLOWED_PERMISSIONS)
         assertFalse(Manifest.permission.READ_CONTACTS in PermissionBridgeActivity.ALLOWED_PERMISSIONS)
         assertFalse(Manifest.permission.ACCESS_FINE_LOCATION in PermissionBridgeActivity.ALLOWED_PERMISSIONS)
     }

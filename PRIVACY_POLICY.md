@@ -1,65 +1,82 @@
 # Privacy Policy — Tapwing Keyboard (`com.tapwing.keyboard`)
 
-**Effective Date / Stand:** 2026-11-21
+**Effective Date / Stand:** `2026-11-26` (Version `2.9.0`, `versionCode = 17`)
+**Hosted Privacy Policy URL:** `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`
+**Contact:** `mixxermannipropvp@gmail.com`
 
 ---
 
 ## English
 
-Tapwing Keyboard ("Tapwing") is built around local, on-device processing. Tapwing does not run analytics SDKs, advertising trackers, or developer-operated telemetry servers.
+### 1. Core Principle: On-Device First
+Tapwing is designed so core keyboard functionality runs **100% locally on your device**:
+- No advertisements, no behavioral analytics SDKs, no crash-reporting trackers, and no background keylogging uploads.
+- Local typing, layout predictions, autocorrect, offline frequency dictionaries, camera OCR, and local rule-based writing assistance stay strictly on your device.
 
-### 1. What We Do Not Collect
-- Tapwing does not send your typing to developer servers or sell it. The optional cloud features below send the content needed for the selected action directly to the configured provider.
-- Passwords, sensitive fields, and typing performed while **Incognito Mode** is active are excluded from adaptive learning and clipboard history.
-- Tapwing includes **zero** ads and **zero** third-party analytics libraries.
+### 2. Storage Separation (Direct Boot DE vs. Credential-Encrypted CE Storage)
+To protect sensitive user data when a device is locked after reboot (`Direct Boot`):
+- **Device-Encrypted (DE) storage**: stores only non-sensitive keyboard configuration (active layout, height, theme preferences, feature toggles, consented provider IDs) so the keyboard can appear cleanly before first unlock.
+- **Credential-Encrypted (CE) storage (accessible only after user unlock)**: stores all personal and behavioral user data:
+  - `PersonalProfileStorage`: personal profile fields encrypted via `AndroidKeyStore` AES-256-GCM (`name`, `birthDate`, `email`, `phone`, address, company, website)
+  - `SecureKeyStorage`: optional user API keys encrypted via hardware-backed `AndroidKeyStore` AES-256-GCM
+  - `ClipboardStore`, `AdaptiveDictionaryStore`, and `TypingStatsStore`: clipboard history, learned vocabulary/bigrams/snippets, and local typing counters (automatically migrated from legacy DE paths with zero-fill deletion of legacy files).
 
-### 2. Local On-Device Storage
-The following data is stored exclusively in app-private, device-protected local storage on your Android device:
-- **Keyboard Preferences**: layout, scale, custom quick-action bar configuration, clipboard retention limits (`DataStore Preferences`).
-- **Custom Dictionary & Adaptive Learning**: words, frequency weights, text shortcuts, and bigrams you create or import (for example from a `.zip`, `.txt`, `.tsv`, `.csv`, or `.json` file), plus rejected autocorrections (`tapwing_dictionary_state.json`). You can export or delete this data at any time in *Settings > Dictionary*.
-- **Clipboard history** keeps copied text and locally cached images up to your configured item limit and retention window (`1 hour` to `30 days` or `Never`). Tapwing checks for duplicate content on the device and skips clips marked sensitive by Android. You can disable or clear the history at any time.
-- **Quick search** hands the query to your chosen browser or compatible search app when you open it. Your selected search engine receives the query when that app loads the results.
-- **Optional AI API Key**: if you configure a custom AI key, it is encrypted locally using hardware-backed `AndroidKeyStore` (`AES/GCM/NoPadding`).
+### 3. Sensitive Editors, OTP Protection & Opt-In Learning
+- **Sensitive field guard (`SensitiveEditorGuard`)**: Tapwing automatically pauses profile learning, clipboard persistence, and typing stats in password fields, credit card/CVV fields, OTP/TAN/PIN inputs, and any editor requesting `IME_FLAG_NO_PERSONALIZED_LEARNING`.
+- **OTP clipboard filter**: Detected 4–8 digit verification/OTP codes copied to the system clipboard are surfaced only ephemerally or excluded from persistent clipboard history.
+- **Incognito mode**: Pauses all adaptive learning, typing stats, and clipboard recording.
+- **Smart profile learning is Opt-In**: `smartProfileAutoLearn` defaults to **Off (`false`)** and requires explicit user confirmation before learning profile attributes locally. Previously learned entries can be inspected individually or cleared completely in **Settings -> Autofill & Profile**.
 
-### 3. Optional Device & Network Features (User-Initiated Only)
-- **Dictation (`RECORD_AUDIO`)**: starts when you tap the microphone. Whisper and Android offline speech process audio on your device. The standard Android speech service may use the internet depending on your device. Tapwing deletes its temporary recording when processing finishes or you cancel.
-- **Camera OCR (`CAMERA`)**: triggered only when you open *Scan Text*. Text recognition runs 100% locally on your device using Google ML Kit Text Recognition (`com.google.mlkit:text-recognition`) without sending images to external servers.
-- **Image/Screenshot OCR (`PickVisualMedia`)**: uses the Android System Photo Picker so Tapwing reads only the single image you explicitly select—without requesting broad gallery or storage permissions.
-- **Optional cloud AI (`INTERNET`)**: Cloud dictation is off by default. If you enable it and save your API key for Gemini or OpenAI, Tapwing sends the recording directly to that provider over an encrypted connection. Gemini Live sends audio as you speak. In the separate cloud mode, the recording is sent after you stop. Optional cloud writing and transcript cleanup can send the text they process to the configured provider. Providers may retain or use data according to their terms and your API account settings. You can switch to an offline mode or remove your key at any time.
+### 4. Permissions & Zero Storage Access
+Tapwing declares only minimal permissions in `AndroidManifest.xml`:
+- **`RECORD_AUDIO`**: Only requested when you activate voice dictation or run mic diagnostics.
+- **`CAMERA`**: Only requested when you open live camera OCR (`ScanTextActivity`); text recognition runs on-device via ML Kit.
+- **`VIBRATE`**: Used locally for optional keypress haptics.
+- **`INTERNET`**: Used strictly for user-initiated downloads (SHA-256 & exact byte-size verified on-device speech models / offline dictionaries) or explicitly consented optional cloud AI requests.
+- **Zero Photo/Gallery Permissions**: Tapwing **does not** declare `READ_MEDIA_IMAGES` or `READ_EXTERNAL_STORAGE`. Single-image OCR uses Android's System Photo Picker (`PickVisualMedia`).
 
-### 4. Data Deletion & User Control
-You retain complete control over your local data:
-- Clear learned vocabulary/bigrams or imported dictionaries in *Settings > Dictionary*.
-- Clear clipboard items directly from the clipboard panel or reduce retention in *Settings > Clipboard & OCR*.
-- Remove your stored API key in *Settings > AI Writing Tools*.
-- Uninstalling Tapwing removes all locally stored app data.
+### 5. Optional Cloud AI & Cloud Dictation (Explicit Per-Provider Consent)
+- All cloud features (`CLOUD` dictation, `GEMINI_LIVE`, and cloud AI writing providers) are **disabled unless explicitly configured and consented** by you per provider (`consentedCloudProviders`).
+- Before enabling or testing a cloud provider, Tapwing displays an in-app consent dialog linking to that provider's privacy policy. You can revoke any or all cloud consents anytime in **Settings -> Privacy & Cloud Consent**.
+- Custom self-hosted endpoints disallow cleartext HTTP except strictly local loopback addresses (`localhost`, `127.0.0.1`, `::1`); all remote endpoints require HTTPS.
 
-### 5. Contact
-For privacy questions regarding Tapwing Keyboard (`com.tapwing.keyboard`), please contact us at `mixxermannipropvp@gmail.com`. Live hosted version: https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy
+### 6. Deletion & Contact
+All local profile data, learned words, clipboard entries, stats, downloaded models, and API keys can be deleted individually inside Tapwing Settings or removed completely by uninstalling the app.
+For privacy questions: `mixxermannipropvp@gmail.com`
 
 ---
 
 ## Deutsch
 
-**Tapwing Keyboard** („Tapwing“) ist konsequent für lokale Verarbeitung direkt auf deinem Gerät entwickelt. Tapwing enthält keine Werbung, keine Analyse-SDKs und keine Entwickler-Telemetrie.
+### 1. Grundprinzip: Verarbeitung lokal auf dem Gerät
+Tapwing verarbeitet sämtliche Kernfunktionen **100 % lokal auf deinem Gerät**:
+- Keine Werbung, keine Analyse-SDKs, kein Hintergrund-Upload von Eingaben.
+- Tippen, Wortvorschläge, Autokorrektur, Offline-Wörterbücher, Kamera-OCR sowie regelbasierte Schreibhilfe und lokale KI-Modelle arbeiten vollständig offline.
 
-### 1. Was Tapwing nicht sammelt
-- Tastenanschläge und getippte Texte werden **niemals** an eigene Server übertragen, protokolliert, verkauft oder geteilt.
-- Im **Inkognito-Modus** werden weder Wörter gelernt noch Einträge in der Zwischenablage gespeichert.
+### 2. Strikte Speichertrennung (Direct-Boot DE vs. Credential-Encrypted CE)
+- **Device-Encrypted (DE) Speicher**: enthält ausschließlich unkritische Tastatur-Einstellungen (Sprachlayout, Höhe, Design, Schalter), damit die Tastatur nach einem Neustart sofort funktioniert.
+- **Credential-Encrypted (CE) Speicher (erst nach Geräte-Entsperrung lesbar)**: enthält alle schützenswerten Daten:
+  - `PersonalProfileStorage`: persönliche Profildaten (AES-256-GCM mit `AndroidKeyStore`)
+  - `SecureKeyStorage`: optionale eigene API-Schlüssel (Hardware-gestützter `AndroidKeyStore` AES-256-GCM)
+  - `ClipboardStore`, `AdaptiveDictionaryStore`, `TypingStatsStore`: Zwischenablage, gelernte Wörter/Kürzel und lokale Tippstatistiken. Eventuelle Altdaten aus DE-Pfaden werden beim Start einmalig sicher in CE-Storage verschoben und überschrieben gelöscht.
 
-### 2. Lokale Speicherung auf dem Gerät
-Alle folgenden Daten verbleiben ausschließlich lokal im privaten App-Speicher auf deinem Smartphone:
-- **Einstellungen**: Tastaturgröße, Design, belegte Schnellleiste, Aufbewahrungsdauer.
-- **Wörterbuch & adaptives Lernen**: selbst angelegte oder importierte Wörterbücher (`.zip`, `.txt`, `.tsv`/`.csv`, `.json`), Textkürzel und lokal gelernte Wortpaare. Diese Daten lassen sich in den Einstellungen jederzeit exportieren oder vollständig löschen.
-- Kopierter Text und zwischengespeicherte Bilder bleiben in der **Zwischenablage** gemäß deinem Limit und Löschzeitraum auf dem Gerät. Tapwing führt gleiche Inhalte lokal zusammen und überspringt Einträge, die Android als vertraulich markiert. Du kannst den Verlauf jederzeit leeren oder ausschalten.
-- Wenn du die **Schnellsuche** öffnest, übergibt Tapwing den Suchbegriff an deinen Browser oder die gewählte Such-App. Deine Suchmaschine erhält den Begriff, sobald die App die Ergebnisse lädt.
-- **Optionaler API-Schlüssel**: wird ausschließlich auf Wunsch mit dem `AndroidKeyStore` (`AES/GCM/NoPadding`) verschlüsselt auf dem Gerät gespeichert.
+### 3. Sensible Felder, OTP-Schutz & Opt-in-Lernen
+- **Sensible Eingabefelder (`SensitiveEditorGuard`)**: Passwort-, Kreditkarten-, OTP-/TAN-/PIN-Felder sowie Felder mit `IME_FLAG_NO_PERSONALIZED_LEARNING` deaktivieren automatisch Profilerkennung, Tippstatistik und Zwischenablage-Speicherung.
+- **Inkognito-Modus**: Pausiert Lernen, Statistik und Verlauf jederzeit manuell.
+- **Opt-in für Smart-Fill-Lernen**: Automatische Profilerkennung ist standardmäßig **ausgeschaltet** und erfordert eine ausdrückliche Bestätigung. Gelernte Werte lassen sich jederzeit einsehen und restlos löschen.
 
-### 3. Optionale System- und Netzwerkfunktionen
-- **Diktat (`RECORD_AUDIO`)**: startet, wenn du auf das Mikrofon tippst. Whisper und Android offline verarbeiten Audio auf dem Gerät. Der normale Android-Sprachdienst kann je nach Gerät das Internet nutzen. Tapwing löscht seine temporäre Aufnahme nach der Verarbeitung oder beim Abbruch.
-- **Kamera-Texterkennung (`CAMERA`)**: öffnet sich nur bei „Text scannen“. Die Texterkennung läuft offline über ML Kit auf dem Gerät.
-- **Foto-/Screenshot-OCR (`PickVisualMedia`)**: nutzt den Android-System-Fotoauswahldialog für genau ein ausgewähltes Bild – ohne pauschale Galerie- oder Speicherberechtigung.
-- **Optionale Cloud-KI (`INTERNET`)**: Cloud-Diktat ist standardmäßig aus. Wenn du es einschaltest und deinen Schlüssel für Gemini oder OpenAI speicherst, sendet Tapwing die Aufnahme direkt über eine verschlüsselte Verbindung an den Anbieter. Gemini Live überträgt Audio bereits beim Sprechen. Im separaten Cloud-Modus geht die Aufnahme nach dem Stopp an den Anbieter. Bei Cloud-Schreibhilfe oder zusätzlicher Textbearbeitung nach dem Diktat kann der bearbeitete Text an den eingestellten Anbieter gehen. Ob ein Anbieter Daten speichert oder weiterverwendet, hängt von seinen Bedingungen und deinen Kontoeinstellungen ab. Du kannst jederzeit auf Offline-Verarbeitung wechseln oder deinen Schlüssel entfernen.
+### 4. Berechtigungen (Kein Medien-/Speicherzugriff)
+- **`RECORD_AUDIO`**: nur nach Aktivierung von Spracheingabe/Mikrofon.
+- **`CAMERA`**: nur für die Live-Kamera-Texterkennung (`ScanTextActivity`, lokal über ML Kit).
+- **`VIBRATE`**: optionales Tasten-Feedback.
+- **`INTERNET`**: ausschließlich für vom Nutzer ausgelöste, per **SHA-256 und Bytegröße verifizierte** Modell-/Wörterbuch-Downloads sowie explizit freigegebene Cloud-Anfragen.
+- **`READ_MEDIA_IMAGES` / `READ_EXTERNAL_STORAGE` wurden vollständig entfernt.** Foto-OCR liest ausschließlich einzelne ausgewählte Bilder über die Android-Systemauswahl (`PickVisualMedia`).
 
-### 4. Löschung
-Alle lokalen Lern-, Wörterbuch-, Zwischenablage- und Key-Daten können jederzeit direkt in den Tapwing-Einstellungen gelöscht oder durch Deinstallation der App restlos entfernt werden. Kontakt für Datenschutzanfragen: `mixxermannipropvp@gmail.com` • Online unter: https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy
+### 5. Optionale Cloud-KI & Cloud-Diktat (Explizite Einwilligung je Anbieter)
+- Cloud-Funktionen übertragen Text oder Audio **erst nach ausdrücklicher Opt-in-Zustimmung je Anbieter** und aktivem Abruf (inkl. sichtbarem Cloud-Badge in der Leiste).
+- Unter **Einstellungen -> Datenschutz & Cloud-Einwilligung** kann jede Freigabe einzeln oder gesammelt sofort widerrufen werden.
+- Klartext-HTTP ist ausschließlich für lokale Loopback-Adressen (`localhost`, `127.0.0.1`, `::1`) erlaubt; externe Endpunkte erfordern HTTPS.
+
+### 6. Löschung & Kontakt
+Alle gespeicherten Daten können direkt in den Tapwing-Einstellungen oder durch Deinstallation der App vollständig gelöscht werden.
+Datenschutz-Kontakt: `mixxermannipropvp@gmail.com` • Online unter: `https://tapwing-keyboard.mixxermannipropvp.workers.dev/privacy`
