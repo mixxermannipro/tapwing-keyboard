@@ -96,6 +96,8 @@
     <string name="nav_clipboard">Zwischenablage &amp; Screenshots</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Über Tapwing</string>
+    <string name="nav_privacy">Datenschutz &amp; Cloud-Einwilligung</string>
+    <string name="nav_licenses">Open-Source- &amp; Modell-Lizenzen</string>
     <string name="section_setup">Einrichtung</string>
     <string name="section_keyboard">Tastatur</string>
     <string name="section_smart_ai">KI &amp; Sprache</string>

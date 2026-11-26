@@ -54,6 +54,8 @@ internal enum class SettingsSection(
         titleRes = R.string.settings_section_system,
         routes = listOf(
             SettingsRoute.STATS,
+            SettingsRoute.PRIVACY,
+            SettingsRoute.LICENSES,
             SettingsRoute.ABOUT
         )
     );
@@ -77,10 +79,10 @@ internal object SettingsCatalog {
     private val keywordsByRoute: Map<SettingsRoute, String> = mapOf(
         SettingsRoute.LANGUAGES to "languages sprachen sprache qwertz qwerty azerty layout multilingual zweisprachig deutsch english swiss schweiz",
         SettingsRoute.PREFERENCES to "preferences einstellungen keyboard tastatur layout height höhe size größe offset abstand bottom haptic haptik vibration sound ton klick long press haltedauer one handed einhand split geteilt tablet foldable enter newline zeile barrierefreiheit accessibility kontrast contrast large labels große tasten",
-        SettingsRoute.APPEARANCE to "theme design farbschema color farbe dark dunkel light hell system amoled pixel slate lavender material you borders umrandung pill capsule tasten apple liquid glass kontrast contrast barrierefreiheit accessibility",
+        SettingsRoute.APPEARANCE to "theme design farbschema color farbe dark dunkel light hell system amoled slate cobalt schiefer kobalt lavender material you borders umrandung pill capsule tasten glass mode glas kontrast contrast barrierefreiheit accessibility",
         SettingsRoute.CORRECTIONS to "text correction textkorrektur autocorrect autokorrektur undo rückgängig backspace double space doppeltipp punkt period grammar grammatik spell rechtschreibung chips math taschenrechner learning lernen incognito inkognito",
         SettingsRoute.GLIDE_TYPING to "glide typing swipe wischen wisch tippen gesture geste delete word wort löschen cursor trackpad spacebar leertaste verschieben",
-        SettingsRoute.VOICE to "voice typing spracheingabe diktat dictation speech mikrofon mic whisper sherpa nvidia nemotron fastconformer parakeet tdt kroko canary rambler streaming live local offline android cloud gemini audio multilingual mehrsprachig stichpunkte bullet lists",
+        SettingsRoute.VOICE to "voice typing spracheingabe diktat dictation speech mikrofon mic whisper sherpa nvidia nemotron fastconformer parakeet tdt kroko canary natural cleanup streaming live local offline android cloud gemini audio multilingual mehrsprachig stichpunkte bullet lists",
         SettingsRoute.DICTIONARY to "dictionary wörterbuch personal persönlich words wörter learn lernen adaptive per app pack paket offline 50k import export zip",
         SettingsRoute.CLIPBOARD to "clipboard zwischenablage copy kopieren paste einfügen history verlauf retention aufbewahrung screenshot ocr scan kamera camera",
         SettingsRoute.EMOJI to "emoji emojis smileys stickers scale größe suggestions vorschläge",
@@ -90,6 +92,8 @@ internal object SettingsCatalog {
         SettingsRoute.QUICK_SEARCH to "quick search schnellsuche web browser google duckduckgo bing startpage brave ecosia",
         SettingsRoute.AUTOFILL to "autofill passwords passwörter bitwarden login anmelden credentials 2fa otp inline profil profile vorname nachname name first last telefon telefonnummer handy phone email mail adresse address strasse street plz zip stadt city geburtsdatum birthday alter age firma company website smart fill",
         SettingsRoute.STATS to "statistics statistik stats wpm speed tempo words wörter saved gespart keystrokes",
+        SettingsRoute.PRIVACY to "privacy datenschutz consent einwilligung cloud revoke widerruf incognito inkognito direct boot storage speicher local lokal",
+        SettingsRoute.LICENSES to "licenses lizenzen open source oss modelle models third party drittanbieter apache mit cc-by attribution",
         SettingsRoute.ABOUT to "about über tapwing version license lizenz privacy datenschutz local lokal system enable aktivieren"
     )
 

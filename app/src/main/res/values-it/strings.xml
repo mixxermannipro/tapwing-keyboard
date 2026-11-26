@@ -81,6 +81,8 @@
     <string name="nav_clipboard">Appunti e screenshot</string>
     <string name="nav_emoji">Emoji</string>
     <string name="nav_about">Informazioni</string>
+    <string name="nav_privacy">Privacy e consenso cloud</string>
+    <string name="nav_licenses">Licenze open source e dei modelli</string>
     <string name="section_setup">Configurazione</string>
     <string name="section_keyboard">Tastiera</string>
     <string name="section_smart_ai">IA e voce</string>
