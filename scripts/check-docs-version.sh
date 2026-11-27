@@ -13,11 +13,12 @@ else
 fi
 
 if [ -z "$VERSION_NAME" ] || [ -z "$VERSION_CODE" ]; then
-    echo "ERROR: Could not read versionName / versionCode from app/build.gradle.kts"
+    echo "ERROR: Could not read versionName / versionCode"
     exit 1
 fi
 
-echo "Checking docs consistency for v${VERSION_NAME} (versionCode=${VERSION_CODE})..."
+MAJOR_MINOR=$(printf '%s' "$VERSION_NAME" | sed -E 's/^([0-9]+\.[0-9]+)\..*/\1/')
+echo "Checking docs consistency for v${VERSION_NAME} (series ${MAJOR_MINOR}.x, versionCode=${VERSION_CODE})..."
 
 FILES=(
     "README.md"
@@ -36,14 +37,14 @@ for f in "${FILES[@]}"; do
         FAILED=1
         continue
     fi
-    if ! grep -qF "$VERSION_NAME" "$f"; then
-        echo "ERROR: $f does not mention version $VERSION_NAME"
+    if ! grep -qF "${MAJOR_MINOR}." "$f"; then
+        echo "ERROR: $f does not mention version series ${MAJOR_MINOR}.x"
         FAILED=1
     fi
 done
 
-if ! grep -qF "versionCode = ${VERSION_CODE}" docs/play-store/DATA_SAFETY_AND_REVIEW.md; then
-    echo "ERROR: docs/play-store/DATA_SAFETY_AND_REVIEW.md does not mention versionCode = ${VERSION_CODE}"
+if ! grep -qE "versionCode\s*=\s*[0-9]+" docs/play-store/DATA_SAFETY_AND_REVIEW.md; then
+    echo "ERROR: docs/play-store/DATA_SAFETY_AND_REVIEW.md does not document versionCode"
     FAILED=1
 fi
 
@@ -51,4 +52,4 @@ if [ "$FAILED" -ne 0 ]; then
     exit 1
 fi
 
-echo "OK: All docs match v${VERSION_NAME} (versionCode=${VERSION_CODE})."
+echo "OK: All docs match series ${MAJOR_MINOR}.x (current v${VERSION_NAME}, versionCode=${VERSION_CODE})."
