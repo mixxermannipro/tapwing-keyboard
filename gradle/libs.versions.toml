@@ -17,7 +17,7 @@ camera = "1.7.0"
 llamatik = "1.10.1"
 sherpaOnnx = "2.0.3"
 commonsCompress = "1.28.0"
-okhttp = "5.3.2"
+okhttp = "5.5.1"
 mlkitGenai = "1.0.0-beta1"
 
 junit = "4.13.2"
