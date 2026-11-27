@@ -11,13 +11,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.RandomAccessFile
+import kotlin.io.path.createTempDirectory
 import kotlin.system.measureNanoTime
 
 class VoiceReliabilityAndBenchmarkTest {
 
     @Test
     fun wavChunkerSplitsFiveMinuteRecordingCleanlyWithValidHeaders() {
-        val tmpDir = createTempDir("tapwing_wav_test")
+        val tmpDir = createTempDirectory("tapwing_wav_test").toFile()
         try {
             val seconds = 300 // 5 minutes of 16 kHz mono 16-bit PCM = 9,600,000 bytes
             val totalPcmBytes = seconds * WavHeaderUtil.PCM_BYTES_PER_SECOND
