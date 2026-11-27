@@ -17,6 +17,7 @@ local.properties
 *.pfx
 keystore.properties
 signing.properties
+play-service-account.json
 
 # Release distribution outputs (uploaded to GitHub Releases)
 dist/

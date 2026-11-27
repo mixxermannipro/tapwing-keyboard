@@ -1,3 +1,4 @@
+import com.github.triplet.gradle.androidpublisher.ReleaseStatus
 import java.util.Properties
 
 plugins {
@@ -5,32 +6,32 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kover)
+    alias(libs.plugins.play.publisher)
 }
 
-fun loadExternalSigningProperties(): Properties {
-    val props = Properties()
-    val config = file("${System.getProperty("user.home")}/.tapwing-signing/keystore.properties")
-    if (config.isFile) {
-        config.inputStream().use { props.load(it) }
+val versionProps = Properties().apply {
+    val versionFile = rootProject.file("version.properties")
+    if (versionFile.isFile) {
+        versionFile.inputStream().use { load(it) }
     }
-    return props
 }
+val appVersionCode = versionProps.getProperty("versionCode")?.trim()?.toIntOrNull() ?: 17
+val appVersionName = versionProps.getProperty("versionName")?.trim()?.takeIf { it.isNotEmpty() } ?: "2.9.0"
 
-val externalSigningProps = loadExternalSigningProperties()
-val envKeystorePath = System.getenv("TAPWING_KEYSTORE_PATH")
-    ?: externalSigningProps.getProperty("storeFile")
-val envStorePassword = System.getenv("TAPWING_STORE_PASSWORD")
-    ?: externalSigningProps.getProperty("storePassword")
-val envKeyAlias = System.getenv("TAPWING_KEY_ALIAS")
-    ?: externalSigningProps.getProperty("keyAlias")
-val envKeyPassword = System.getenv("TAPWING_KEY_PASSWORD")
-    ?: externalSigningProps.getProperty("keyPassword")
+val envKeystorePath = System.getenv("SIGNING_KEYSTORE_PATH")
+val envKeyAlias = System.getenv("SIGNING_KEY_ALIAS")
+val envStorePassword = System.getenv("SIGNING_STORE_PASSWORD")
+val envKeyPassword = System.getenv("SIGNING_KEY_PASSWORD")
 
 val hasReleaseSigning = !envKeystorePath.isNullOrBlank() &&
     file(envKeystorePath).isFile &&
-    !envStorePassword.isNullOrBlank() &&
     !envKeyAlias.isNullOrBlank() &&
+    !envStorePassword.isNullOrBlank() &&
     !envKeyPassword.isNullOrBlank()
+
+val playServiceAccountPath = System.getenv("PLAY_SERVICE_ACCOUNT_JSON_PATH")
+val hasPlayServiceAccount = !playServiceAccountPath.isNullOrBlank() &&
+    file(playServiceAccountPath).isFile
 
 android {
     namespace = "com.tapwing.keyboard"
@@ -41,8 +42,8 @@ android {
         applicationId = "com.tapwing.keyboard"
         minSdk = 29
         targetSdk = 36
-        versionCode = 17
-        versionName = "2.9.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -141,6 +142,16 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+}
+
+play {
+    enabled.set(hasPlayServiceAccount)
+    if (hasPlayServiceAccount) {
+        serviceAccountCredentials.set(file(playServiceAccountPath!!))
+    }
+    track.set(System.getenv("PLAY_TRACK")?.takeIf { it.isNotBlank() } ?: "production")
+    releaseStatus.set(ReleaseStatus.COMPLETED)
+    defaultToAppBundles.set(true)
 }
 
 kotlin {
