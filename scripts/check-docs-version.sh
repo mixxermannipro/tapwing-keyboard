@@ -4,8 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | cut -d'"' -f2)
-VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n 1 | tr -dc '0-9')
+if [ -f "version.properties" ]; then
+    VERSION_NAME=$(grep -E '^versionName=' version.properties | head -n 1 | cut -d'=' -f2- | tr -d '[:space:]')
+    VERSION_CODE=$(grep -E '^versionCode=' version.properties | head -n 1 | cut -d'=' -f2- | tr -dc '0-9')
+else
+    VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | cut -d'"' -f2)
+    VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n 1 | tr -dc '0-9')
+fi
 
 if [ -z "$VERSION_NAME" ] || [ -z "$VERSION_CODE" ]; then
     echo "ERROR: Could not read versionName / versionCode from app/build.gradle.kts"

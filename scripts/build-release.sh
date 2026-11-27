@@ -23,7 +23,11 @@ if [ -z "${ANDROID_HOME:-}" ] && [ -d "$HOME/Android/sdk" ]; then
     export ANDROID_HOME="$HOME/Android/sdk"
 fi
 
-VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | cut -d'"' -f2)
+if [ -f "version.properties" ]; then
+    VERSION_NAME=$(grep -E '^versionName=' version.properties | head -n 1 | cut -d'=' -f2- | tr -d '[:space:]')
+else
+    VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | cut -d'"' -f2)
+fi
 VERSION_NAME="${VERSION_NAME:-1.0.0}"
 
 echo "=== 1. Running Tapwing Unit Tests & Docs Version Check ==="
