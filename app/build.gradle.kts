@@ -118,6 +118,12 @@ android {
         }
     }
 
+    bundle {
+        language {
+            enableSplit = false
+        }
+    }
+
     lint {
         abortOnError = true
         checkReleaseBuilds = true
@@ -129,13 +135,12 @@ android {
             "TrustAllX509TrustManager",
             "BadHostnameVerifier",
             "ExportedService",
-            "ExportedActivity",
             "ExportedReceiver",
             "ExportedContentProvider",
             "WorldReadableFiles",
             "WorldWriteableFiles",
             "InsecureBaseConfiguration",
-            "CleartextTrafficPermitted"
+            "NetworkSecurityConfig"
         )
     }
 
