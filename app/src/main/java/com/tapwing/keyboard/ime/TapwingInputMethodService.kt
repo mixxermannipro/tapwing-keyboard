@@ -120,6 +120,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 private const val MAX_INLINE_SUGGESTIONS = 6
 private const val PASTE_CHIP_LIFETIME_MS = 20_000L
@@ -159,13 +161,19 @@ class TapwingInputMethodService :
 
     private lateinit var prefsRepo: TapwingPreferencesRepository
     private lateinit var secureKeyStorage: SecureKeyStorage
+    @Volatile
     private lateinit var dictionaryStore: AdaptiveDictionaryStore
     private lateinit var offlinePackManager: OfflineDictionaryPackManager
+    @Volatile
     private lateinit var statsStore: TypingStatsStore
     private lateinit var modelManager: LocalModelManager
     private lateinit var writingToolsEngine: WritingToolsEngine
-    private var clipboardStore by mutableStateOf(ClipboardStore(storageFile = null))
+    @Volatile
+    private var clipboardStoreRef: ClipboardStore = ClipboardStore(storageFile = null)
+    private var clipboardStore by mutableStateOf(clipboardStoreRef)
     private var clipboardReady = false
+    private val unlockEpoch = AtomicLong(0L)
+    private val unlockHandled = AtomicBoolean(false)
     private lateinit var voiceController: TapwingVoiceController
     private val undoManager = UndoManager()
 
@@ -435,11 +443,20 @@ class TapwingInputMethodService :
         offlinePackManager = OfflineDictionaryPackManager(this)
         statsStore = TypingStatsStore.createForContext(this)
         modelManager = LocalModelManager(this)
-        writingToolsEngine = WritingToolsEngine(secureKeyStorage, dictionaryStore, modelManager, this)
+        writingToolsEngine = WritingToolsEngine(
+            secureKeyStorage = secureKeyStorage,
+            dictionaryStoreProvider = { dictionaryStore },
+            modelManager = modelManager,
+            appContext = applicationContext
+        )
+        val initialUnlockEpoch = unlockEpoch.get()
         serviceScope.launch {
-            clipboardStore = withContext(Dispatchers.IO) {
+            val loadedClipboard = withContext(Dispatchers.IO) {
                 ClipboardStore.createForContext(this@TapwingInputMethodService)
             }
+            if (unlockEpoch.get() != initialUnlockEpoch) return@launch
+            clipboardStoreRef = loadedClipboard
+            clipboardStore = loadedClipboard
             clipboardReady = true
             if (prefsLoaded) clipboardStore.prune(currentPrefs.clipboardRetention, currentPrefs.clipboardMaxItems)
             if (inputViewActive) {
@@ -511,27 +528,7 @@ class TapwingInputMethodService :
                 if (intent?.action != Intent.ACTION_USER_UNLOCKED) return
                 runCatching { unregisterReceiver(this) }
                 userUnlockedReceiver = null
-                prefsRepo.reloadAfterUnlock()
-                serviceScope.launch(Dispatchers.IO) {
-                    dictionaryStore = AdaptiveDictionaryStore.createForContext(this@TapwingInputMethodService)
-                    statsStore = TypingStatsStore.createForContext(this@TapwingInputMethodService)
-                    val unlockedClipboard = ClipboardStore.createForContext(this@TapwingInputMethodService)
-                    val refreshedSnippets = dictionaryStore.listSnippets()
-                    val refreshedEmojis = dictionaryStore.listRecentEmojis()
-                    withContext(Dispatchers.Main) {
-                        clipboardStore = unlockedClipboard
-                        clipboardReady = true
-                        snippetsSnapshot = refreshedSnippets
-                        recentEmojisSnapshot = refreshedEmojis
-                        if (prefsLoaded) {
-                            clipboardStore.prune(currentPrefs.clipboardRetention, currentPrefs.clipboardMaxItems)
-                        }
-                        if (inputViewActive) {
-                            syncSystemClipboard()
-                            refreshContextAndSuggestions(force = true)
-                        }
-                    }
-                }
+                handleUserUnlocked()
             }
         }
         userUnlockedReceiver = receiver
@@ -542,6 +539,44 @@ class TapwingInputMethodService :
                 IntentFilter(Intent.ACTION_USER_UNLOCKED),
                 ContextCompat.RECEIVER_NOT_EXPORTED
             )
+        }
+        // Close TOCTOU window if user unlocked between the initial check and registerReceiver().
+        if (TapwingPreferencesRepository.isUserUnlocked(this)) {
+            runCatching { unregisterReceiver(receiver) }
+            userUnlockedReceiver = null
+            handleUserUnlocked()
+        }
+    }
+
+    private fun handleUserUnlocked() {
+        if (!unlockHandled.compareAndSet(false, true)) return
+        val epoch = unlockEpoch.incrementAndGet()
+        prefsRepo.reloadAfterUnlock()
+        offlinePackManager.onUserUnlocked()
+        modelManager.onUserUnlocked()
+        serviceScope.launch(Dispatchers.IO) {
+            val unlockedDict = AdaptiveDictionaryStore.createForContext(this@TapwingInputMethodService)
+            val unlockedStats = TypingStatsStore.createForContext(this@TapwingInputMethodService)
+            val unlockedClipboard = ClipboardStore.createForContext(this@TapwingInputMethodService)
+            val refreshedSnippets = unlockedDict.listSnippets()
+            val refreshedEmojis = unlockedDict.listRecentEmojis()
+            dictionaryStore = unlockedDict
+            statsStore = unlockedStats
+            clipboardStoreRef = unlockedClipboard
+            withContext(Dispatchers.Main) {
+                if (unlockEpoch.get() != epoch) return@withContext
+                clipboardStore = unlockedClipboard
+                clipboardReady = true
+                snippetsSnapshot = refreshedSnippets
+                recentEmojisSnapshot = refreshedEmojis
+                if (prefsLoaded) {
+                    clipboardStore.prune(currentPrefs.clipboardRetention, currentPrefs.clipboardMaxItems)
+                }
+                if (inputViewActive) {
+                    syncSystemClipboard()
+                    refreshContextAndSuggestions(force = true)
+                }
+            }
         }
     }
 

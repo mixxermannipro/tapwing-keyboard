@@ -21,6 +21,7 @@ import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 
 import com.tapwing.keyboard.ai.DownloadIntegrityVerifier
+import com.tapwing.keyboard.data.TapwingPreferencesRepository
 
 data class OfflinePackSpec(
     val langCode: String,
@@ -108,10 +109,17 @@ class LoadedDictionaryPack(
  * Downloads, caches, and indexes 50,000-word offline frequency dictionary packs per language
  * (powered by MIT/CC-BY-SA FrequencyWords lists) for instant spellchecking, completions & swipe typing.
  */
-class OfflineDictionaryPackManager(context: Context) {
+class OfflineDictionaryPackManager(
+    context: Context,
+    private val isUserUnlocked: () -> Boolean = {
+        TapwingPreferencesRepository.isUserUnlocked(context.applicationContext)
+    }
+) {
 
     private val appContext = context.applicationContext
-    private val packsDir: File = File(appContext.noBackupFilesDir ?: appContext.filesDir, "tapwing_dictionaries")
+    private val packsDir: File by lazy {
+        File(appContext.noBackupFilesDir ?: appContext.filesDir, "tapwing_dictionaries")
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val loadedCache = ConcurrentHashMap<String, LoadedDictionaryPack>()
@@ -120,10 +128,19 @@ class OfflineDictionaryPackManager(context: Context) {
     val states: StateFlow<Map<String, PackInstallState>> = _states.asStateFlow()
 
     init {
-        refreshStatesAsync()
+        if (isUserUnlocked()) {
+            refreshStatesAsync()
+        }
+    }
+
+    fun onUserUnlocked() {
+        if (isUserUnlocked()) {
+            refreshStatesAsync()
+        }
     }
 
     fun refreshStatesAsync() {
+        if (!isUserUnlocked()) return
         scope.launch { refreshStates() }
     }
 
@@ -139,6 +156,7 @@ class OfflineDictionaryPackManager(context: Context) {
     }
 
     fun refreshStates() {
+        if (!isUserUnlocked()) return
         _states.update { currentMap ->
             val next = LinkedHashMap<String, PackInstallState>()
             availablePacks.forEach { spec ->
@@ -170,6 +188,7 @@ class OfflineDictionaryPackManager(context: Context) {
      * is installed on disk but not yet parsed in memory.
      */
     fun getCachedPack(locale: String): LoadedDictionaryPack? {
+        if (!isUserUnlocked()) return null
         val base = KeyboardLocales.baseLang(locale)
         loadedCache[base]?.let { return it }
         preloadLocaleAsync(base)
@@ -178,6 +197,7 @@ class OfflineDictionaryPackManager(context: Context) {
 
     @Synchronized
     fun getLoadedPack(locale: String): LoadedDictionaryPack? {
+        if (!isUserUnlocked()) return null
         val base = KeyboardLocales.baseLang(locale)
         loadedCache[base]?.let { return it }
         val file = packFileFor(base)
@@ -192,6 +212,7 @@ class OfflineDictionaryPackManager(context: Context) {
     }
 
     fun preloadLocaleAsync(locale: String) {
+        if (!isUserUnlocked()) return
         val base = KeyboardLocales.baseLang(locale)
         if (loadedCache.containsKey(base)) return
         val file = packFileFor(base)
