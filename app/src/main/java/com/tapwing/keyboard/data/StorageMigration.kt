@@ -60,12 +60,23 @@ internal object StorageMigration {
      * Overwrites [file] with zeros and deletes it. Also cleans up matching `.tmp` siblings if present.
      */
     fun secureDelete(file: File): Boolean {
-        if (!file.exists()) return true
+        val mainOk = secureWipeAndDelete(file)
+        val tmpSibling = file.parentFile?.let { File(it, "${file.name}.tmp") }
+        val tmpOk = if (tmpSibling != null && tmpSibling.exists()) {
+            secureWipeAndDelete(tmpSibling)
+        } else {
+            true
+        }
+        return mainOk && tmpOk
+    }
+
+    private fun secureWipeAndDelete(target: File): Boolean {
+        if (!target.exists()) return true
         return runCatching {
-            if (file.isFile) {
-                val len = file.length()
+            if (target.isFile) {
+                val len = target.length()
                 if (len > 0L) {
-                    RandomAccessFile(file, "rw").use { raf ->
+                    RandomAccessFile(target, "rw").use { raf ->
                         val zeros = ByteArray(8192)
                         var remaining = len
                         raf.seek(0L)
@@ -78,7 +89,7 @@ internal object StorageMigration {
                     }
                 }
             }
-            file.delete()
+            target.delete()
         }.getOrDefault(false)
     }
 }
