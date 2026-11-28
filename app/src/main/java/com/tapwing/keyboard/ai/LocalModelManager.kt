@@ -2,6 +2,7 @@ package com.tapwing.keyboard.ai
 
 import android.content.Context
 import android.net.Uri
+import com.tapwing.keyboard.data.TapwingPreferencesRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,10 +34,17 @@ sealed interface ModelInstallState {
  * Downloads, extracts, imports, validates, and deletes on-device speech and LLM models
  * (Sherpa-ONNX directory packages, Whisper .bin files, and GGUF language models) inside app-private noBackupFilesDir.
  */
-class LocalModelManager(context: Context) {
+class LocalModelManager(
+    context: Context,
+    private val isUserUnlocked: () -> Boolean = {
+        TapwingPreferencesRepository.isUserUnlocked(context.applicationContext)
+    }
+) {
 
     private val appContext = context.applicationContext
-    private val modelsRoot: File = File(appContext.noBackupFilesDir ?: appContext.filesDir, "tapwing_models")
+    private val modelsRoot: File by lazy {
+        File(appContext.noBackupFilesDir ?: appContext.filesDir, "tapwing_models")
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val activeJobs = ConcurrentHashMap<String, Job>()
 
@@ -44,10 +52,19 @@ class LocalModelManager(context: Context) {
     val states: StateFlow<Map<String, ModelInstallState>> = _states.asStateFlow()
 
     init {
-        refreshStatesAsync()
+        if (isUserUnlocked()) {
+            refreshStatesAsync()
+        }
+    }
+
+    fun onUserUnlocked() {
+        if (isUserUnlocked()) {
+            refreshStatesAsync()
+        }
     }
 
     fun refreshStatesAsync() {
+        if (!isUserUnlocked()) return
         scope.launch { refreshStates() }
     }
 
@@ -58,6 +75,7 @@ class LocalModelManager(context: Context) {
     }
 
     fun refreshStates() {
+        if (!isUserUnlocked()) return
         _states.update { currentMap ->
             val next = LinkedHashMap<String, ModelInstallState>()
             LocalModelCatalog.allModels.forEach { spec ->
@@ -111,6 +129,7 @@ class LocalModelManager(context: Context) {
     }
 
     fun installedModelFile(modelId: String): File? {
+        if (!isUserUnlocked()) return null
         val spec = LocalModelCatalog.findById(modelId) ?: return null
         return if (spec.kind.isSherpa) {
             val dir = sherpaModelDirFor(spec)

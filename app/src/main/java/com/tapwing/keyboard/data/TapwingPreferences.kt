@@ -186,22 +186,30 @@ private val Context.tapwingDataStore: DataStore<Preferences> by preferencesDataS
     name = "tapwing_preferences"
 )
 
-class TapwingPreferencesRepository(context: Context) {
+class TapwingPreferencesRepository private constructor(
+    private val dataStore: DataStore<Preferences>,
+    private val profileStorage: PersonalProfileStorage,
+    private val isUserUnlockedProvider: () -> Boolean
+) {
 
-    private val appContext: Context = context.applicationContext
+    constructor(context: Context) : this(
+        dataStore = (ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
+            ?: context.applicationContext).tapwingDataStore,
+        profileStorage = PersonalProfileStorage.getInstance(context.applicationContext),
+        isUserUnlockedProvider = { isUserUnlocked(context.applicationContext) }
+    )
 
-    // Non-secret keyboard configuration lives in device-protected storage so Direct Boot IME works cleanly.
-    // Personal profile data lives strictly in Credential-Encrypted storage via PersonalProfileStorage.
-    private val storageContext: Context =
-        ContextCompat.createDeviceProtectedStorageContext(appContext)
-            ?: appContext
-
-    private val profileStorage = PersonalProfileStorage.getInstance(appContext)
+    internal constructor(
+        dataStore: DataStore<Preferences>,
+        profileStorage: PersonalProfileStorage,
+        isUserUnlockedProvider: () -> Boolean,
+        @Suppress("UNUSED_PARAMETER") forTesting: Unit = Unit
+    ) : this(dataStore, profileStorage, isUserUnlockedProvider)
 
     @Volatile
     private var legacyDeCleanedUp = false
 
-    private object Keys {
+    internal object Keys {
         val ACTIVE_LOCALE = stringPreferencesKey("active_locale")
         val ENABLED_LOCALES = stringPreferencesKey("enabled_locales")
         val APP_UI_LOCALE = stringPreferencesKey("app_ui_locale")
@@ -300,7 +308,7 @@ class TapwingPreferencesRepository(context: Context) {
     }
 
     val prefsFlow: Flow<TapwingPrefs> = combine(
-        storageContext.tapwingDataStore.data
+        dataStore.data
             .catch { exception ->
                 if (exception is IOException) {
                     emit(emptyPreferences())
@@ -309,31 +317,32 @@ class TapwingPreferencesRepository(context: Context) {
                 }
             }
             .onEach { p ->
-                if (!legacyDeCleanedUp && isUserUnlocked(appContext) && hasLegacyPersonalKeys(p)) {
-                    legacyDeCleanedUp = true
-                    storageContext.tapwingDataStore.edit { mutable ->
+                if (!legacyDeCleanedUp && isUserUnlockedProvider() && hasLegacyPersonalKeys(p)) {
+                    dataStore.edit { mutable ->
                         migrateAndStripLegacyPersonalKeys(mutable)
                     }
+                    legacyDeCleanedUp = true
                 }
             },
         profileStorage.profileFlow
     ) { prefs, ceProfile ->
-        val resolvedProfile = if (isUserUnlocked(appContext)) ceProfile else PersonalProfile()
+        val resolvedProfile = if (isUserUnlockedProvider()) ceProfile else PersonalProfile()
         fromPreferences(prefs, resolvedProfile)
     }
 
     suspend fun update(transform: (TapwingPrefs) -> TapwingPrefs) {
-        storageContext.tapwingDataStore.edit { mutable ->
-            if (isUserUnlocked(appContext)) {
+        dataStore.edit { mutable ->
+            val unlocked = isUserUnlockedProvider()
+            if (unlocked) {
                 migrateAndStripLegacyPersonalKeys(mutable)
             }
-            val activeProfile = if (isUserUnlocked(appContext)) profileStorage.load() else PersonalProfile()
+            val activeProfile = if (unlocked) profileStorage.load() else PersonalProfile()
             val current = fromPreferences(mutable, activeProfile)
             val next = transform(current)
-            if (isUserUnlocked(appContext) && next.personalProfile != activeProfile) {
+            if (unlocked && next.personalProfile != activeProfile) {
                 profileStorage.save(next.personalProfile)
             }
-            writePreferences(mutable, next)
+            writePreferences(mutable, next, stripLegacyPersonalKeys = unlocked)
         }
     }
 
@@ -476,7 +485,11 @@ class TapwingPreferencesRepository(context: Context) {
         )
     }
 
-    private fun writePreferences(mutable: MutablePreferences, next: TapwingPrefs) {
+    private fun writePreferences(
+        mutable: MutablePreferences,
+        next: TapwingPrefs,
+        stripLegacyPersonalKeys: Boolean
+    ) {
         val cleanEnabled = KeyboardLocales.serializeEnabledLocales(next.enabledLocales)
         val enabledList = KeyboardLocales.parseEnabledLocales(cleanEnabled)
         val cleanActive = if (next.activeLocale in enabledList) next.activeLocale else enabledList.first()
@@ -516,10 +529,12 @@ class TapwingPreferencesRepository(context: Context) {
         mutable[Keys.SMART_FILL_ENABLED] = next.smartFillEnabled
         mutable[Keys.SMART_PROFILE_AUTO_LEARN] = next.smartProfileAutoLearn
         mutable[Keys.PROFILE_AUTO_LEARN_NOTICE_SEEN] = next.profileAutoLearnNoticeSeen
-        mutable.remove(Keys.PERSONAL_PROFILE_JSON)
         mutable[Keys.INCOGNITO_MODE] = next.incognitoMode
-        mutable.remove(Keys.SNIPPET_USER_NAME)
-        mutable.remove(Keys.SNIPPET_USER_EMAIL)
+        if (stripLegacyPersonalKeys) {
+            mutable.remove(Keys.PERSONAL_PROFILE_JSON)
+            mutable.remove(Keys.SNIPPET_USER_NAME)
+            mutable.remove(Keys.SNIPPET_USER_EMAIL)
+        }
         mutable[Keys.INLINE_MATH_ENABLED] = next.inlineMathEnabled
         mutable[Keys.SWIPE_BACKSPACE_WORD] = next.swipeBackspaceDeleteWord
         mutable[Keys.QUICK_SEARCH_ENGINE] = next.quickSearchEngine.name
@@ -587,7 +602,7 @@ class TapwingPreferencesRepository(context: Context) {
 
         fun isUserUnlocked(context: Context): Boolean {
             val um = context.getSystemService(UserManager::class.java)
-            return um?.isUserUnlocked ?: true
+            return um?.isUserUnlocked ?: false
         }
 
         internal fun parseThemeMode(raw: String?): ThemeMode = when (raw?.trim()) {

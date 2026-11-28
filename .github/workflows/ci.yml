@@ -34,8 +34,8 @@ jobs:
       - name: Verify docs and Play Store versions match app/build.gradle.kts
         run: ./scripts/check-docs-version.sh
 
-      - name: Build Debug, Unit Tests, Lint, AndroidTest APK & Kover Report
-        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest :app:koverXmlReport --no-daemon
+      - name: Build Debug, Unit Tests, Lint (Debug & Release), AndroidTest APK & Kover Verification
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleDebugAndroidTest :app:koverXmlReport :app:koverVerify --no-daemon
 
       - name: Upload Kover Coverage Report
         if: always()

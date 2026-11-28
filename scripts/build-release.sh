@@ -30,9 +30,9 @@ else
 fi
 VERSION_NAME="${VERSION_NAME:-1.0.0}"
 
-echo "=== 1. Running Tapwing Unit Tests & Docs Version Check ==="
+echo "=== 1. Running Tapwing Unit Tests, Release Lint & Docs Version Check ==="
 ./scripts/check-docs-version.sh
-./gradlew testDebugUnitTest --no-daemon
+./gradlew :app:testDebugUnitTest :app:lintRelease --no-daemon
 
 echo "=== 2. Building Signed Release APK & AAB ==="
 ./gradlew assembleRelease bundleRelease --no-daemon
