@@ -82,4 +82,32 @@ class SmartProfilePrivacyTest {
         assertEquals(1L, captured?.editorGeneration)
         assertNull(controller.consumePending())
     }
+
+    @Test
+    fun personalProfileFilledFieldCountIncludesAllElevenFieldsAndHelpersPreserveValues() {
+        val full = PersonalProfile(
+            firstName = "Ada",
+            lastName = "Lovelace",
+            birthDate = "10.12.1815",
+            emails = listOf("ada@example.com"),
+            phones = listOf("+491701234567"),
+            street = "Musterstraße 1",
+            postalCode = "10115",
+            city = "Berlin",
+            country = "Deutschland",
+            company = "Analytical Engine Co",
+            website = "https://example.com"
+        )
+        assertEquals(11, full.filledFieldCount)
+        assertEquals(1, PersonalProfile(country = "Deutschland").filledFieldCount)
+
+        val updated = PersonalProfile(emails = listOf("old@example.com", "backup@example.com"))
+            .withFullName("Max Mustermann")
+            .withPrimaryEmail("max@example.com")
+        assertEquals("Max", updated.firstName)
+        assertEquals("Mustermann", updated.lastName)
+        assertEquals("Max Mustermann", updated.fullName)
+        assertEquals(listOf("max@example.com", "backup@example.com"), updated.emails)
+        assertEquals("max@example.com", updated.primaryEmail)
+    }
 }

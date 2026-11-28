@@ -108,9 +108,27 @@ data class PersonalProfile(
             street.isNotBlank(),
             postalCode.isNotBlank(),
             city.isNotBlank(),
+            country.isNotBlank(),
             company.isNotBlank(),
             website.isNotBlank()
         ).count { it }
+
+    fun withFullName(rawName: String): PersonalProfile {
+        val normalized = rawName.trim()
+        if (normalized.isEmpty()) return copy(firstName = "", lastName = "")
+        val parts = normalized.split(WHITESPACE_REGEX, limit = 2)
+        return copy(
+            firstName = parts.getOrElse(0) { "" },
+            lastName = parts.getOrElse(1) { "" }
+        )
+    }
+
+    fun withPrimaryEmail(rawEmail: String): PersonalProfile {
+        val trimmed = rawEmail.trim()
+        val remaining = emails.drop(1).filter { it.isNotBlank() }
+        val updated = if (trimmed.isEmpty()) remaining else listOf(trimmed) + remaining
+        return copy(emails = updated)
+    }
 
     /**
      * Parses [birthDate] in common formats (dd.MM.yyyy, yyyy-MM-dd, dd/MM/yyyy)
@@ -174,6 +192,7 @@ data class PersonalProfile(
     }
 
     companion object {
+        private val WHITESPACE_REGEX = Regex("\\s+")
         private val ISO_DATE_REGEX = Regex("""^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$""")
         private val DMY_DATE_REGEX = Regex("""^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$""")
 

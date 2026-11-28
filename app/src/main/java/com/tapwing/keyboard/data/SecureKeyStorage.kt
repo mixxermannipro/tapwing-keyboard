@@ -2,10 +2,14 @@ package com.tapwing.keyboard.data
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
+import java.security.KeyStoreException
+import java.security.ProviderException
+import java.security.UnrecoverableKeyException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -15,32 +19,59 @@ import javax.crypto.spec.GCMParameterSpec
  * Encrypts user-supplied AI API keys per provider with AES-256-GCM backed by Android Keystore.
  * Credential-encrypted storage is only accessed after UserManager.isUserUnlocked() is true.
  */
-class SecureKeyStorage(context: Context) {
+class SecureKeyStorage internal constructor(
+    private val isUnlocked: () -> Boolean,
+    private val kvStore: KvStore,
+    private val cipherBackend: CipherBackend
+) {
+    internal interface KvStore {
+        fun getAll(): Map<String, *>
+        fun getString(key: String): String?
+        fun putStrings(values: Map<String, String?>)
+    }
 
-    private val appContext = context.applicationContext
+    internal interface CipherBackend {
+        fun encrypt(plainText: String): Pair<String, String>
+        fun decrypt(cipherB64: String, ivB64: String): String
+        fun resetKey() {}
+    }
+
+    constructor(context: Context) : this(
+        isUnlocked = { TapwingPreferencesRepository.isUserUnlocked(context.applicationContext) },
+        kvStore = SharedPrefsKvStore(context.applicationContext),
+        cipherBackend = AndroidKeyStoreCipherBackend()
+    )
+
     private val keyCache = java.util.concurrent.ConcurrentHashMap<AiProviderType, String>()
 
-    fun saveKey(provider: AiProviderType, rawKey: String) {
-        if (!TapwingPreferencesRepository.isUserUnlocked(appContext)) return
+    fun saveKey(provider: AiProviderType, rawKey: String): Boolean {
+        if (!isUnlocked()) return false
         val trimmed = rawKey.trim()
-        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val cipherField = "cipher_${provider.name}"
         val ivField = "iv_${provider.name}"
         if (trimmed.isEmpty()) {
-            val editor = prefs.edit().remove(cipherField).remove(ivField)
-            if (legacyMatchesProvider(prefs.getString(DICTATION_PROVIDER, null), provider)) {
-                editor.remove(KEY_CIPHER).remove(KEY_IV).remove(DICTATION_PROVIDER)
+            val removals = mutableMapOf<String, String?>(
+                cipherField to null,
+                ivField to null
+            )
+            if (legacyMatchesProvider(kvStore.getString(DICTATION_PROVIDER), provider)) {
+                removals[KEY_CIPHER] = null
+                removals[KEY_IV] = null
+                removals[DICTATION_PROVIDER] = null
             }
-            editor.apply()
+            kvStore.putStrings(removals)
             keyCache.remove(provider)
-            return
+            return true
         }
-        val (cipherB64, ivB64) = encryptValue(trimmed)
-        prefs.edit()
-            .putString(cipherField, cipherB64)
-            .putString(ivField, ivB64)
-            .apply()
+        val (cipherB64, ivB64) = encryptWithRecovery(trimmed).getOrNull() ?: return false
+        kvStore.putStrings(
+            mapOf(
+                cipherField to cipherB64,
+                ivField to ivB64
+            )
+        )
         keyCache[provider] = trimmed
+        return true
     }
 
     fun deleteKey(provider: AiProviderType) {
@@ -48,23 +79,32 @@ class SecureKeyStorage(context: Context) {
     }
 
     fun readKey(provider: AiProviderType): String {
-        if (!TapwingPreferencesRepository.isUserUnlocked(appContext)) return ""
+        if (!isUnlocked()) return ""
         keyCache[provider]?.let { return it }
-        val entries = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).all
+        val entries = kvStore.getAll()
         val cipherB64 = entries["cipher_${provider.name}"] as? String
         val ivB64 = entries["iv_${provider.name}"] as? String
-        val resolved = if (!cipherB64.isNullOrBlank() && !ivB64.isNullOrBlank()) {
-            decryptValue(cipherB64, ivB64)
+        val decrypted: Result<String> = if (!cipherB64.isNullOrBlank() && !ivB64.isNullOrBlank()) {
+            decryptSafe(cipherB64, ivB64)
         } else {
-            // Fallback to legacy single-key slot for smooth migration
+            // Fallback to legacy single-key slot strictly when DICTATION_PROVIDER matches this provider.
             val legacyProv = entries[DICTATION_PROVIDER] as? String
-            if (legacyProv.isNullOrBlank() || legacyMatchesProvider(legacyProv, provider)) {
+            if (!legacyProv.isNullOrBlank() && legacyMatchesProvider(legacyProv, provider)) {
                 val legCipher = entries[KEY_CIPHER] as? String
                 val legIv = entries[KEY_IV] as? String
-                if (!legCipher.isNullOrBlank() && !legIv.isNullOrBlank()) decryptValue(legCipher, legIv) else ""
-            } else ""
+                if (!legCipher.isNullOrBlank() && !legIv.isNullOrBlank()) {
+                    decryptSafe(legCipher, legIv)
+                } else {
+                    Result.success("")
+                }
+            } else {
+                Result.success("")
+            }
         }
-        keyCache[provider] = resolved
+        val resolved = decrypted.getOrNull() ?: return ""
+        if (resolved.isNotBlank()) {
+            keyCache[provider] = resolved
+        }
         return resolved
     }
 
@@ -79,25 +119,33 @@ class SecureKeyStorage(context: Context) {
     fun configuredCloudProviders(): List<AiProviderType> =
         CLOUD_PROVIDERS.filter { hasKey(it) }
 
-    fun saveApiKey(rawKey: String, dictationProvider: String? = null) {
-        if (!TapwingPreferencesRepository.isUserUnlocked(appContext)) return
+    fun saveApiKey(rawKey: String, dictationProvider: String? = null): Boolean {
+        if (!isUnlocked()) return false
         val trimmed = rawKey.trim()
-        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (trimmed.isEmpty()) {
-            prefs.edit().remove(KEY_CIPHER).remove(KEY_IV).remove(DICTATION_PROVIDER).apply()
+            kvStore.putStrings(
+                mapOf(
+                    KEY_CIPHER to null,
+                    KEY_IV to null,
+                    DICTATION_PROVIDER to null
+                )
+            )
             keyCache.clear()
-            return
+            return true
         }
-        val (cipherB64, ivB64) = encryptValue(trimmed)
-        prefs.edit()
-            .putString(KEY_CIPHER, cipherB64)
-            .putString(KEY_IV, ivB64)
-            .putString(DICTATION_PROVIDER, dictationProvider)
-            .apply()
+        val (cipherB64, ivB64) = encryptWithRecovery(trimmed).getOrNull() ?: return false
+        kvStore.putStrings(
+            mapOf(
+                KEY_CIPHER to cipherB64,
+                KEY_IV to ivB64,
+                DICTATION_PROVIDER to dictationProvider
+            )
+        )
         keyCache.clear()
         providerFromLegacyName(dictationProvider)?.let { mapped ->
-            saveKey(mapped, trimmed)
+            return saveKey(mapped, trimmed)
         }
+        return true
     }
 
     fun readApiKey(): String = readLegacyKey()
@@ -111,12 +159,12 @@ class SecureKeyStorage(context: Context) {
     }
 
     private fun readLegacyKey(dictationProvider: String? = null): String {
-        if (!TapwingPreferencesRepository.isUserUnlocked(appContext)) return ""
-        val entries = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).all
+        if (!isUnlocked()) return ""
+        val entries = kvStore.getAll()
         if (dictationProvider != null && entries[DICTATION_PROVIDER] != dictationProvider) return ""
         val cipherB64 = entries[KEY_CIPHER] as? String ?: return ""
         val ivB64 = entries[KEY_IV] as? String ?: return ""
-        return decryptValue(cipherB64, ivB64)
+        return decryptSafe(cipherB64, ivB64).getOrDefault("")
     }
 
     fun hasApiKey(): Boolean = readApiKey().isNotBlank() || CLOUD_PROVIDERS.any { hasKey(it) }
@@ -133,17 +181,49 @@ class SecureKeyStorage(context: Context) {
         saveApiKey("")
     }
 
-    private fun encryptValue(plainText: String): Pair<String, String> {
-        val secretKey = getOrCreateKey()
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey)
-        val encrypted = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
-        val iv = cipher.iv
-        return Base64.encodeToString(encrypted, Base64.NO_WRAP) to Base64.encodeToString(iv, Base64.NO_WRAP)
+    private fun encryptWithRecovery(plainText: String): Result<Pair<String, String>> {
+        val firstAttempt = runCatching { cipherBackend.encrypt(plainText) }
+        if (firstAttempt.isSuccess) return firstAttempt
+        val err = firstAttempt.exceptionOrNull()
+        if (isRecoverableKeyStoreError(err)) {
+            runCatching { cipherBackend.resetKey() }
+            return runCatching { cipherBackend.encrypt(plainText) }
+        }
+        return firstAttempt
     }
 
-    private fun decryptValue(cipherB64: String, ivB64: String): String {
-        return runCatching {
+    private fun decryptSafe(cipherB64: String, ivB64: String): Result<String> =
+        runCatching { cipherBackend.decrypt(cipherB64, ivB64) }
+
+    private class SharedPrefsKvStore(private val appContext: Context) : KvStore {
+        private val prefs by lazy {
+            appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        }
+
+        override fun getAll(): Map<String, *> = prefs.all
+
+        override fun getString(key: String): String? = prefs.getString(key, null)
+
+        override fun putStrings(values: Map<String, String?>) {
+            val editor = prefs.edit()
+            values.forEach { (k, v) ->
+                if (v == null) editor.remove(k) else editor.putString(k, v)
+            }
+            editor.apply()
+        }
+    }
+
+    private class AndroidKeyStoreCipherBackend : CipherBackend {
+        override fun encrypt(plainText: String): Pair<String, String> {
+            val secretKey = getOrCreateKey()
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+            val encrypted = cipher.doFinal(plainText.toByteArray(StandardCharsets.UTF_8))
+            val iv = cipher.iv
+            return Base64.encodeToString(encrypted, Base64.NO_WRAP) to Base64.encodeToString(iv, Base64.NO_WRAP)
+        }
+
+        override fun decrypt(cipherB64: String, ivB64: String): String {
             val secretKey = synchronized(keyStoreLock) {
                 val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
                 keyStore.getKey(KEY_ALIAS, null) as? SecretKey
@@ -152,29 +232,50 @@ class SecureKeyStorage(context: Context) {
             val iv = Base64.decode(ivB64, Base64.NO_WRAP)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_BITS, iv))
             val decoded = cipher.doFinal(Base64.decode(cipherB64, Base64.NO_WRAP))
-            String(decoded, StandardCharsets.UTF_8)
-        }.getOrDefault("")
-    }
+            return String(decoded, StandardCharsets.UTF_8)
+        }
 
-    private fun getOrCreateKey(): SecretKey = synchronized(keyStoreLock) {
-        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
-        if (existing != null) return@synchronized existing
+        override fun resetKey() {
+            synchronized(keyStoreLock) {
+                runCatching {
+                    val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+                    if (keyStore.containsAlias(KEY_ALIAS)) {
+                        keyStore.deleteEntry(KEY_ALIAS)
+                    }
+                }
+            }
+        }
 
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-        val spec = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .build()
-        generator.init(spec)
-        generator.generateKey()
+        private fun getOrCreateKey(): SecretKey = synchronized(keyStoreLock) {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
+            if (existing != null) return@synchronized existing
+
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+            val spec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+            generator.init(spec)
+            generator.generateKey()
+        }
     }
 
     companion object {
+        @Volatile
+        private var instance: SecureKeyStorage? = null
+
+        fun getInstance(context: Context): SecureKeyStorage {
+            val appCtx = context.applicationContext
+            return instance ?: synchronized(this) {
+                instance ?: SecureKeyStorage(appCtx).also { instance = it }
+            }
+        }
+
         val CLOUD_PROVIDERS = listOf(
             AiProviderType.GEMINI_API,
             AiProviderType.GROQ_API,
@@ -182,6 +283,12 @@ class SecureKeyStorage(context: Context) {
             AiProviderType.XAI_API,
             AiProviderType.OPENAI_COMPATIBLE
         )
+
+        private fun isRecoverableKeyStoreError(err: Throwable?): Boolean =
+            err is KeyPermanentlyInvalidatedException ||
+                err is UnrecoverableKeyException ||
+                err is KeyStoreException ||
+                err is ProviderException
 
         private fun providerFromLegacyName(name: String?): AiProviderType? = when (name?.uppercase()) {
             "GEMINI" -> AiProviderType.GEMINI_API
