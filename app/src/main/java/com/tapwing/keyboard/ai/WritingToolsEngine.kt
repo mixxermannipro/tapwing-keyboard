@@ -15,10 +15,26 @@ data class WritingToolsOutput(
 
 class WritingToolsEngine(
     private val secureKeyStorage: SecureKeyStorage,
-    private val dictionaryStore: AdaptiveDictionaryStore? = null,
+    private val dictionaryStoreProvider: () -> AdaptiveDictionaryStore? = { null },
     private val modelManager: LocalModelManager? = null,
-    private val appContext: Context? = null
+    appContext: Context? = null
 ) {
+    private val appContext: Context? = appContext?.applicationContext
+
+    constructor(
+        secureKeyStorage: SecureKeyStorage,
+        dictionaryStore: AdaptiveDictionaryStore?,
+        modelManager: LocalModelManager? = null,
+        appContext: Context? = null
+    ) : this(
+        secureKeyStorage = secureKeyStorage,
+        dictionaryStoreProvider = { dictionaryStore },
+        modelManager = modelManager,
+        appContext = appContext
+    )
+
+    private val currentDictionaryStore: AdaptiveDictionaryStore?
+        get() = dictionaryStoreProvider()
 
     suspend fun runAction(
         sourceText: String,
@@ -64,7 +80,7 @@ class WritingToolsEngine(
             )
         }
 
-        val local = LocalWritingAssistant.transform(sourceText, action, locale, dictionaryStore)
+        val local = LocalWritingAssistant.transform(sourceText, action, locale, currentDictionaryStore)
         val reason = (primary as? ProviderAttempt.Failure)?.reason
             ?: (fallback as? ProviderAttempt.Failure)?.reason
         return WritingToolsOutput(
@@ -165,13 +181,13 @@ class WritingToolsEngine(
         if (provider == AiProviderType.LOCAL_RULES) {
             return ProviderAttempt.Success(
                 WritingToolsOutput(
-                    rewrittenText = LocalWritingAssistant.transform(sourceText, action, locale, dictionaryStore),
+                    rewrittenText = LocalWritingAssistant.transform(sourceText, action, locale, currentDictionaryStore),
                     badge = "On-Device"
                 )
             )
         }
 
-        val personalVocabulary = dictionaryStore?.topVocabularyForVoice(appPackage = appPackage, limit = 25).orEmpty()
+        val personalVocabulary = currentDictionaryStore?.topVocabularyForVoice(appPackage = appPackage, limit = 25).orEmpty()
 
         if (provider == AiProviderType.LOCAL_LLM) {
             val preferredLlmId = model.trim().takeIf { LocalModelCatalog.findById(it)?.kind?.isLlm == true }
