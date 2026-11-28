@@ -437,8 +437,8 @@ class TapwingInputMethodService :
         savedStateController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
 
-        prefsRepo = TapwingPreferencesRepository(this)
-        secureKeyStorage = SecureKeyStorage(this)
+        prefsRepo = TapwingPreferencesRepository.getInstance(this)
+        secureKeyStorage = SecureKeyStorage.getInstance(this)
         dictionaryStore = AdaptiveDictionaryStore.createForContext(this)
         offlinePackManager = OfflineDictionaryPackManager(this)
         statsStore = TypingStatsStore.createForContext(this)

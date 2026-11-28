@@ -84,8 +84,8 @@ internal fun DictionaryLearningScreen(
     var newSnippetTrigger by remember { mutableStateOf("") }
     var newSnippetTitle by remember { mutableStateOf("") }
     var newSnippetBody by remember { mutableStateOf("") }
-    var profileName by remember(prefs.snippetUserName) { mutableStateOf(prefs.snippetUserName) }
-    var profileEmail by remember(prefs.snippetUserEmail) { mutableStateOf(prefs.snippetUserEmail) }
+    var profileName by remember(prefs.personalProfile.fullName) { mutableStateOf(prefs.personalProfile.fullName) }
+    var profileEmail by remember(prefs.personalProfile.primaryEmail) { mutableStateOf(prefs.personalProfile.primaryEmail) }
 
     val stats = remember(revision) { dictionaryStore.stats() }
     val customWords = remember(revision) { dictionaryStore.listCustomWords().take(25) }
@@ -523,7 +523,7 @@ internal fun DictionaryLearningScreen(
                                 value = profileName,
                                 onValueChange = {
                                     profileName = it
-                                    onUpdatePrefs { p -> p.copy(snippetUserName = it) }
+                                    onUpdatePrefs { p -> p.copy(personalProfile = p.personalProfile.withFullName(it)) }
                                 },
                                 placeholder = "{NAME}",
                                 modifier = Modifier.weight(1f)
@@ -532,7 +532,7 @@ internal fun DictionaryLearningScreen(
                                 value = profileEmail,
                                 onValueChange = {
                                     profileEmail = it
-                                    onUpdatePrefs { p -> p.copy(snippetUserEmail = it) }
+                                    onUpdatePrefs { p -> p.copy(personalProfile = p.personalProfile.withPrimaryEmail(it)) }
                                 },
                                 placeholder = "{EMAIL}",
                                 modifier = Modifier.weight(1f)

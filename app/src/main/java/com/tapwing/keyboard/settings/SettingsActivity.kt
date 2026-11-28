@@ -30,8 +30,8 @@ class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val prefsRepo = TapwingPreferencesRepository(this)
-        val secureKeyStorage = SecureKeyStorage(this)
+        val prefsRepo = TapwingPreferencesRepository.getInstance(this)
+        val secureKeyStorage = SecureKeyStorage.getInstance(this)
         val dictionaryStore = AdaptiveDictionaryStore.createForContext(this)
         modelManager = LocalModelManager(this)
         packManager = OfflineDictionaryPackManager(this)

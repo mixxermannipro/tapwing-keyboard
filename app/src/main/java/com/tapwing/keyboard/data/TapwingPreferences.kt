@@ -1,5 +1,6 @@
 package com.tapwing.keyboard.data
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.UserManager
 import androidx.core.content.ContextCompat
@@ -194,7 +195,7 @@ class TapwingPreferencesRepository private constructor(
     constructor(context: Context) : this(
         dataStore = (ContextCompat.createDeviceProtectedStorageContext(context.applicationContext)
             ?: context.applicationContext).tapwingDataStore,
-        profileStorage = PersonalProfileStorage(context.applicationContext),
+        profileStorage = PersonalProfileStorage.getInstance(context.applicationContext),
         isUserUnlockedProvider = { isUserUnlocked(context.applicationContext) }
     )
 
@@ -588,6 +589,17 @@ class TapwingPreferencesRepository private constructor(
     }
 
     companion object {
+        @SuppressLint("StaticFieldLeak")
+        @Volatile
+        private var instance: TapwingPreferencesRepository? = null
+
+        fun getInstance(context: Context): TapwingPreferencesRepository {
+            val appCtx = context.applicationContext
+            return instance ?: synchronized(this) {
+                instance ?: TapwingPreferencesRepository(appCtx).also { instance = it }
+            }
+        }
+
         fun isUserUnlocked(context: Context): Boolean {
             val um = context.getSystemService(UserManager::class.java)
             return um?.isUserUnlocked ?: false
