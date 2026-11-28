@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Tapwing-Source-Available
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 package com.tapwing.keyboard.settings
 
@@ -24,10 +24,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tapwing.keyboard.BuildConfig
+import com.tapwing.keyboard.R
 import com.tapwing.keyboard.ai.OpenSourceLicensesCatalog
 import com.tapwing.keyboard.ai.OpenSourceNotice
 import com.tapwing.keyboard.data.TypingStats
@@ -62,7 +64,7 @@ internal fun AboutSettingsScreen(
                 }
                 Text("Tapwing", fontWeight = FontWeight.Bold, fontSize = 22.sp)
                 Text(
-                    "Version ${BuildConfig.VERSION_NAME} • Source Available",
+                    "Version ${BuildConfig.VERSION_NAME} • Open Source (GPL-3.0-or-later)",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp
                 )
@@ -79,7 +81,7 @@ internal fun AboutSettingsScreen(
                     AppleHairlineDivider(startIndent = 16.dp)
                     MinimalValueRow(
                         if (de) "Lizenz" else "License",
-                        if (de) "Source Available (Apache-2.0-Basis)" else "Source Available (Apache-2.0 baseline)"
+                        "Open Source (GPL-3.0-or-later)"
                     )
                 }
             }
@@ -128,11 +130,25 @@ internal fun AboutSettingsScreen(
 @Composable
 internal fun LicensesScreen(de: Boolean) {
     val context = LocalContext.current
+    val tapwingNotice = OpenSourceNotice(
+        name = stringResource(R.string.license_tapwing_name),
+        license = stringResource(R.string.license_tapwing_license),
+        copyrightOrAuthor = stringResource(R.string.license_tapwing_copyright),
+        url = stringResource(R.string.license_tapwing_url),
+        note = stringResource(R.string.license_tapwing_note)
+    )
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
+        item {
+            LicenseNoticeSection(
+                title = stringResource(R.string.license_tapwing_section),
+                notices = listOf(tapwingNotice),
+                onOpenUrl = { context.openSettingsLink(it) }
+            )
+        }
         item {
             LicenseNoticeSection(
                 title = if (de) "Eingebundene Bibliotheken" else "Bundled Libraries",

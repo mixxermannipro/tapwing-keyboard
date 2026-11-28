@@ -1,6 +1,6 @@
 # Tapwing Google Play Store Guide
 
-Tapwing (`com.tapwing.keyboard`) is an Android keyboard built on official Android APIs (`InputMethodService`, `SpeechRecognizer`, `CameraX` + `ML Kit`, `PickVisualMedia`, `AndroidX DataStore`, `AndroidKeyStore` AES-256-GCM) with a Jetpack Compose UI. See [docs/licensing.md](docs/licensing.md) and [LICENSE](LICENSE) for **Tapwing Source Available** licensing terms (with Apache-2.0 baseline through commit `299dc28b80e791e750cff20ff10694b031d6604e`).
+Tapwing (`com.tapwing.keyboard`) is an Android keyboard built on official Android APIs (`InputMethodService`, `SpeechRecognizer`, `CameraX` + `ML Kit`, `PickVisualMedia`, `AndroidX DataStore`, `AndroidKeyStore` AES-256-GCM) with a Jetpack Compose UI. See [docs/licensing.md](docs/licensing.md), [LICENSE](LICENSE), and [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md) for **Open Source (`GPL-3.0-or-later`)** licensing terms (with Apache-2.0 baseline through commit `299dc28b80e791e750cff20ff10694b031d6604e`).
 
 ---
 

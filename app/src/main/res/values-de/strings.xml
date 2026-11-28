@@ -171,4 +171,6 @@
     <string name="cd_pin">Anpinnen</string>
     <string name="cd_unpin">Lösen</string>
     <string name="cd_delete">Löschen</string>
+    <string name="license_tapwing_section">Anwendung</string>
+    <string name="license_tapwing_note">Open-Source-Software mit Zusatzerlaubnis gemäß § 7 für Google ML Kit / Google Play services. Ohne jede Gewährleistung.</string>
 </resources>

@@ -9,7 +9,7 @@
 ![Version 2.9.0](https://img.shields.io/badge/Version-2.9.0-6750A4?style=flat-square)
 ![Android 10+](https://img.shields.io/badge/Android-10%2B-307D5D?style=flat-square&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7451BD?style=flat-square&logo=kotlin&logoColor=white)
-![Lizenz Source Available](https://img.shields.io/badge/Lizenz-Source%20Available-405773?style=flat-square)
+![Lizenz Open Source (GPL-3.0-or-later)](https://img.shields.io/badge/Lizenz-Open%20Source%20(GPL--3.0--or--later)-307D5D?style=flat-square)
 
 [Google Play · Geschlossener Test](https://play.google.com/apps/testing/com.tapwing.keyboard) · [Screenshots](#screenshots) · [Funktionen](#funktionen) · [Datenschutz](#verarbeitung-und-datenschutz) · [Build](#lokal-bauen) · [English](docs/README.en.md)
 
@@ -77,5 +77,5 @@ Mehr zu den Architekturdetails in [ARCHITECTURE_ANALYSIS.md](ARCHITECTURE_ANALYS
 
 ## Lizenz & Mitwirken
 
-Fehler und Vorschläge können über [GitHub Issues](https://github.com/mixxermannipro/tapwing-keyboard/issues) gemeldet werden.
-Aktuelle Änderungen stehen unter der [Tapwing Source Available License](LICENSE) (historische Basis bis Commit `299dc28b80e791e750cff20ff10694b031d6604e` unter Apache-2.0; Details in [docs/licensing.md](docs/licensing.md) und [REUSE.toml](REUSE.toml)).
+Fehler und Vorschläge können über [GitHub Issues](https://github.com/mixxermannipro/tapwing-keyboard/issues) gemeldet werden; Hinweise für Beiträge stehen in [CONTRIBUTING.md](CONTRIBUTING.md) (DCO `Signed-off-by`).
+Tapwing ist **Open Source (`GPL-3.0-or-later`)** gemäß [LICENSE](LICENSE), mit einer Zusatzerlaubnis für Google ML Kit / Google Play services in [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md) (historische Basis bis einschließlich Commit `299dc28b80e791e750cff20ff10694b031d6604e` zusätzlich unter Apache-2.0; Markenregeln in [TRADEMARKS.md](TRADEMARKS.md), Details in [docs/licensing.md](docs/licensing.md) und [REUSE.toml](REUSE.toml)).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Tapwing-Source-Available
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 package com.tapwing.keyboard.settings
 

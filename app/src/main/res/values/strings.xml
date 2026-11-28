@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Tapwing</string>
     <string name="subtype_de_qwertz">German (QWERTZ)</string>
     <string name="subtype_de_ch_qwertz">German Switzerland (QWERTZ)</string>
@@ -171,4 +171,10 @@
     <string name="cd_pin">Pin</string>
     <string name="cd_unpin">Unpin</string>
     <string name="cd_delete">Delete</string>
+    <string name="license_tapwing_section" tools:ignore="MissingTranslation">Application</string>
+    <string name="license_tapwing_name" translatable="false">Tapwing</string>
+    <string name="license_tapwing_license" translatable="false">GPL-3.0-or-later</string>
+    <string name="license_tapwing_copyright" translatable="false">Copyright © 2026 Manuel Blasaditsch</string>
+    <string name="license_tapwing_note" tools:ignore="MissingTranslation">Open-source software with Section 7 exception for Google ML Kit / Google Play services. Distributed without any warranty.</string>
+    <string name="license_tapwing_url" translatable="false">https://github.com/mixxermannipro/tapwing-keyboard</string>
 </resources>
