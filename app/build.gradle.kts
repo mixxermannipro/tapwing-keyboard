@@ -154,9 +154,19 @@ play {
     if (hasPlayServiceAccount) {
         serviceAccountCredentials.set(file(playServiceAccountPath!!))
     }
-    track.set(System.getenv("PLAY_TRACK")?.takeIf { it.isNotBlank() } ?: "production")
+    track.set(System.getenv("PLAY_TRACK")?.takeIf { it.isNotBlank() } ?: "internal")
     releaseStatus.set(ReleaseStatus.COMPLETED)
     defaultToAppBundles.set(true)
+}
+
+kover {
+    reports {
+        verify {
+            rule {
+                minBound(29)
+            }
+        }
+    }
 }
 
 kotlin {
