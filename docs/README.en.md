@@ -9,7 +9,7 @@
 ![Version 2.9.0](https://img.shields.io/badge/Version-2.9.0-6750A4?style=flat-square)
 ![Android 10+](https://img.shields.io/badge/Android-10%2B-307D5D?style=flat-square&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7451BD?style=flat-square&logo=kotlin&logoColor=white)
-![License Source Available](https://img.shields.io/badge/License-Source%20Available-405773?style=flat-square)
+![License Open Source (GPL-3.0-or-later)](https://img.shields.io/badge/License-Open%20Source%20(GPL--3.0--or--later)-307D5D?style=flat-square)
 
 [Google Play · Closed test](https://play.google.com/apps/testing/com.tapwing.keyboard) · [Screenshots](../README.md#screenshots) · [Deutsch](../README.md)
 
@@ -33,7 +33,7 @@ Tapwing `2.9.0` (`versionCode = 17`) supports Android 10 and later (`arm64-v8a`)
 - **Opt-In Smart Profile Learning & Sensitive Editor Guard**: Auto-learning defaults to `false`; password, credit card, OTP/PIN, incognito, and `IME_FLAG_NO_PERSONALIZED_LEARNING` editors are always excluded.
 - **Zero Storage Permissions**: `READ_MEDIA_IMAGES` and `READ_EXTERNAL_STORAGE` were removed completely.
 - **SHA-256 Supply-Chain Verification & Explicit Cloud Consent**: All 17 models and 9 dictionary packs verify exact byte size + SHA-256 before activation, and all cloud features require explicit per-provider opt-in consent with instant revocation in **Settings -> Privacy & Cloud Consent**.
-- **Licensing**: Post-`299dc28b80e791e750cff20ff10694b031d6604e` changes are under the [Tapwing Source Available License](../LICENSE), with historical code through `299dc28b80e791e750cff20ff10694b031d6604e` under Apache-2.0. See [docs/licensing.md](licensing.md), [REUSE.toml](../REUSE.toml), and the in-app **Open-Source & Model Licenses** screen.
+- **Licensing**: Tapwing is **Open Source (`GPL-3.0-or-later`)** under [LICENSE](../LICENSE) with an additional permission for Google ML Kit / Google Play services in [LICENSE-EXCEPTION.md](../LICENSE-EXCEPTION.md) (historical codebase through commit `299dc28b80e791e750cff20ff10694b031d6604e` also remains under Apache-2.0). See [TRADEMARKS.md](../TRADEMARKS.md), [docs/licensing.md](licensing.md), [REUSE.toml](../REUSE.toml), [CONTRIBUTING.md](../CONTRIBUTING.md), and the in-app **Open-Source & Model Licenses** screen.
 
 ## Build Locally
 

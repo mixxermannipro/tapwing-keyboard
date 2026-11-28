@@ -9,21 +9,25 @@ or assets. Before submitting code, run:
 git diff --check
 ```
 
-## Contribution rights
+## Licensing & Developer Certificate of Origin (DCO)
 
-See the [license](LICENSE) and [licensing notes](docs/licensing.md) for the
-Apache-2.0 baseline and the source-available terms for marked new material.
-Submissions intended for the source-available project use the express terms
-below, including when they add new portions to an Apache-2.0 file.
+Tapwing is licensed under the **GNU General Public License v3.0 or later**
+(`GPL-3.0-or-later`; see [LICENSE](LICENSE) and [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md)).
+All contributions are accepted under `GPL-3.0-or-later` (including the Section 7
+additional permission in [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md)).
 
-You retain ownership of your contribution. By intentionally submitting a pull
-request for inclusion, you grant the project maintainer a perpetual,
-worldwide, non-exclusive, royalty-free license to review, reproduce, modify,
-incorporate, maintain and distribute your contribution as part of the project,
-including under the published source-available terms and in the project's
-official releases. Only submit material for which you can grant these
-permissions. Identify any separately licensed portions and their notices
-in the pull request. Previously granted rights remain valid.
+Every commit must include a `Signed-off-by` line certifying the
+[Developer Certificate of Origin (DCO)](https://developercertificate.org/):
 
+```text
+Signed-off-by: Your Name <you@example.com>
+```
+
+You can add this automatically with `git commit -s`. By adding `Signed-off-by`,
+you certify that you wrote the contribution or otherwise have the right to
+submit it under `GPL-3.0-or-later`. Identify any separately licensed portions
+and their notices in the pull request.
+
+See [TRADEMARKS.md](TRADEMARKS.md) for trademark and branding rules.
 Keep keys, signing files and personal data out of commits and screenshots.
 Use the [private reporting process](SECURITY.md) for vulnerabilities.

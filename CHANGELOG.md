@@ -2,6 +2,13 @@
 
 All notable changes to Tapwing are documented in this file.
 
+## [Unreleased]
+
+### Licensing & Governance
+- **Relicensed to `GPL-3.0-or-later`**: Replaced the previous "Tapwing Source Available" license with the GNU General Public License v3.0 or later (`LICENSE`, `LICENSES/GPL-3.0-or-later.txt`), updating all `SPDX-License-Identifier` headers and `REUSE.toml`.
+- **GPLv3 Section 7 Exception & Trademarks**: Added `LICENSE-EXCEPTION.md` for linking/combining with Google ML Kit and Google Play services libraries, and `TRADEMARKS.md` clarifying name and logo usage for forks.
+- **DCO & Transparency**: Adopted the Developer Certificate of Origin (`Signed-off-by`) in `CONTRIBUTING.md`, updated `docs/licensing.md` (preserving the historical Apache-2.0 baseline through commit `299dc28b80e791e750cff20ff10694b031d6604e`), and added a **Tapwing** entry (`GPL-3.0-or-later`, source link, no-warranty notice) in **Settings -> About / Licenses**.
+
 ## [2.9.0] — `versionCode = 17` (2026-11-26)
 
 ### Security & Privacy Hardening
